@@ -63,13 +63,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Static file serving for frontend
     let static_path = std::env::var("STATIC_FILES_PATH")
         .unwrap_or_else(|_| "./frontend/dist".to_string());
-    let static_dir = StaticDir::new(static_path)
-        .defaults("index.html");
-
+    println!("STATIC_FILES_PATH: {}", static_path);
+    
+    let static_service = StaticDir::new(&static_path).defaults("index.html");
+    
     // Main router - API routes first, then static files as fallback
     let router = Router::new()
         .push(Router::with_path("/api").push(api_router))
-        .push(Router::new().path("<**path>").get(static_dir));
+        .push(Router::with_path("{*path}").get(static_service));
 
     let acceptor = TcpListener::new(&config.server_address).bind().await;
     

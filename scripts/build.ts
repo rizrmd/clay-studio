@@ -44,4 +44,3 @@ if (backendBuild.exitCode !== 0) {
 }
 
 console.log("✅ Backend built successfully!");
-console.log("\n🎉 Clay Studio built successfully! Run 'bun run prod' to start the production server.");
