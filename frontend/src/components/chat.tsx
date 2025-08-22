@@ -2,8 +2,8 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Messages } from './messages'
 import { MultimodalInput } from './multimodal-input'
-import { useClayChat, type Message } from '@/hooks/useClayChat'
-import { Settings, AlertCircle } from 'lucide-react'
+import { useClayChat } from '@/hooks/useClayChat'
+import { Settings } from 'lucide-react'
 
 const PROJECT_ID = '6c14f284-44c3-4f78-8d2e-85cd3facb259'
 
