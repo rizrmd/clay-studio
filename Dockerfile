@@ -11,7 +11,8 @@ RUN bun run build
 # Stage 2: Build backend
 FROM rust:1.89 AS backend-builder
 WORKDIR /app
-COPY backend/Cargo.toml backend/Cargo.lock ./
+COPY backend/Cargo.toml ./
+COPY backend/Cargo.lock* ./
 COPY backend/migration ./migration
 COPY backend/src ./src
 RUN cargo build --release
