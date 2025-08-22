@@ -1,0 +1,36 @@
+# Backend
+/backend/target
+/backend/Cargo.lock
+/backend/.env
+/backend/uploads/
+
+# Frontend
+node_modules
+/frontend/dist
+/frontend/.env
+/frontend/.env.local
+
+# Database
+*.db
+*.sqlite
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker
+.docker/
+
+# Uploads
+/uploads/
+
+.playwright-mcp

@@ -1,0 +1,19 @@
+{
+  "name": "clay-studio",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "bun run scripts/dev.ts",
+    "build": "bun run scripts/build.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "workspaces": [
+    "frontend"
+  ],
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}

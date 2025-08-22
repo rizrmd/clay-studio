@@ -1,0 +1,27 @@
+[package]
+name = "clay-studio-backend"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+members = [".", "migration"]
+
+[dependencies]
+migration = { path = "migration" }
+salvo = { version = "0.78", features = ["jwt-auth", "serve-static", "websocket"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sea-orm = { version = "1.1", features = ["sqlx-postgres", "runtime-tokio-rustls", "macros"] }
+sea-orm-migration = { version = "1.1" }
+dotenv = "0.15"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+anyhow = "1"
+thiserror = "2"
+reqwest = { version = "0.12", features = ["stream"] }
+
+[dev-dependencies]
+sea-orm-cli = { version = "1.1", default-features = false, features = ["runtime-tokio-rustls", "codegen"] }
