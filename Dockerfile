@@ -1,8 +1,24 @@
-# Production Dockerfile for Clay Studio
-# Assumes the application has been built with 'bun run build' in CI/CD
-# This creates a minimal runtime container
+# Multi-stage Dockerfile for Clay Studio
 
+# Stage 1: Build frontend
+FROM oven/bun:1 AS frontend-builder
+WORKDIR /app
+COPY frontend/package.json frontend/bun.lockb* ./
+RUN bun install --frozen-lockfile || bun install
+COPY frontend/ ./
+RUN bun run build
+
+# Stage 2: Build backend
+FROM rust:1.89 AS backend-builder
+WORKDIR /app
+COPY backend/Cargo.toml backend/Cargo.lock ./
+COPY backend/migration ./migration
+COPY backend/src ./src
+RUN cargo build --release
+
+# Stage 3: Runtime
 FROM debian:trixie-slim
+WORKDIR /app
 
 # Install minimal runtime dependencies
 RUN apt-get update && \
@@ -12,14 +28,9 @@ RUN apt-get update && \
     libpq5 && \
     rm -rf /var/lib/apt/lists/*
 
-# Create app directory
-WORKDIR /app
-
-# Copy the pre-built Rust binary from CI/CD build
-COPY backend/target/release/clay-studio-backend /app/clay-studio-backend
-
-# Copy the pre-built frontend dist
-COPY frontend/dist /app/frontend/dist
+# Copy the built artifacts from the builder stages
+COPY --from=backend-builder /app/target/release/clay-studio-backend /app/clay-studio-backend
+COPY --from=frontend-builder /app/dist /app/frontend/dist
 
 # Set environment variables
 ENV RUST_LOG=info
