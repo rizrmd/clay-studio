@@ -7,6 +7,7 @@ mod state;
 mod middleware;
 
 use salvo::prelude::*;
+use salvo::serve_static::StaticDir;
 use tracing_subscriber;
 use dotenv::dotenv;
 
@@ -59,9 +60,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .delete(conversations::delete_conversation)
         );
 
-    // Main router - serve API routes
+    // Static file serving for frontend
+    let static_path = std::env::var("STATIC_FILES_PATH")
+        .unwrap_or_else(|_| "./frontend/dist".to_string());
+    let static_dir = StaticDir::new(static_path)
+        .defaults("index.html");
+
+    // Main router - API routes first, then static files as fallback
     let router = Router::new()
-        .push(Router::with_path("/api").push(api_router));
+        .push(Router::with_path("/api").push(api_router))
+        .push(Router::new().path("<**path>").get(static_dir));
 
     let acceptor = TcpListener::new(&config.server_address).bind().await;
     

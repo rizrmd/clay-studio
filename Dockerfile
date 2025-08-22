@@ -36,6 +36,7 @@ COPY --from=frontend-builder /app/dist /app/frontend/dist
 # Set environment variables
 ENV RUST_LOG=info
 ENV PORT=7680
+ENV STATIC_FILES_PATH=/app/frontend/dist
 
 # Expose the backend port
 EXPOSE 7680
