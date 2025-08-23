@@ -600,6 +600,7 @@ impl ClaudeSetup {
         Ok(final_oauth_token)
     }
 
+    #[allow(dead_code)]
     pub fn is_input_ready(&self) -> bool {
         self.input_ready.load(Ordering::SeqCst)
     }
@@ -649,6 +650,7 @@ impl ClaudeManager {
         clients.get(&client_id).cloned()
     }
     
+    #[allow(dead_code)]
     pub fn is_input_ready(client_id: Uuid) -> bool {
         let clients = CLIENT_INSTANCES.lock().unwrap();
         if let Some(client) = clients.get(&client_id) {

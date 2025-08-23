@@ -18,6 +18,9 @@ pub enum AppError {
     #[error("Unauthorized: {0}")]
     Unauthorized(String),
     
+    #[error("Service unavailable: {0}")]
+    ServiceUnavailable(String),
+    
     #[error("Parse error: {0}")]
     ParseError(#[from] salvo::http::ParseError),
     
@@ -34,6 +37,7 @@ impl AppError {
             AppError::NotFound(_) => StatusCode::NOT_FOUND,
             AppError::BadRequest(_) => StatusCode::BAD_REQUEST,
             AppError::Unauthorized(_) => StatusCode::UNAUTHORIZED,
+            AppError::ServiceUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
             AppError::InternalServerError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         }

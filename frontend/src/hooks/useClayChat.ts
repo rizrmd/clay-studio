@@ -100,7 +100,8 @@ export function useConversationContext(conversationId: string | null) {
       if (!conversationId) throw new Error("Conversation ID required");
 
       const response = await fetch(
-        `${API_BASE_URL}/conversations/${conversationId}/context`
+        `${API_BASE_URL}/conversations/${conversationId}/context`,
+        { credentials: "include" }
       );
       if (!response.ok) throw new Error("Failed to fetch conversation context");
 
@@ -139,7 +140,8 @@ export function useProjectContext(projectId: string | null) {
       if (!projectId) throw new Error("Project ID required");
 
       const response = await fetch(
-        `${API_BASE_URL}/projects/${projectId}/context`
+        `${API_BASE_URL}/projects/${projectId}/context`,
+        { credentials: "include" }
       );
       if (!response.ok) throw new Error("Failed to fetch project context");
 
@@ -210,6 +212,7 @@ export function useClayChat(projectId: string, conversationId?: string) {
 
         const response = await fetch(`${API_BASE_URL}/chat`, {
           method: "POST",
+          credentials: "include",
           headers: {
             "Content-Type": "application/json",
           },
