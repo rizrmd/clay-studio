@@ -6,42 +6,7 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // Create users table
-        manager
-            .create_table(
-                Table::create()
-                    .table(Users::Table)
-                    .if_not_exists()
-                    .col(
-                        ColumnDef::new(Users::Id)
-                            .string()
-                            .not_null()
-                            .primary_key(),
-                    )
-                    .col(ColumnDef::new(Users::Email).string().not_null().unique_key())
-                    .col(ColumnDef::new(Users::Username).string().not_null().unique_key())
-                    .col(ColumnDef::new(Users::PasswordHash).string().not_null())
-                    .col(ColumnDef::new(Users::FullName).string())
-                    .col(ColumnDef::new(Users::AvatarUrl).string())
-                    .col(ColumnDef::new(Users::IsActive).boolean().not_null().default(true))
-                    .col(ColumnDef::new(Users::Role).string().not_null().default("user"))
-                    .col(
-                        ColumnDef::new(Users::CreatedAt)
-                            .timestamp_with_time_zone()
-                            .not_null()
-                            .default(Expr::current_timestamp()),
-                    )
-                    .col(
-                        ColumnDef::new(Users::UpdatedAt)
-                            .timestamp_with_time_zone()
-                            .not_null()
-                            .default(Expr::current_timestamp()),
-                    )
-                    .to_owned(),
-            )
-            .await?;
-
-        // Create clients table
+        // Create clients table first (no foreign keys)
         manager
             .create_table(
                 Table::create()
@@ -49,19 +14,15 @@ impl MigrationTrait for Migration {
                     .if_not_exists()
                     .col(
                         ColumnDef::new(Clients::Id)
-                            .string()
+                            .uuid()
                             .not_null()
-                            .primary_key(),
+                            .primary_key()
+                            .default(Expr::cust("gen_random_uuid()")),
                     )
-                    .col(ColumnDef::new(Clients::UserId).string().not_null())
-                    .col(ColumnDef::new(Clients::Name).string().not_null())
-                    .col(ColumnDef::new(Clients::CompanyName).string())
-                    .col(ColumnDef::new(Clients::Email).string())
-                    .col(ColumnDef::new(Clients::Phone).string())
-                    .col(ColumnDef::new(Clients::Address).text())
-                    .col(ColumnDef::new(Clients::ClaudeToken).text())
-                    .col(ColumnDef::new(Clients::Metadata).json())
-                    .col(ColumnDef::new(Clients::IsActive).boolean().not_null().default(true))
+                    .col(ColumnDef::new(Clients::Name).text().not_null())
+                    .col(ColumnDef::new(Clients::Description).text())
+                    .col(ColumnDef::new(Clients::Status).text().not_null().default("pending"))
+                    .col(ColumnDef::new(Clients::InstallPath).text().not_null())
                     .col(
                         ColumnDef::new(Clients::CreatedAt)
                             .timestamp_with_time_zone()
@@ -74,12 +35,34 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .default(Expr::current_timestamp()),
                     )
+                    .col(ColumnDef::new(Clients::DeletedAt).timestamp_with_time_zone())
+                    .col(ColumnDef::new(Clients::ClaudeToken).text())
+                    .col(ColumnDef::new(Clients::Config).json_binary().not_null())
+                    .to_owned(),
+            )
+            .await?;
+
+        // Create users table with foreign key to clients
+        manager
+            .create_table(
+                Table::create()
+                    .table(Users::Table)
+                    .if_not_exists()
+                    .col(
+                        ColumnDef::new(Users::Id)
+                            .uuid()
+                            .not_null()
+                            .primary_key()
+                            .default(Expr::cust("gen_random_uuid()")),
+                    )
+                    .col(ColumnDef::new(Users::ClientId).uuid().not_null())
+                    .col(ColumnDef::new(Users::Username).text().not_null())
+                    .col(ColumnDef::new(Users::Password).text().not_null())
                     .foreign_key(
                         ForeignKey::create()
-                            .name("fk_clients_user")
-                            .from(Clients::Table, Clients::UserId)
-                            .to(Users::Table, Users::Id)
-                            .on_delete(ForeignKeyAction::Cascade),
+                            .name("user_client_id_fkey")
+                            .from(Users::Table, Users::ClientId)
+                            .to(Clients::Table, Clients::Id),
                     )
                     .to_owned(),
             )
@@ -97,8 +80,6 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(Projects::UserId).string().not_null())
-                    .col(ColumnDef::new(Projects::ClientId).string())
                     .col(ColumnDef::new(Projects::Name).string().not_null())
                     .col(ColumnDef::new(Projects::Settings).json())
                     .col(ColumnDef::new(Projects::OrganizationSettings).json())
@@ -113,20 +94,6 @@ impl MigrationTrait for Migration {
                             .timestamp_with_time_zone()
                             .not_null()
                             .default(Expr::current_timestamp()),
-                    )
-                    .foreign_key(
-                        ForeignKey::create()
-                            .name("fk_projects_user")
-                            .from(Projects::Table, Projects::UserId)
-                            .to(Users::Table, Users::Id)
-                            .on_delete(ForeignKeyAction::Cascade),
-                    )
-                    .foreign_key(
-                        ForeignKey::create()
-                            .name("fk_projects_client")
-                            .from(Projects::Table, Projects::ClientId)
-                            .to(Clients::Table, Clients::Id)
-                            .on_delete(ForeignKeyAction::SetNull),
                     )
                     .to_owned(),
             )
@@ -242,37 +209,29 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
+        // Create tools table
+        manager
+            .create_table(
+                Table::create()
+                    .table(Tools::Table)
+                    .if_not_exists()
+                    .col(
+                        ColumnDef::new(Tools::Id)
+                            .string()
+                            .not_null()
+                            .primary_key(),
+                    )
+                    .col(ColumnDef::new(Tools::Name).string().not_null())
+                    .col(ColumnDef::new(Tools::Category).string().not_null())
+                    .col(ColumnDef::new(Tools::Description).text())
+                    .col(ColumnDef::new(Tools::Parameters).json())
+                    .col(ColumnDef::new(Tools::UsageExamples).json())
+                    .col(ColumnDef::new(Tools::IsActive).boolean().not_null().default(true))
+                    .to_owned(),
+            )
+            .await?;
+
         // Create indexes
-        manager
-            .create_index(
-                Index::create()
-                    .name("idx_clients_user")
-                    .table(Clients::Table)
-                    .col(Clients::UserId)
-                    .to_owned(),
-            )
-            .await?;
-
-        manager
-            .create_index(
-                Index::create()
-                    .name("idx_projects_user")
-                    .table(Projects::Table)
-                    .col(Projects::UserId)
-                    .to_owned(),
-            )
-            .await?;
-
-        manager
-            .create_index(
-                Index::create()
-                    .name("idx_projects_client")
-                    .table(Projects::Table)
-                    .col(Projects::ClientId)
-                    .to_owned(),
-            )
-            .await?;
-
         manager
             .create_index(
                 Index::create()
@@ -314,16 +273,19 @@ impl MigrationTrait for Migration {
             .drop_table(Table::drop().table(DataSources::Table).to_owned())
             .await?;
         manager
+            .drop_table(Table::drop().table(Tools::Table).to_owned())
+            .await?;
+        manager
             .drop_table(Table::drop().table(Conversations::Table).to_owned())
             .await?;
         manager
             .drop_table(Table::drop().table(Projects::Table).to_owned())
             .await?;
         manager
-            .drop_table(Table::drop().table(Clients::Table).to_owned())
+            .drop_table(Table::drop().table(Users::Table).to_owned())
             .await?;
         manager
-            .drop_table(Table::drop().table(Users::Table).to_owned())
+            .drop_table(Table::drop().table(Clients::Table).to_owned())
             .await?;
         Ok(())
     }
@@ -333,40 +295,30 @@ impl MigrationTrait for Migration {
 enum Users {
     Table,
     Id,
-    Email,
+    ClientId,
     Username,
-    PasswordHash,
-    FullName,
-    AvatarUrl,
-    IsActive,
-    Role,
-    CreatedAt,
-    UpdatedAt,
+    Password,
 }
 
 #[derive(Iden)]
 enum Clients {
     Table,
     Id,
-    UserId,
     Name,
-    CompanyName,
-    Email,
-    Phone,
-    Address,
-    ClaudeToken,
-    Metadata,
-    IsActive,
+    Description,
+    Status,
+    InstallPath,
     CreatedAt,
     UpdatedAt,
+    DeletedAt,
+    ClaudeToken,
+    Config,
 }
 
 #[derive(Iden)]
 enum Projects {
     Table,
     Id,
-    UserId,
-    ClientId,
     Name,
     Settings,
     OrganizationSettings,
@@ -411,5 +363,17 @@ enum DataSources {
     LastTestedAt,
     IsActive,
     CreatedAt,
+}
+
+#[derive(Iden)]
+enum Tools {
+    Table,
+    Id,
+    Name,
+    Category,
+    Description,
+    Parameters,
+    UsageExamples,
+    IsActive,
 }
 

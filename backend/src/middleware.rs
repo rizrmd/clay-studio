@@ -1,6 +1,8 @@
 use salvo::prelude::*;
 use crate::state::AppState;
 
+pub mod auth;
+
 pub struct StateInjector {
     state: AppState,
 }

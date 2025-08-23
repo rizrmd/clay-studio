@@ -19,8 +19,6 @@ pub async fn get_project_context(
         project_id: project_id.clone(),
         project_settings: ProjectSettings {
             project_id: project_id.clone(),
-            user_id: "user-1".to_string(),
-            client_id: Some("client-1".to_string()),
             name: "My Analytics Project".to_string(),
             settings: serde_json::json!({
                 "theme": "dark",

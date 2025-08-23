@@ -82,9 +82,9 @@ const frontendProcess = spawn({
   }
 })();
 
-// Build and start backend
+// Build and start backend with watching
 const backendProcess = spawn({
-  cmd: ["cargo", "run"],
+  cmd: ["cargo", "watch", "-x", "run"],
   cwd: backendDir,
   stdout: "pipe",
   stderr: "pipe",

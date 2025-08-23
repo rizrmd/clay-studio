@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug Clay Studio</title>
+</head>
+<body>
+    <h1>Clay Studio Debug</h1>
+    <h2>Client Data:</h2>
+    <pre id="client-data">Loading...</pre>
+    <h2>Auth Status:</h2>
+    <pre id="auth-status">Loading...</pre>
+    
+    <script>
+        async function fetchData() {
+            try {
+                const clientResponse = await fetch('/api/clients');
+                const clients = await clientResponse.json();
+                document.getElementById('client-data').textContent = JSON.stringify(clients, null, 2);
+                
+                if (clients.length > 0) {
+                    const firstClient = clients[0];
+                    const statusInfo = `
+First Client:
+  ID: ${firstClient.id}
+  Name: ${firstClient.name}
+  Status: ${firstClient.status}
+  Has Token: ${firstClient.claude_token ? 'Yes' : 'No'}
+  Should Show Setup: ${firstClient.status !== 'active' ? 'Yes' : 'No'}
+                    `;
+                    document.getElementById('client-data').textContent += '\n\n' + statusInfo;
+                }
+            } catch (e) {
+                document.getElementById('client-data').textContent = 'Error: ' + e.message;
+            }
+            
+            try {
+                const authResponse = await fetch('/api/auth/me');
+                const authData = await authResponse.json();
+                document.getElementById('auth-status').textContent = JSON.stringify(authData, null, 2);
+            } catch (e) {
+                document.getElementById('auth-status').textContent = 'Error: ' + e.message;
+            }
+        }
+        
+        fetchData();
+    </script>
+</body>
+</html>

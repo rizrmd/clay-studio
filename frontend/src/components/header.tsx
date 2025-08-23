@@ -6,12 +6,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { UserMenu } from '@/components/auth/UserMenu'
 
 export function Header() {
   return (
     <div className="flex items-center justify-between px-4 py-3 border-b">
       <div className="flex items-center gap-3">
-        <h1 className="text-lg font-semibold">Chatbot</h1>
+        <h1 className="text-lg font-semibold">Clay Studio</h1>
       </div>
       
       <div className="flex items-center gap-3">
@@ -41,6 +42,8 @@ export function Header() {
             <DropdownMenuItem>🌐 Public</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+
+        <UserMenu />
       </div>
     </div>
   )

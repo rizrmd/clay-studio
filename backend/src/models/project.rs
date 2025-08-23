@@ -6,8 +6,6 @@ use crate::models::{DataSourceContext, ToolContext};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Project {
     pub id: String,
-    pub user_id: String,
-    pub client_id: Option<String>,
     pub name: String,
     pub settings: Option<Value>,
     pub organization_settings: Option<Value>,
@@ -18,8 +16,6 @@ pub struct Project {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectSettings {
     pub project_id: String,
-    pub user_id: String,
-    pub client_id: Option<String>,
     pub name: String,
     pub settings: Value,
     pub organization_settings: Value,

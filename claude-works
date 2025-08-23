@@ -1,0 +1,20 @@
+
+each client setup, will create a folder .clients/[client_id]
+  in there we will download bun in (.clients/bun), and bun add '@anthropic-ai/claude-code'.
+
+  so each client will have their own instance of claude code.
+
+  next in each client run (we call this cli) in a expectr, and capture it's stdout/stderr: 
+
+     `claude setup-token`
+
+  it will show an auth url, show that to user.
+  after user visit the url and authroize their account, they will get a setup-token.
+
+  we need that token to be pasted to cli (they are waiting to be pasted)
+
+  after that the cli will output an OAUTH_TOKEN
+
+  we need to store that OAUTH_TOKEN as claude_token in client field.
+
+  and then store it each client .env as per cli instruction

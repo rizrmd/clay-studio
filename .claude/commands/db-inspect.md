@@ -1,0 +1,1 @@
+inspect each table currently on database (using backend/.env and psql), and modify last migration to match it. ensure backend has no error or warning after you modify.

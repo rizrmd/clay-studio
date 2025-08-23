@@ -33,4 +33,4 @@ Thumbs.db
 # Uploads
 /uploads/
 
-.playwright-mcp
+.playwright-mcp.clients/

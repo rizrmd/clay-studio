@@ -5,28 +5,30 @@ mod handlers;
 mod models;
 mod state;
 mod middleware;
+mod claude;
 
 use salvo::prelude::*;
 use salvo::serve_static::StaticDir;
-use tracing_subscriber;
+use salvo::session::SessionHandler;
+use salvo_session::MemoryStore;
 use dotenv::dotenv;
 
 use crate::config::Config;
 use crate::state::AppState;
-use crate::handlers::{chat, conversations, projects};
-use crate::middleware::inject_state;
+use crate::handlers::{auth, chat, clients, conversations, projects};
+use crate::middleware::{inject_state, auth::auth_required};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv().ok();
     
-    // Configure logging - only show warnings and errors
+    // Configure logging - show info level for debugging
     tracing_subscriber::fmt()
         .with_target(false)
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("clay_studio_backend=warn".parse()?)
-                .add_directive("salvo=warn".parse()?)
+                .add_directive("clay_studio_backend=info".parse()?)
+                .add_directive("salvo=info".parse()?)
                 .add_directive("sea_orm=warn".parse()?)
                 .add_directive("sqlx=warn".parse()?)
         )
@@ -35,10 +37,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::from_env()?;
     let state = AppState::new(&config).await?;
 
-    // API routes with state injection
-    let api_router = Router::new()
-        .hoop(inject_state(state))
+    // Session configuration
+    let default_secret = "clay-studio-secret-key-change-in-production-this-is-64-bytes-long";
+    let session_secret = std::env::var("SESSION_SECRET").unwrap_or_else(|_| default_secret.to_string());
+    
+    // Ensure the session secret is at least 64 bytes
+    let session_key = if session_secret.len() < 64 {
+        format!("{}{}", session_secret, "0".repeat(64 - session_secret.len()))
+    } else {
+        session_secret
+    };
+    
+    let session_handler = SessionHandler::builder(
+        MemoryStore::new(),
+        session_key.as_bytes(),
+    )
+    .build()
+    .unwrap();
+
+    // Public routes (no auth required)
+    let public_router = Router::new()
         .push(Router::with_path("/health").get(health_check))
+        .push(Router::with_path("/auth").push(auth::auth_routes()))
+        .push(Router::new().push(clients::client_routes())); // Allow client creation during initial setup
+
+    // Protected routes (auth required)
+    let protected_router = Router::new()
+        .hoop(auth_required)
         .push(Router::with_path("/chat").post(chat::handle_chat))
         .push(
             Router::with_path("/conversations/<conversation_id>/context")
@@ -58,12 +83,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .get(conversations::get_conversation)
                 .put(conversations::update_conversation)
                 .delete(conversations::delete_conversation)
-        );
+        )
+;
+
+    // API routes with state injection and session handling
+    let api_router = Router::new()
+        .hoop(session_handler)
+        .hoop(inject_state(state))
+        .push(public_router)
+        .push(protected_router);
 
     // Static file serving for frontend
     let static_path = std::env::var("STATIC_FILES_PATH")
         .unwrap_or_else(|_| "./frontend/dist".to_string());
-    println!("STATIC_FILES_PATH: {}", static_path);
     
     let static_service = StaticDir::new(&static_path).defaults("index.html");
     

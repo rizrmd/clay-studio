@@ -6,28 +6,35 @@ pub enum AppError {
     #[error("Database error: {0}")]
     Database(#[from] sea_orm::DbErr),
     
-    #[error("Not found")]
-    #[allow(dead_code)]
-    NotFound,
+    #[error("Not found: {0}")]
+    NotFound(String),
     
     #[error("Bad request: {0}")]
     BadRequest(String),
     
-    #[error("Internal server error")]
-    #[allow(dead_code)]
-    InternalServerError,
+    #[error("Internal server error: {0}")]
+    InternalServerError(String),
     
-    #[error("Unauthorized")]
-    #[allow(dead_code)]
-    Unauthorized,
+    #[error("Unauthorized: {0}")]
+    Unauthorized(String),
+    
+    #[error("Parse error: {0}")]
+    ParseError(#[from] salvo::http::ParseError),
+    
+    #[error("IO error: {0}")]
+    IoError(#[from] std::io::Error),
+    
+    #[error("JSON error: {0}")]
+    JsonError(#[from] serde_json::Error),
 }
 
 impl AppError {
     pub fn status_code(&self) -> StatusCode {
         match self {
-            AppError::NotFound => StatusCode::NOT_FOUND,
+            AppError::NotFound(_) => StatusCode::NOT_FOUND,
             AppError::BadRequest(_) => StatusCode::BAD_REQUEST,
-            AppError::Unauthorized => StatusCode::UNAUTHORIZED,
+            AppError::Unauthorized(_) => StatusCode::UNAUTHORIZED,
+            AppError::InternalServerError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }

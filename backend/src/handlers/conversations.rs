@@ -61,8 +61,6 @@ pub async fn get_conversation_context(
         ],
         project_settings: ProjectSettings {
             project_id: "project-1".to_string(),
-            user_id: "user-1".to_string(),
-            client_id: Some("client-1".to_string()),
             name: "My Analytics Project".to_string(),
             settings: serde_json::json!({}),
             organization_settings: serde_json::json!({}),

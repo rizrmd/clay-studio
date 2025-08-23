@@ -2,18 +2,24 @@
 name = "clay-studio-backend"
 version = "0.1.0"
 edition = "2021"
+default-run = "clay-studio-backend"
+
+[[bin]]
+name = "clay-studio-backend"
+path = "src/main.rs"
 
 [workspace]
 members = [".", "migration"]
 
 [dependencies]
 migration = { path = "migration" }
-salvo = { version = "0.78", features = ["jwt-auth", "serve-static", "websocket"] }
+salvo = { version = "0.78", features = ["serve-static", "websocket", "session", "sse"] }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sea-orm = { version = "1.1", features = ["sqlx-postgres", "runtime-tokio-rustls", "macros"] }
 sea-orm-migration = { version = "1.1" }
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono"] }
 dotenv = "0.15"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
@@ -22,6 +28,12 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 anyhow = "1"
 thiserror = "2"
 reqwest = { version = "0.12", features = ["stream"] }
+bcrypt = "0.15"
+salvo-session = "0.78"
+async-stream = "0.3"
+futures-util = "0.3"
+regex = "1.10"
+expectrl = "0.7"
 
 [dev-dependencies]
 sea-orm-cli = { version = "1.1", default-features = false, features = ["runtime-tokio-rustls", "codegen"] }
