@@ -202,12 +202,14 @@ runQuery();
     }
     
     // Set or update the OAuth token
+    #[allow(dead_code)]
     pub async fn set_oauth_token(&self, token: String) {
         let mut guard = self.oauth_token.lock().await;
         *guard = Some(token);
     }
     
     // Get the current OAuth token
+    #[allow(dead_code)]
     pub async fn get_oauth_token(&self) -> Option<String> {
         let guard = self.oauth_token.lock().await;
         guard.clone()
@@ -928,6 +930,7 @@ impl ClaudeManager {
         sdk.query(request).await
     }
     
+    #[allow(dead_code)]
     pub async fn query_claude_simple(
         client_id: Uuid,
         prompt: String,
@@ -951,6 +954,7 @@ impl ClaudeManager {
         Ok(result)
     }
     
+    #[allow(dead_code)]
     pub async fn update_sdk_token(client_id: Uuid, oauth_token: String) {
         let sdk = Self::get_or_create_sdk(client_id, Some(oauth_token.clone()));
         sdk.set_oauth_token(oauth_token).await;
