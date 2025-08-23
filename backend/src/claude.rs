@@ -2,13 +2,217 @@ use std::path::PathBuf;
 use std::process::Command;
 use uuid::Uuid;
 use expectrl::{Regex as ExpectRegex, spawn, Session};
-use serde_json::json;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use tokio::sync::{mpsc, Mutex};
 use std::sync::Arc;
 use tracing::info;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::collections::HashMap;
 use std::sync::Mutex as StdMutex;
+use tokio::process::Command as TokioCommand;
+
+// SDK Query Options matching the JavaScript SDK structure
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct QueryOptions {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_prompt: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_turns: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allowed_tools: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub permission_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resume_session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_format: Option<String>,
+}
+
+// SDK Query Request
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueryRequest {
+    pub prompt: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub options: Option<QueryOptions>,
+}
+
+// SDK Response Message Types
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum ClaudeMessage {
+    #[serde(rename = "start")]
+    Start { session_id: String },
+    #[serde(rename = "progress")]
+    Progress { content: String },
+    #[serde(rename = "tool_use")]
+    ToolUse { tool: String, args: Value },
+    #[serde(rename = "result")]
+    Result { result: String },
+    #[serde(rename = "error")]
+    Error { error: String },
+}
+
+// Claude SDK Client for programmatic interaction
+#[derive(Debug, Clone)]
+pub struct ClaudeSDK {
+    client_id: Uuid,
+    client_dir: PathBuf,
+    bun_path: PathBuf,
+    oauth_token: Arc<Mutex<Option<String>>>,
+}
+
+impl ClaudeSDK {
+    pub fn new(client_id: Uuid, oauth_token: Option<String>) -> Self {
+        let clients_base = std::env::var("CLIENTS_DIR")
+            .unwrap_or_else(|_| "../.clients".to_string());
+        
+        let clients_base_path = PathBuf::from(&clients_base);
+        let client_dir = clients_base_path.join(format!("{}", client_id));
+        let bun_path = clients_base_path.join("bun");
+        
+        Self {
+            client_id,
+            client_dir,
+            bun_path,
+            oauth_token: Arc::new(Mutex::new(oauth_token)),
+        }
+    }
+    
+    // Execute a query using the Claude Code SDK
+    pub async fn query(
+        &self,
+        request: QueryRequest,
+    ) -> Result<mpsc::Receiver<ClaudeMessage>, Box<dyn std::error::Error + Send + Sync>> {
+        let (tx, rx) = mpsc::channel(100);
+        
+        // Verify OAuth token exists
+        let oauth_token = self.oauth_token.lock().await.clone()
+            .ok_or("No OAuth token available")?;
+        
+        // Create a temporary script to run the SDK query
+        let script_path = self.client_dir.join("query_script.js");
+        let script_content = self.generate_query_script(&request, &oauth_token)?;
+        std::fs::write(&script_path, script_content)?;
+        
+        // Execute the script using bun
+        let bun_executable = self.bun_path.join("bin/bun");
+        let client_dir = self.client_dir.clone();
+        let client_id = self.client_id;
+        
+        tokio::spawn(async move {
+            let mut cmd = TokioCommand::new(&bun_executable)
+                .arg(&script_path)
+                .current_dir(&client_dir)
+                .env("CLAUDE_CODE_OAUTH_TOKEN", oauth_token)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .expect("Failed to spawn Claude SDK process");
+            
+            // Stream stdout
+            if let Some(stdout) = cmd.stdout.take() {
+                use tokio::io::{BufReader, AsyncBufReadExt};
+                let reader = BufReader::new(stdout);
+                let mut lines = reader.lines();
+                
+                while let Ok(Some(line)) = lines.next_line().await {
+                    if let Ok(message) = serde_json::from_str::<ClaudeMessage>(&line) {
+                        let _ = tx.send(message).await;
+                    } else {
+                        // Send raw progress for non-JSON lines
+                        let _ = tx.send(ClaudeMessage::Progress {
+                            content: line,
+                        }).await;
+                    }
+                }
+            }
+            
+            // Wait for process to complete
+            match cmd.wait().await {
+                Ok(status) if !status.success() => {
+                    let _ = tx.send(ClaudeMessage::Error {
+                        error: format!("Process exited with status: {}", status),
+                    }).await;
+                }
+                Err(e) => {
+                    let _ = tx.send(ClaudeMessage::Error {
+                        error: format!("Process error: {}", e),
+                    }).await;
+                }
+                _ => {}
+            }
+            
+            // Clean up script file
+            let _ = std::fs::remove_file(&script_path);
+            info!("Query completed for client {}", client_id);
+        });
+        
+        Ok(rx)
+    }
+    
+    // Generate JavaScript code to execute the SDK query
+    fn generate_query_script(
+        &self,
+        request: &QueryRequest,
+        oauth_token: &str,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        let options_json = if let Some(ref opts) = request.options {
+            serde_json::to_string(opts)?
+        } else {
+            "{}".to_string()
+        };
+        
+        let script = format!(r#"
+import {{ query }} from "@anthropic-ai/claude-code";
+
+const runQuery = async () => {{
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "{}";
+    
+    const request = {{
+        prompt: {},
+        options: {}
+    }};
+    
+    console.log(JSON.stringify({{ type: "start", session_id: Date.now().toString() }}));
+    
+    try {{
+        for await (const message of query(request)) {{
+            if (message.type === "progress") {{
+                console.log(JSON.stringify({{ type: "progress", content: message.content }}));
+            }} else if (message.type === "tool_use") {{
+                console.log(JSON.stringify({{ type: "tool_use", tool: message.tool, args: message.args }}));
+            }} else if (message.type === "result") {{
+                console.log(JSON.stringify({{ type: "result", result: message.result }}));
+            }}
+        }}
+    }} catch (error) {{
+        console.log(JSON.stringify({{ type: "error", error: error.message }}));
+    }}
+}};
+
+runQuery();
+"#,
+            oauth_token,
+            serde_json::to_string(&request.prompt)?,
+            options_json
+        );
+        
+        Ok(script)
+    }
+    
+    // Set or update the OAuth token
+    pub async fn set_oauth_token(&self, token: String) {
+        let mut guard = self.oauth_token.lock().await;
+        *guard = Some(token);
+    }
+    
+    // Get the current OAuth token
+    pub async fn get_oauth_token(&self) -> Option<String> {
+        let guard = self.oauth_token.lock().await;
+        guard.clone()
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct ClaudeSetup {
@@ -633,6 +837,10 @@ use std::sync::LazyLock;
 static CLIENT_INSTANCES: LazyLock<StdMutex<HashMap<Uuid, Arc<ClaudeSetup>>>> = 
     LazyLock::new(|| StdMutex::new(HashMap::new()));
 
+// SDK Instance Manager
+static SDK_INSTANCES: LazyLock<StdMutex<HashMap<Uuid, Arc<ClaudeSDK>>>> = 
+    LazyLock::new(|| StdMutex::new(HashMap::new()));
+
 impl ClaudeManager {
     fn get_or_create_client(client_id: Uuid) -> Arc<ClaudeSetup> {
         let mut clients = CLIENT_INSTANCES.lock().unwrap();
@@ -683,5 +891,68 @@ impl ClaudeManager {
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         let setup = Self::get_or_create_client(client_id);
         setup.submit_setup_token(setup_token).await
+    }
+    
+    // SDK Methods for programmatic Claude Code interaction
+    
+    pub fn get_or_create_sdk(client_id: Uuid, oauth_token: Option<String>) -> Arc<ClaudeSDK> {
+        let mut sdks = SDK_INSTANCES.lock().unwrap();
+        if let Some(sdk) = sdks.get(&client_id) {
+            sdk.clone()
+        } else {
+            let sdk = Arc::new(ClaudeSDK::new(client_id, oauth_token));
+            sdks.insert(client_id, sdk.clone());
+            sdk
+        }
+    }
+    
+    pub async fn query_claude(
+        client_id: Uuid,
+        prompt: String,
+        options: Option<QueryOptions>,
+    ) -> Result<mpsc::Receiver<ClaudeMessage>, Box<dyn std::error::Error + Send + Sync>> {
+        // First check if we have an OAuth token for this client
+        let setup = Self::get_client_setup(client_id);
+        let oauth_token = if let Some(setup) = setup {
+            setup.get_oauth_token().await
+        } else {
+            None
+        };
+        
+        if oauth_token.is_none() {
+            return Err("Client not authenticated. Please complete setup first.".into());
+        }
+        
+        let sdk = Self::get_or_create_sdk(client_id, oauth_token);
+        let request = QueryRequest { prompt, options };
+        sdk.query(request).await
+    }
+    
+    pub async fn query_claude_simple(
+        client_id: Uuid,
+        prompt: String,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        let mut receiver = Self::query_claude(client_id, prompt, None).await?;
+        let mut result = String::new();
+        
+        while let Some(message) = receiver.recv().await {
+            match message {
+                ClaudeMessage::Result { result: r } => {
+                    result = r;
+                    break;
+                }
+                ClaudeMessage::Error { error } => {
+                    return Err(error.into());
+                }
+                _ => continue,
+            }
+        }
+        
+        Ok(result)
+    }
+    
+    pub async fn update_sdk_token(client_id: Uuid, oauth_token: String) {
+        let sdk = Self::get_or_create_sdk(client_id, Some(oauth_token.clone()));
+        sdk.set_oauth_token(oauth_token).await;
     }
 }
