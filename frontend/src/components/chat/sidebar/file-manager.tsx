@@ -65,7 +65,7 @@ export function FileManager({ projectId, conversationId, onFileSelect }: FileMan
         setFiles(data);
       }
     } catch (error) {
-      console.error('Failed to fetch files:', error);
+      // Failed to fetch files
     } finally {
       setLoading(false);
     }
@@ -102,7 +102,7 @@ export function FileManager({ projectId, conversationId, onFileSelect }: FileMan
         setEditDescription('');
       }
     } catch (error) {
-      console.error('Failed to update description:', error);
+      // Failed to update description
     } finally {
       setSavingDescription(false);
     }
@@ -116,7 +116,11 @@ export function FileManager({ projectId, conversationId, onFileSelect }: FileMan
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
-    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
   };
 
   if (loading) {

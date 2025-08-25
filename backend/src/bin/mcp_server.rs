@@ -6,13 +6,12 @@ fn main() {
     let backend_env_path = std::env::current_exe()
         .ok()
         .and_then(|exe_path| exe_path.parent().map(|p| p.to_path_buf()))
-        .map(|target_path| {
+        .and_then(|target_path| {
             // Navigate from target/debug to backend directory
             target_path.parent()
                 .and_then(|p| p.parent())  // Go up from target/debug to backend
                 .map(|p| p.join(".env"))
         })
-        .flatten()
         .unwrap_or_else(|| std::path::PathBuf::from("backend/.env"));
     
     if let Err(e) = dotenv::from_path(&backend_env_path) {

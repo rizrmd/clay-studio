@@ -73,8 +73,8 @@ impl SessionStore for PostgresSessionStore {
         
         // Get expiry from session or default to 24 hours
         let expires_at = session.expiry()
-            .map(|e| e.clone())
-            .unwrap_or_else(|| (now + chrono::Duration::hours(24)).into());
+            .copied()
+            .unwrap_or_else(|| now + chrono::Duration::hours(24));
         
         // Serialize session to JSON
         let session_json = serde_json::to_string(&session)

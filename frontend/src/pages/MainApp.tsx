@@ -34,7 +34,6 @@ export function MainApp() {
           });
           
           if (!response.ok) {
-            console.error('Failed to fetch conversations');
             // On error, navigate to new chat as fallback
             navigate(`/chat/${projectId}/new`, { replace: true });
             return;
@@ -51,7 +50,6 @@ export function MainApp() {
             navigate(`/chat/${projectId}/new`, { replace: true });
           }
         } catch (error) {
-          console.error('Error loading conversations:', error);
           // On error, navigate to new chat as fallback
           navigate(`/chat/${projectId}/new`, { replace: true });
         }

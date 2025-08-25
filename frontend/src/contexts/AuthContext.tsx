@@ -76,15 +76,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const checkAuthStatus = async () => {
     try {
       const response = await axios.get('/auth/me')
-      console.log('Auth check successful:', response.data)
       setUser(response.data.user)
       setIsSetupComplete(response.data.is_setup_complete)
       return response.data.user
     } catch (error: any) {
       // Only log if it's not a 401 (which is expected when no user is logged in)
-      if (error.response?.status !== 401) {
-        console.error('Auth check failed:', error)
-      }
+      // 401 is expected when no user is logged in
       setUser(null)
       setIsSetupComplete(false)
       return null
@@ -96,12 +93,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // First try to get all clients (including incomplete ones)
       // This endpoint should work even when not authenticated
       const response = await axios.get('/clients')
-      console.log('Fetched clients:', response.data)
       if (response.data && response.data.length > 0) {
         const client = response.data[0]
-        console.log('Setting firstClient:', client)
-        console.log('Client status:', client.status)
-        console.log('Client has status field:', 'status' in client)
         setFirstClient(client)
         // Store the active client ID in localStorage for file uploads
         if (client.id) {
@@ -112,13 +105,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
         return client // Return client for further processing
       } else {
         // No clients exist - initial setup needed
-        console.log('No clients found, setting needsInitialSetup to true')
         setFirstClient(null)
         setNeedsInitialSetup(true)
         return null
       }
     } catch (error) {
-      console.error('Failed to fetch clients:', error)
       // Don't assume initial setup is needed if we can't fetch clients
       // The endpoint might be temporarily unavailable
       setNeedsInitialSetup(false)
@@ -134,9 +125,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const usersExist = response.data.users_exist
       // If client is active but no users exist, we need to create the first user
       setNeedsFirstUser(!usersExist)
-      console.log('Users exist check:', { clientId, usersExist, needsFirstUser: !usersExist })
     } catch (error) {
-      console.error('Failed to check if users exist:', error)
       // Assume users exist if we can't check (safer default)
       setNeedsFirstUser(false)
     }
@@ -152,7 +141,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setRegistrationEnabled(response.data.registration_enabled)
       setRequireInviteCode(response.data.require_invite_code)
     } catch (error) {
-      console.error('Failed to check registration status:', error)
       setRegistrationEnabled(false)
       setRequireInviteCode(false)
     }
@@ -229,7 +217,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try {
       await axios.post('/auth/logout')
     } catch (error) {
-      console.error('Logout error:', error)
+      // Logout error
     } finally {
       setUser(null)
       setIsSetupComplete(false)

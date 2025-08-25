@@ -19,6 +19,12 @@ pub struct ProjectManager {
     clients_base_dir: PathBuf,
 }
 
+impl Default for ProjectManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ProjectManager {
     pub fn new() -> Self {
         let clients_base = std::env::var("CLIENTS_DIR")
@@ -316,5 +322,40 @@ Add any project-specific context or instructions here that Claude should be awar
         }
         
         Ok(queries)
+    }
+    
+    pub fn get_claude_md_content(
+        &self,
+        client_id: Uuid,
+        project_id: &str,
+    ) -> Result<String, AppError> {
+        let project_dir = self.get_project_directory(client_id, project_id);
+        let claude_md_path = project_dir.join("CLAUDE.md");
+        
+        if !claude_md_path.exists() {
+            return Err(AppError::NotFound("CLAUDE.md not found for this project".to_string()));
+        }
+        
+        fs::read_to_string(&claude_md_path)
+            .map_err(|e| AppError::InternalServerError(
+                format!("Failed to read CLAUDE.md: {}", e)
+            ))
+    }
+    
+    pub fn save_claude_md_content(
+        &self,
+        client_id: Uuid,
+        project_id: &str,
+        content: &str,
+    ) -> Result<(), AppError> {
+        let project_dir = self.ensure_project_directory(client_id, project_id)?;
+        let claude_md_path = project_dir.join("CLAUDE.md");
+        
+        fs::write(&claude_md_path, content)
+            .map_err(|e| AppError::InternalServerError(
+                format!("Failed to save CLAUDE.md: {}", e)
+            ))?;
+        
+        Ok(())
     }
 }

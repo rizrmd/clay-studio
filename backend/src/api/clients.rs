@@ -89,14 +89,14 @@ pub async fn create_client(req: &mut Request, depot: &mut Depot, res: &mut Respo
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         "#,
     )
-    .bind(&client_id)
+    .bind(client_id)
     .bind(&create_request.name)
     .bind(&create_request.description)
     .bind("pending")
     .bind(&install_path)
     .bind(&config_json)
-    .bind(&now)
-    .bind(&now)
+    .bind(now)
+    .bind(now)
     .execute(&state.db_pool)
     .await
     .map_err(|e| AppError::InternalServerError(format!("Failed to create client: {}", e)))?;
@@ -116,7 +116,7 @@ pub async fn create_client(req: &mut Request, depot: &mut Depot, res: &mut Respo
     // Start Claude setup automatically in the background
     tokio::spawn({
         let state = state.clone();
-        let client_uuid = client_id.clone();
+        let client_uuid = client_id;
         async move {
             tracing::info!("Starting automatic Claude setup for client {}", client_uuid);
             
@@ -130,8 +130,8 @@ pub async fn create_client(req: &mut Request, depot: &mut Depot, res: &mut Respo
                     // Update status to pending (waiting for authentication)
                     let _ = sqlx::query("UPDATE clients SET status = $1, updated_at = $2 WHERE id = $3")
                         .bind("pending")
-                        .bind(&Utc::now())
-                        .bind(&client_uuid)
+                        .bind(Utc::now())
+                        .bind(client_uuid)
                         .execute(&state.db_pool)
                         .await;
                 }
@@ -141,8 +141,8 @@ pub async fn create_client(req: &mut Request, depot: &mut Depot, res: &mut Respo
                     // Update status to error
                     let _ = sqlx::query("UPDATE clients SET status = $1, updated_at = $2 WHERE id = $3")
                         .bind("error")
-                        .bind(&Utc::now())
-                        .bind(&client_uuid)
+                        .bind(Utc::now())
+                        .bind(client_uuid)
                         .execute(&state.db_pool)
                         .await;
                 }
@@ -178,7 +178,7 @@ pub async fn start_claude_setup(req: &mut Request, depot: &mut Depot, res: &mut 
     
     // Verify client exists and check if already set up
     let client_row = sqlx::query("SELECT id, name, install_path, status, claude_token FROM clients WHERE id = $1")
-        .bind(&client_uuid)
+        .bind(client_uuid)
         .fetch_optional(&state.db_pool)
         .await
         .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
@@ -198,8 +198,8 @@ pub async fn start_claude_setup(req: &mut Request, depot: &mut Depot, res: &mut 
     // Update status to installing
     sqlx::query("UPDATE clients SET status = $1, updated_at = $2 WHERE id = $3")
         .bind("installing")
-        .bind(&Utc::now())
-        .bind(&client_uuid)
+        .bind(Utc::now())
+        .bind(client_uuid)
         .execute(&state.db_pool)
         .await
         .map_err(|e| AppError::InternalServerError(format!("Failed to update client status: {}", e)))?;
@@ -207,7 +207,6 @@ pub async fn start_claude_setup(req: &mut Request, depot: &mut Depot, res: &mut 
     // Start the Claude Code setup process in background
     tokio::spawn({
         let state = state.clone();
-        let client_uuid = client_uuid.clone();
         async move {
             // First setup the environment
             match ClaudeManager::setup_client(client_uuid, None).await {
@@ -217,8 +216,8 @@ pub async fn start_claude_setup(req: &mut Request, depot: &mut Depot, res: &mut 
                     // Update client status to pending (ready for streaming setup)
                     let _ = sqlx::query("UPDATE clients SET status = $1, updated_at = $2 WHERE id = $3")
                         .bind("pending")
-                        .bind(&Utc::now())
-                        .bind(&client_uuid)
+                        .bind(Utc::now())
+                        .bind(client_uuid)
                         .execute(&state.db_pool)
                         .await;
                 }
@@ -227,8 +226,8 @@ pub async fn start_claude_setup(req: &mut Request, depot: &mut Depot, res: &mut 
                     // Update client status to error
                     let _ = sqlx::query("UPDATE clients SET status = $1, updated_at = $2 WHERE id = $3")
                         .bind("error")
-                        .bind(&Utc::now())
-                        .bind(&client_uuid)
+                        .bind(Utc::now())
+                        .bind(client_uuid)
                         .execute(&state.db_pool)
                         .await;
                 }
@@ -259,7 +258,7 @@ pub async fn submit_claude_token(req: &mut Request, depot: &mut Depot, res: &mut
     
     // Verify client exists and get install path
     let client_row = sqlx::query("SELECT id, name, install_path FROM clients WHERE id = $1")
-        .bind(&client_uuid)
+        .bind(client_uuid)
         .fetch_optional(&state.db_pool)
         .await
         .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
@@ -278,8 +277,8 @@ pub async fn submit_claude_token(req: &mut Request, depot: &mut Depot, res: &mut
             sqlx::query("UPDATE clients SET claude_token = $1, status = $2, updated_at = $3 WHERE id = $4")
                 .bind(&oauth_token)
                 .bind("active")
-                .bind(&Utc::now())
-                .bind(&client_uuid)
+                .bind(Utc::now())
+                .bind(client_uuid)
                 .execute(&state.db_pool)
                 .await
                 .map_err(|e| AppError::InternalServerError(format!("Failed to update client token: {}", e)))?;
@@ -308,7 +307,7 @@ pub async fn list_clients(depot: &mut Depot, res: &mut Response) -> Result<(), A
     
     // First, fix any inconsistent states (has token but not active)
     let fix_result = sqlx::query("UPDATE clients SET status = 'active', updated_at = $1 WHERE claude_token IS NOT NULL AND status != 'active'")
-        .bind(&Utc::now())
+        .bind(Utc::now())
         .execute(&state.db_pool)
         .await;
     
@@ -363,7 +362,7 @@ pub async fn get_client_status(req: &mut Request, depot: &mut Depot, res: &mut R
         .map_err(|_| AppError::BadRequest("Invalid client ID format".to_string()))?;
     
     let client_row = sqlx::query("SELECT id, status, updated_at FROM clients WHERE id = $1")
-        .bind(&client_uuid)
+        .bind(client_uuid)
         .fetch_optional(&state.db_pool)
         .await
         .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
@@ -393,7 +392,7 @@ pub async fn get_setup_progress(req: &mut Request, depot: &mut Depot, res: &mut 
         .map_err(|_| AppError::BadRequest("Invalid client ID format".to_string()))?;
     
     let client_row = sqlx::query("SELECT id, status, claude_token, install_path, updated_at FROM clients WHERE id = $1")
-        .bind(&client_uuid)
+        .bind(client_uuid)
         .fetch_optional(&state.db_pool)
         .await
         .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
@@ -410,8 +409,8 @@ pub async fn get_setup_progress(req: &mut Request, depot: &mut Depot, res: &mut 
         tracing::info!("Fixing inconsistent state in get_setup_progress for client {}: has token but status is {}", client_uuid, status_str);
         let _ = sqlx::query("UPDATE clients SET status = $1, updated_at = $2 WHERE id = $3")
             .bind("active")
-            .bind(&Utc::now())
-            .bind(&client_uuid)
+            .bind(Utc::now())
+            .bind(client_uuid)
             .execute(&state.db_pool)
             .await;
         status_str = "active".to_string();
@@ -445,7 +444,7 @@ pub async fn get_setup_progress(req: &mut Request, depot: &mut Depot, res: &mut 
     let clients_base_path = std::path::Path::new(&clients_base);
     
     // Extract just the client ID from the install_path (e.g., ".clients/uuid" -> "uuid")
-    let client_id_str = install_path.split('/').last().unwrap_or("");
+    let client_id_str = install_path.split('/').next_back().unwrap_or("");
     let client_dir = clients_base_path.join(client_id_str);
     let bun_path = clients_base_path.join("bun");
     
@@ -488,7 +487,7 @@ pub async fn claude_setup_sse_query(req: &mut Request, depot: &mut Depot, res: &
     
     // Get client details including token
     let client_row = sqlx::query("SELECT id, name, install_path, status, claude_token FROM clients WHERE id = $1")
-        .bind(&client_uuid)
+        .bind(client_uuid)
         .fetch_optional(&state.db_pool)
         .await
         .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
@@ -503,8 +502,8 @@ pub async fn claude_setup_sse_query(req: &mut Request, depot: &mut Depot, res: &
         tracing::info!("Fixing inconsistent state for client {}: has token but status is {}", client_uuid, current_status);
         let _ = sqlx::query("UPDATE clients SET status = $1, updated_at = $2 WHERE id = $3")
             .bind("active")
-            .bind(&Utc::now())
-            .bind(&client_uuid)
+            .bind(Utc::now())
+            .bind(client_uuid)
             .execute(&state.db_pool)
             .await;
         
@@ -532,8 +531,8 @@ pub async fn claude_setup_sse_query(req: &mut Request, depot: &mut Depot, res: &
         tracing::info!("Resetting stuck client {} from installing to created", client_uuid);
         let _ = sqlx::query("UPDATE clients SET status = $1, updated_at = $2 WHERE id = $3")
             .bind("created")
-            .bind(&Utc::now())
-            .bind(&client_uuid)
+            .bind(Utc::now())
+            .bind(client_uuid)
             .execute(&state.db_pool)
             .await;
     }
@@ -541,8 +540,8 @@ pub async fn claude_setup_sse_query(req: &mut Request, depot: &mut Depot, res: &
     // Update status to installing to prevent duplicate setups
     let _ = sqlx::query("UPDATE clients SET status = $1, updated_at = $2 WHERE id = $3")
         .bind("installing")
-        .bind(&Utc::now())
-        .bind(&client_uuid)
+        .bind(Utc::now())
+        .bind(client_uuid)
         .execute(&state.db_pool)
         .await;
     
@@ -551,7 +550,7 @@ pub async fn claude_setup_sse_query(req: &mut Request, depot: &mut Depot, res: &
     
     // Start setup in background with progress reporting
     let state_clone = state.clone();
-    let client_uuid_clone = client_uuid.clone();
+    let client_uuid_clone = client_uuid;
     
     tokio::spawn(async move {
         match ClaudeManager::setup_client(client_uuid_clone, Some(tx.clone())).await {
@@ -577,8 +576,8 @@ pub async fn claude_setup_sse_query(req: &mut Request, depot: &mut Depot, res: &
                             let _ = sqlx::query("UPDATE clients SET claude_token = $1, status = $2, updated_at = $3 WHERE id = $4")
                                 .bind(&token)
                                 .bind("active")
-                                .bind(&Utc::now())
-                                .bind(&client_uuid_clone)
+                                .bind(Utc::now())
+                                .bind(client_uuid_clone)
                                 .execute(&state_clone.db_pool)
                                 .await;
                             
@@ -587,8 +586,8 @@ pub async fn claude_setup_sse_query(req: &mut Request, depot: &mut Depot, res: &
                             // No token captured, update status to pending
                             let _ = sqlx::query("UPDATE clients SET status = $1, updated_at = $2 WHERE id = $3")
                                 .bind("pending")
-                                .bind(&Utc::now())
-                                .bind(&client_uuid_clone)
+                                .bind(Utc::now())
+                                .bind(client_uuid_clone)
                                 .execute(&state_clone.db_pool)
                                 .await;
                         }
@@ -601,8 +600,8 @@ pub async fn claude_setup_sse_query(req: &mut Request, depot: &mut Depot, res: &
                         // Update status to error on failure
                         let _ = sqlx::query("UPDATE clients SET status = $1, updated_at = $2 WHERE id = $3")
                             .bind("error")
-                            .bind(&Utc::now())
-                            .bind(&client_uuid_clone)
+                            .bind(Utc::now())
+                            .bind(client_uuid_clone)
                             .execute(&state_clone.db_pool)
                             .await;
                     }
@@ -672,7 +671,7 @@ pub async fn cleanup_invalid_clients(depot: &mut Depot, res: &mut Response) -> R
     
     // Reset clients that are marked as active but don't have claude_token
     let result = sqlx::query("UPDATE clients SET status = 'pending', updated_at = $1 WHERE status = 'active' AND claude_token IS NULL")
-        .bind(&Utc::now())
+        .bind(Utc::now())
         .execute(&state.db_pool)
         .await
         .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;

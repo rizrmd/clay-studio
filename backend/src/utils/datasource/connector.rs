@@ -8,7 +8,7 @@ pub enum DataSourceType {
     PostgreSQL,
     MySQL,
     SQLite,
-    CSV,
+    Csv,
 }
 
 impl From<&str> for DataSourceType {
@@ -17,7 +17,7 @@ impl From<&str> for DataSourceType {
             "postgresql" | "postgres" => DataSourceType::PostgreSQL,
             "mysql" => DataSourceType::MySQL,
             "sqlite" => DataSourceType::SQLite,
-            "csv" => DataSourceType::CSV,
+            "csv" => DataSourceType::Csv,
             _ => DataSourceType::PostgreSQL, // default
         }
     }
@@ -237,7 +237,7 @@ impl DataSourceConnector for MySQLConnector {
                 "is_nullable": row.get::<String, _>("is_nullable"),
             });
             
-            if !schema["tables"].get(&table_name).is_some() {
+            if schema["tables"].get(&table_name).is_none() {
                 schema["tables"][&table_name] = json!([]);
             }
             schema["tables"][&table_name].as_array_mut().unwrap().push(column_info);
@@ -530,7 +530,7 @@ pub async fn create_connector(source_type: &str, config: &Value) -> Result<Box<d
         DataSourceType::SQLite => {
             Ok(Box::new(SQLiteConnector::new(config)?))
         },
-        DataSourceType::CSV => {
+        DataSourceType::Csv => {
             Ok(Box::new(CSVConnector::new(config)?))
         }
     }

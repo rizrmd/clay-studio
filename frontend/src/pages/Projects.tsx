@@ -41,7 +41,6 @@ export function ProjectsPage() {
       setProjects(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load projects");
-      console.error("Error fetching projects:", err);
     } finally {
       setLoading(false);
     }
@@ -75,7 +74,6 @@ export function ProjectsPage() {
       navigate(`/chat/${newProject.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create project");
-      console.error("Error creating project:", err);
     } finally {
       setLoading(false);
     }

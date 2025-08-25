@@ -6,6 +6,8 @@ mod m20250824_create_file_uploads_table;
 mod m20250825_000001_add_forgotten_after;
 mod m20250824_234033_add_forgotten_message_field;
 mod m20250825_085605_add_client_id_to_projects;
+mod m20250825_create_message_files_table;
+mod m20250826_000001_add_title_manual_flag;
 
 pub struct Migrator;
 
@@ -15,9 +17,12 @@ impl MigratorTrait for Migrator {
         vec![
             Box::new(m20240101_000001_create_tables::Migration),
             Box::new(m20250824_225443_create_sessions_table::Migration),
+            Box::new(m20250824_create_file_uploads_table::Migration),
             Box::new(m20250825_000001_add_forgotten_after::Migration),
             Box::new(m20250824_234033_add_forgotten_message_field::Migration),
             Box::new(m20250825_085605_add_client_id_to_projects::Migration),
+            Box::new(m20250825_create_message_files_table::Migration),
+            Box::new(m20250826_000001_add_title_manual_flag::Migration),
         ]
     }
 }

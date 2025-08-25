@@ -3,6 +3,17 @@ import { useQuery } from "@tanstack/react-query";
 import { API_BASE_URL } from "@/lib/url";
 
 // Types matching the backend
+export interface FileAttachment {
+  id: string;
+  file_name: string;
+  original_name: string;
+  file_path: string;
+  file_size: number;
+  mime_type?: string;
+  description?: string;
+  auto_description?: string;
+}
+
 export interface Message {
   id: string;
   content: string;
@@ -10,6 +21,7 @@ export interface Message {
   createdAt?: string;
   clay_tools_used?: string[];
   processing_time_ms?: number;
+  file_attachments?: FileAttachment[];
 }
 
 export interface ConversationContext {
@@ -193,6 +205,31 @@ export function useClayChat(projectId: string, conversationId?: string) {
   const [forgottenCount, setForgottenCount] = useState<number>(0);
   const [hasStartedNewConversation, setHasStartedNewConversation] = useState(false);
 
+  // Function to load uploaded files for a conversation
+  const loadUploadedFiles = useCallback(async () => {
+    if (!projectId || !conversationId || conversationId === 'new') {
+      setUploadedFiles([]);
+      return;
+    }
+
+    try {
+      const clientId = localStorage.getItem('activeClientId');
+      if (!clientId) return;
+
+      const response = await fetch(
+        `${API_BASE_URL}/uploads?client_id=${clientId}&project_id=${projectId}&conversation_id=${conversationId}`,
+        { credentials: "include" }
+      );
+
+      if (response.ok) {
+        const files = await response.json();
+        setUploadedFiles(files);
+      }
+    } catch (err) {
+      // Failed to load uploaded files
+    }
+  }, [projectId, conversationId]);
+
   // Load messages when conversation changes
   useEffect(() => {
     if (!conversationId) return;
@@ -247,9 +284,10 @@ export function useClayChat(projectId: string, conversationId?: string) {
         .then(data => {
           setMessages(data);
           setIsLoadingMessages(false);
+          // Load uploaded files for this conversation
+          loadUploadedFiles();
         })
         .catch(err => {
-          console.error("Failed to load conversation messages:", err);
           setError(err.message);
           setIsLoadingMessages(false);
         });
@@ -271,12 +309,11 @@ export function useClayChat(projectId: string, conversationId?: string) {
             setForgottenCount(data.forgotten_count || 0);
           }
         })
-        .catch(err => {
+        .catch(() => {
           // Silently handle forgotten status errors
-          console.debug("Could not load forgotten status:", err);
         });
     }
-  }, [conversationId, projectId]);
+  }, [conversationId, projectId, loadUploadedFiles]);
 
   // Load context for the conversation or project
   const { context: conversationContext } = useConversationContext(
@@ -339,6 +376,8 @@ export function useClayChat(projectId: string, conversationId?: string) {
 
       // Upload files first if any
       let uploadedFiles: string[] = [];
+      let reusedFiles: any[] = [];
+      
       if (files && files.length > 0) {
         try {
           // Get client ID from localStorage or API
@@ -349,23 +388,48 @@ export function useClayChat(projectId: string, conversationId?: string) {
           }
 
           for (const file of files) {
-            const formData = new FormData();
-            formData.append('file', file);
+            // Check if this is an existing file being reused
+            const fileWithMeta = file as any;
+            if (fileWithMeta.isExisting && fileWithMeta.filePath) {
+              // This is an existing file, just add its path
+              uploadedFiles.push(fileWithMeta.filePath);
+              reusedFiles.push({
+                id: fileWithMeta.fileId,
+                file_path: fileWithMeta.filePath,
+                original_name: fileWithMeta.name,
+                description: fileWithMeta.description,
+                auto_description: fileWithMeta.autoDescription,
+              });
+            } else {
+              // This is a new file, upload it
+              const formData = new FormData();
+              formData.append('file', file);
 
-            const response = await fetch(`${API_BASE_URL}/upload?client_id=${clientId}&project_id=${projectId}`, {
-              method: 'POST',
-              credentials: 'include',
-              body: formData,
-            });
+              const response = await fetch(`${API_BASE_URL}/upload?client_id=${clientId}&project_id=${projectId}`, {
+                method: 'POST',
+                credentials: 'include',
+                body: formData,
+              });
 
-            if (!response.ok) {
-              throw new Error(`Failed to upload ${file.name}`);
+              if (!response.ok) {
+                throw new Error(`Failed to upload ${file.name}`);
+              }
+
+              const result = await response.json();
+              uploadedFiles.push(result.file_path);
+              // Store the uploaded file info for display
+              setUploadedFiles(prev => [...prev, result]);
             }
-
-            const result = await response.json();
-            uploadedFiles.push(result.file_path);
-            // Store the uploaded file info for display
-            setUploadedFiles(prev => [...prev, result]);
+          }
+          
+          // Add reused files to the uploadedFiles display
+          if (reusedFiles.length > 0) {
+            setUploadedFiles(prev => {
+              // Filter out duplicates
+              const existingIds = new Set(prev.map(f => f.id));
+              const newFiles = reusedFiles.filter(f => !existingIds.has(f.id));
+              return [...prev, ...newFiles];
+            });
           }
         } catch (err) {
           setError(`File upload failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
@@ -435,7 +499,6 @@ export function useClayChat(projectId: string, conversationId?: string) {
           // Check if conversation ID is in response headers
           const responseConversationId = response.headers.get('X-Conversation-ID') || response.headers.get('conversation-id');
           if (responseConversationId && !currentConversationId) {
-            console.log('Setting conversation ID from response headers:', responseConversationId);
             setCurrentConversationId(responseConversationId);
           }
 
@@ -470,21 +533,17 @@ export function useClayChat(projectId: string, conversationId?: string) {
 
                 try {
                   const event = JSON.parse(data);
-                  console.log('Received streaming event:', event.type, event);
                   
                   switch (event.type) {
                     case "start":
                       // Message ID received, streaming started
                       // Set conversation ID if this is a new conversation
                       if (event.conversation_id && event.conversation_id !== 'new' && (!currentConversationId || currentConversationId === 'new')) {
-                        console.log('Setting conversation ID from start event:', event.conversation_id, 'currentConversationId before:', currentConversationId);
                         setCurrentConversationId(event.conversation_id);
-                        console.log('setCurrentConversationId called with:', event.conversation_id);
                       } else if (!currentConversationId || currentConversationId === 'new') {
                         // Check for alternative property names
                         const altConvId = event.conversationId || event.conversation || event.conv_id;
                         if (altConvId) {
-                          console.log('Setting conversation ID from start event (alt property):', altConvId);
                           setCurrentConversationId(altConvId);
                         }
                       }
@@ -492,7 +551,6 @@ export function useClayChat(projectId: string, conversationId?: string) {
                     case "progress":
                       // Set conversation ID if this is a new conversation
                       if (event.conversation_id && (!currentConversationId || currentConversationId === 'new')) {
-                        console.log('Setting conversation ID from progress event:', event.conversation_id);
                         setCurrentConversationId(event.conversation_id);
                       }
                       
@@ -581,14 +639,12 @@ export function useClayChat(projectId: string, conversationId?: string) {
                         }
                       } catch (parseError) {
                         // Skip non-JSON messages (like system init messages)
-                        console.debug("Skipping non-JSON message:", event.content);
                       }
                       break;
                     case "content":
                       // Final content from Result message - only update if we have an assistant message
                       // Set conversation ID if this is a new conversation
                       if (event.conversation_id && (!currentConversationId || currentConversationId === 'new')) {
-                        console.log('Setting conversation ID from content event:', event.conversation_id);
                         setCurrentConversationId(event.conversation_id);
                       }
                       
@@ -617,7 +673,6 @@ export function useClayChat(projectId: string, conversationId?: string) {
                       break;
                     case "complete":
                       processingTime = event.processing_time_ms;
-                      console.log('Complete event data:', JSON.stringify(event, null, 2));
                       
                       // Update final message with complete data
                       setMessages((prev) => {
@@ -634,19 +689,13 @@ export function useClayChat(projectId: string, conversationId?: string) {
                       // Set conversation ID if this is a new conversation
                       // Check if we got a real conversation ID (not 'new')
                       if (event.conversation_id && event.conversation_id !== 'new' && (!currentConversationId || currentConversationId === 'new')) {
-                        console.log('Setting conversation ID from complete event:', event.conversation_id);
                         setCurrentConversationId(event.conversation_id);
                       } else if (!currentConversationId || currentConversationId === 'new') {
                         // Check for alternative property names
                         const altConvId = event.conversationId || event.conversation || event.conv_id;
                         if (altConvId && altConvId !== 'new') {
-                          console.log('Setting conversation ID from complete event (alt property):', altConvId);
                           setCurrentConversationId(altConvId);
-                        } else {
-                          console.log('Complete event - no valid conversation ID found. Event keys:', Object.keys(event), 'conversation_id:', event.conversation_id);
                         }
-                      } else {
-                        console.log('Complete event - conversation_id:', event.conversation_id, 'currentConversationId:', currentConversationId);
                       }
                       break;
                     case "error":
@@ -654,7 +703,7 @@ export function useClayChat(projectId: string, conversationId?: string) {
                       break;
                   }
                 } catch (e) {
-                  console.error("Failed to parse SSE event:", e);
+                  // Failed to parse SSE event
                 }
               }
             }
@@ -687,20 +736,15 @@ export function useClayChat(projectId: string, conversationId?: string) {
           }
 
           const assistantResponse = await response.json();
-          console.log('Non-streaming response:', assistantResponse);
 
           // Set conversation ID if this is a new conversation
           if (assistantResponse.conversation_id && !currentConversationId) {
-            console.log('Setting conversation ID from non-streaming response:', assistantResponse.conversation_id);
             setCurrentConversationId(assistantResponse.conversation_id);
           } else if (!currentConversationId) {
             // Check for alternative property names
             const altConvId = assistantResponse.conversationId || assistantResponse.conversation || assistantResponse.conv_id;
             if (altConvId) {
-              console.log('Setting conversation ID from non-streaming response (alt property):', altConvId);
               setCurrentConversationId(altConvId);
-            } else {
-              console.log('Non-streaming response - no conversation ID found. Response keys:', Object.keys(assistantResponse));
             }
           }
 
@@ -718,10 +762,8 @@ export function useClayChat(projectId: string, conversationId?: string) {
       } catch (err) {
         if (err instanceof DOMException && err.name === 'AbortError') {
           // Request was cancelled - don't show error message
-          console.log("Chat request cancelled");
         } else {
           setError(err instanceof Error ? err.message : "An error occurred");
-          console.error("Chat error:", err);
         }
       } finally {
         setIsLoading(false);
@@ -732,11 +774,11 @@ export function useClayChat(projectId: string, conversationId?: string) {
     [projectId, currentConversationId, forgottenAfterMessageId, restoreForgottenMessages]
   );
 
+
   // Function to stop/cancel current request
   const stopMessage = useCallback(() => {
     if (currentAbortController) {
       currentAbortController.abort();
-      console.log("Stopping current request...");
     }
   }, [currentAbortController]);
 
@@ -800,7 +842,6 @@ export function useClayChat(projectId: string, conversationId?: string) {
         return assistantMessage;
       } catch (err) {
         setError(err instanceof Error ? err.message : "An error occurred");
-        console.error("One-shot chat error:", err);
         return null;
       } finally {
         setIsLoading(false);

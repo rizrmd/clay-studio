@@ -3,6 +3,7 @@ use salvo::fs::NamedFile;
 use serde::Deserialize;
 use uuid::Uuid;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use crate::utils::AppError;
@@ -343,5 +344,63 @@ pub async fn handle_list_uploads(
         .collect();
     
     res.render(Json(responses));
+    Ok(())
+}
+
+#[handler]
+pub async fn handle_delete_upload(
+    req: &mut Request,
+    depot: &mut Depot,
+    res: &mut Response,
+) -> Result<(), AppError> {
+    let state = depot.obtain::<AppState>().unwrap();
+    
+    let file_id_str = req.param::<String>("id")
+        .ok_or_else(|| AppError::BadRequest("Missing file id".to_string()))?;
+    
+    let file_id = Uuid::parse_str(&file_id_str)
+        .map_err(|_| AppError::BadRequest("Invalid file id".to_string()))?;
+    
+    // Get client_id from query params for authorization
+    let client_id_str = req.query::<String>("client_id")
+        .ok_or_else(|| AppError::BadRequest("Missing client_id".to_string()))?;
+    
+    let client_id = Uuid::parse_str(&client_id_str)
+        .map_err(|_| AppError::BadRequest("Invalid client_id".to_string()))?;
+    
+    // First get the file info to delete the physical file
+    let file = sqlx::query_as::<_, FileUpload>(
+        "SELECT * FROM file_uploads WHERE id = $1 AND client_id = $2"
+    )
+    .bind(file_id)
+    .bind(client_id)
+    .fetch_optional(&state.db_pool)
+    .await
+    .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?
+    .ok_or_else(|| AppError::NotFound("File not found".to_string()))?;
+    
+    // Delete the physical file
+    if let Ok(path) = PathBuf::from_str(&file.file_path) {
+        if path.exists() {
+            if let Err(e) = fs::remove_file(&path).await {
+                tracing::warn!("Failed to delete physical file {}: {}", file.file_path, e);
+            }
+        }
+    }
+    
+    // Delete from database
+    sqlx::query(
+        "DELETE FROM file_uploads WHERE id = $1 AND client_id = $2"
+    )
+    .bind(file_id)
+    .bind(client_id)
+    .execute(&state.db_pool)
+    .await
+    .map_err(|e| AppError::InternalServerError(format!("Failed to delete file: {}", e)))?;
+    
+    res.render(Json(serde_json::json!({
+        "message": "File deleted successfully",
+        "id": file_id_str
+    })));
     Ok(())
 }

@@ -80,6 +80,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .get(projects::list_queries)
                 .post(projects::save_query)
         )
+        .push(
+            Router::with_path("/projects/{project_id}/claude-md")
+                .get(projects::get_claude_md)
+                .put(projects::save_claude_md)
+        )
         // Conversation routes - more specific paths first
         .push(
             Router::with_path("/conversations/{conversation_id}/messages")
@@ -111,6 +116,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .push(
             Router::with_path("/uploads/{file_id}/description")
                 .put(upload::handle_update_file_description)
+        )
+        .push(
+            Router::with_path("/uploads/<id>")
+                .delete(upload::handle_delete_upload)
         )
         .push(
             Router::with_path("/uploads/{client_id}/{project_id}/{file_name}")

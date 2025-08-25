@@ -76,7 +76,7 @@ pub async fn register(req: &mut Request, depot: &mut Depot, res: &mut Response) 
 
     // Get client and check if registration is enabled
     let client_row = sqlx::query("SELECT id, config FROM clients WHERE id = $1")
-        .bind(&client_id)
+        .bind(client_id)
         .fetch_optional(&state.db_pool)
         .await
         .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
@@ -85,7 +85,7 @@ pub async fn register(req: &mut Request, depot: &mut Depot, res: &mut Response) 
 
     // Check if this is the first user for the client
     let user_count_row = sqlx::query("SELECT COUNT(*) as count FROM users WHERE client_id = $1")
-        .bind(&client_id)
+        .bind(client_id)
         .fetch_one(&state.db_pool)
         .await
         .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
@@ -127,7 +127,7 @@ pub async fn register(req: &mut Request, depot: &mut Depot, res: &mut Response) 
 
     // Check if user already exists for this client
     let existing_user = sqlx::query("SELECT id FROM users WHERE client_id = $1 AND username = $2")
-        .bind(&client_id)
+        .bind(client_id)
         .bind(&register_req.username)
         .fetch_optional(&state.db_pool)
         .await
@@ -150,8 +150,8 @@ pub async fn register(req: &mut Request, depot: &mut Depot, res: &mut Response) 
         VALUES ($1, $2, $3, $4)
         "#,
     )
-    .bind(&user_id)
-    .bind(&client_id)
+    .bind(user_id)
+    .bind(client_id)
     .bind(&register_req.username)
     .bind(&password_hash)
     .execute(&state.db_pool)
@@ -160,7 +160,7 @@ pub async fn register(req: &mut Request, depot: &mut Depot, res: &mut Response) 
 
     // Fetch the created user
     let row = sqlx::query("SELECT id, client_id, username, password FROM users WHERE id = $1")
-        .bind(&user_id)
+        .bind(user_id)
         .fetch_one(&state.db_pool)
         .await
         .map_err(|e| AppError::InternalServerError(format!("Failed to fetch user: {}", e)))?;
@@ -211,7 +211,7 @@ pub async fn login(req: &mut Request, depot: &mut Depot, res: &mut Response) -> 
         WHERE client_id = $1 AND username = $2
         "#,
     )
-    .bind(&client_id)
+    .bind(client_id)
     .bind(&login_req.username)
     .fetch_optional(&state.db_pool)
     .await
@@ -293,7 +293,7 @@ pub async fn me(depot: &mut Depot, res: &mut Response) -> Result<(), AppError> {
         })?;
 
     let row = sqlx::query("SELECT id, client_id, username, password FROM users WHERE id = $1")
-        .bind(&user_uuid)
+        .bind(user_uuid)
         .fetch_optional(&state.db_pool)
         .await
         .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
@@ -340,7 +340,7 @@ pub async fn me(depot: &mut Depot, res: &mut Response) -> Result<(), AppError> {
     let client_check = sqlx::query(
         "SELECT status FROM clients WHERE id = $1"
     )
-    .bind(&client_uuid)
+    .bind(client_uuid)
     .fetch_optional(&state.db_pool)
     .await
     .map_err(|e| {
@@ -364,7 +364,7 @@ pub async fn me(depot: &mut Depot, res: &mut Response) -> Result<(), AppError> {
     let project_count = sqlx::query(
         "SELECT COUNT(*) as count FROM projects WHERE client_id = $1"
     )
-    .bind(&client_uuid)
+    .bind(client_uuid)
     .fetch_one(&state.db_pool)
     .await
     .map_err(|e| {
@@ -404,7 +404,7 @@ pub async fn check_registration_status(req: &mut Request, depot: &mut Depot, res
 
     // Get client info and config
     let client_row = sqlx::query("SELECT name, config FROM clients WHERE id = $1")
-        .bind(&client_uuid)
+        .bind(client_uuid)
         .fetch_optional(&state.db_pool)
         .await
         .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
@@ -485,7 +485,7 @@ pub async fn check_users_exist(req: &mut Request, depot: &mut Depot, res: &mut R
     
     // Check if any users exist for this client
     let row = sqlx::query("SELECT COUNT(*) as count FROM users WHERE client_id = $1")
-        .bind(&client_uuid)
+        .bind(client_uuid)
         .fetch_one(&state.db_pool)
         .await
         .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;

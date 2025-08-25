@@ -45,13 +45,13 @@ pub struct UpdateFileDescription {
     pub auto_description: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileUploadResponse {
     pub id: String,
     pub file_name: String,
     pub original_name: String,
     pub file_path: String,
-    pub size: i64,
+    pub file_size: i64,  // Changed from 'size' to 'file_size' to match frontend expectations
     pub mime_type: Option<String>,
     pub description: Option<String>,
     pub auto_description: Option<String>,
@@ -80,7 +80,7 @@ impl FileUpload {
             file_name: self.file_name.clone(),
             original_name: self.original_name.clone(),
             file_path: self.file_path.clone(),
-            size: self.file_size,
+            file_size: self.file_size,  // Changed from 'size' to 'file_size'
             mime_type: self.mime_type.clone(),
             description: self.description.clone(),
             auto_description: self.auto_description.clone(),

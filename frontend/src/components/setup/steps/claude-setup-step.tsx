@@ -8,9 +8,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { CheckCircle2, Settings } from "lucide-react";
-import { TerminalOutput } from "./terminal-output";
-import { AuthUrlDisplay } from "./auth-url-display";
-import { TokenSubmissionForm } from "./token-submission-form";
+import { TerminalOutput } from "../ui/terminal-output";
+import { AuthUrlDisplay } from "../ui/auth-url-display";
+import { TokenSubmissionForm } from "../forms/token-submission-form";
 
 interface ClaudeSetupStepProps {
   claudeSetupResponse: any;

@@ -6,6 +6,10 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   MessageSquare,
+  MoreHorizontal,
+  Edit,
+  Trash2,
+  FileText,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,9 +18,19 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { API_BASE_URL } from "@/lib/url";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
+import { ClaudeMdModal } from "./claude-md-modal";
 
 interface Conversation {
   id: string;
@@ -41,12 +55,16 @@ export function ConversationSidebar({
   onToggle,
   projectId,
   currentConversationId,
-  onConversationSelect,
+  onConversationSelect: _onConversationSelect,
   refreshTrigger,
 }: ConversationSidebarProps) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [renameDialogOpen, setRenameDialogOpen] = useState(false);
+  const [renamingConversation, setRenamingConversation] = useState<Conversation | null>(null);
+  const [newTitle, setNewTitle] = useState("");
+  const [claudeMdModalOpen, setClaudeMdModalOpen] = useState(false);
   const { isAuthenticated, isSetupComplete, user, logout } = useAuth();
   const navigate = useNavigate();
 
@@ -71,12 +89,6 @@ export function ConversationSidebar({
 
         if (!response.ok) {
           const errorText = await response.text();
-          console.error("Conversations fetch failed:", {
-            status: response.status,
-            statusText: response.statusText,
-            url: url.toString(),
-            errorText,
-          });
           throw new Error(
             `Failed to fetch conversations: ${response.status} - ${response.statusText}`
           );
@@ -85,7 +97,6 @@ export function ConversationSidebar({
         const data = await response.json();
         setConversations(data);
       } catch (err) {
-        console.error("Failed to fetch conversations:", err);
         setError(
           err instanceof Error ? err.message : "Failed to load conversations"
         );
@@ -114,18 +125,16 @@ export function ConversationSidebar({
 
   // Handle logout
   const handleLogout = async () => {
-    console.log("Logout clicked!"); // Debug log
     try {
       await logout();
       navigate("/auth");
     } catch (error) {
-      console.error("Logout failed:", error);
+      // Logout failed
     }
   };
 
   // Handle profile click
   const handleProfile = () => {
-    console.log("Profile clicked!");
     // TODO: Navigate to profile page or open profile modal
     // For now, just show an alert
     alert("Profile functionality not yet implemented");
@@ -133,10 +142,86 @@ export function ConversationSidebar({
 
   // Handle settings click
   const handleSettings = () => {
-    console.log("Settings clicked!");
     // TODO: Navigate to settings page or open settings modal
     // For now, just show an alert
     alert("Settings functionality not yet implemented");
+  };
+
+  // Handle conversation rename
+  const handleRenameConversation = async () => {
+    if (!renamingConversation || !newTitle.trim()) return;
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/conversations/${renamingConversation.id}`,
+        {
+          method: "PUT",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            title: newTitle.trim(),
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to rename conversation");
+      }
+
+      const updatedConversation = await response.json();
+      
+      // Update local state
+      setConversations(convs => 
+        convs.map(c => c.id === renamingConversation.id ? updatedConversation : c)
+      );
+
+      // Close dialog and reset state
+      setRenameDialogOpen(false);
+      setRenamingConversation(null);
+      setNewTitle("");
+    } catch (err) {
+      setError("Failed to rename conversation");
+    }
+  };
+
+  // Handle conversation delete
+  const handleDeleteConversation = async (conversation: Conversation) => {
+    if (!confirm(`Are you sure you want to delete "${conversation.title || 'New Conversation'}"?`)) {
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/conversations/${conversation.id}`,
+        {
+          method: "DELETE",
+          credentials: "include",
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to delete conversation");
+      }
+
+      // Update local state
+      setConversations(convs => convs.filter(c => c.id !== conversation.id));
+      
+      // If we're currently viewing this conversation, navigate away
+      if (currentConversationId === conversation.id) {
+        navigate(`/chat/${projectId}/new`);
+      }
+    } catch (err) {
+      setError("Failed to delete conversation");
+    }
+  };
+
+  // Open rename dialog
+  const openRenameDialog = (conversation: Conversation) => {
+    setRenamingConversation(conversation);
+    setNewTitle(conversation.title || "");
+    setRenameDialogOpen(true);
   };
 
   return (
@@ -204,13 +289,15 @@ export function ConversationSidebar({
               {conversations.map((conversation) => (
                 <div
                   key={conversation.id}
-                  onClick={(e) => handleConversationClick(conversation.id, e)}
                   className={cn(
-                    "block w-full text-left p-2 rounded-md hover:bg-muted transition-colors mb-1 group cursor-pointer",
+                    "block w-full text-left p-2 rounded-md hover:bg-muted transition-colors mb-1 group cursor-pointer relative",
                     currentConversationId === conversation.id && "bg-muted"
                   )}
                 >
-                  <div className="flex items-start gap-2">
+                  <div 
+                    onClick={(e) => handleConversationClick(conversation.id, e)}
+                    className="flex items-start gap-2 pr-8"
+                  >
                     <MessageSquare className="h-4 w-4 mt-0.5 text-muted-foreground" />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">
@@ -218,15 +305,67 @@ export function ConversationSidebar({
                       </p>
                       <p className="text-xs text-muted-foreground">
                         {conversation.message_count}{" "}
-                        message{conversation.message_count !== 1 ? "s" : ""} •{" "}
+                        chat{conversation.message_count !== 1 ? "s" : ""} •{" "}
                         {new Date(conversation.updated_at).toLocaleDateString()} {new Date(conversation.updated_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', hour12: false})}
                       </p>
                     </div>
+                  </div>
+                  
+                  {/* Actions dropdown */}
+                  <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <MoreHorizontal className="h-3 w-3" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openRenameDialog(conversation);
+                          }}
+                        >
+                          <Edit className="h-4 w-4 mr-2" />
+                          Rename
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteConversation(conversation);
+                          }}
+                          className="text-red-600 focus:text-red-600"
+                        >
+                          <Trash2 className="h-4 w-4 mr-2" />
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
                 </div>
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* CLAUDE.md Button */}
+      {projectId && (
+        <div className="p-3 border-t">
+          <Button
+            onClick={() => setClaudeMdModalOpen(true)}
+            variant="ghost"
+            size="sm"
+            className={`w-full ${isCollapsed ? 'justify-center' : 'justify-start'} gap-2`}
+          >
+            <FileText className="h-4 w-4" />
+            {!isCollapsed && "Edit CLAUDE.md"}
+          </Button>
         </div>
       )}
 
@@ -281,6 +420,60 @@ export function ConversationSidebar({
           </DropdownMenu>
         )}
       </div>
+      
+      {/* CLAUDE.md Modal */}
+      {projectId && (
+        <ClaudeMdModal
+          projectId={projectId}
+          isOpen={claudeMdModalOpen}
+          onOpenChange={setClaudeMdModalOpen}
+        />
+      )}
+
+      {/* Rename Dialog */}
+      <Dialog open={renameDialogOpen} onOpenChange={setRenameDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Rename Conversation</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="title" className="text-right">
+                Title
+              </Label>
+              <Input
+                id="title"
+                value={newTitle}
+                onChange={(e) => setNewTitle(e.target.value)}
+                className="col-span-3"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    handleRenameConversation();
+                  }
+                }}
+                placeholder="Enter conversation title"
+                autoFocus
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setRenameDialogOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={handleRenameConversation}
+              disabled={!newTitle.trim()}
+            >
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

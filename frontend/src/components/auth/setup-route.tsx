@@ -13,18 +13,6 @@ export function SetupRoute({ children, fallback }: SetupRouteProps) {
   const { isAuthenticated, isSetupComplete, needsInitialSetup, needsFirstUser, loading, firstClient } = useAuth()
   const location = useLocation()
 
-  console.log('SetupRoute debug:', {
-    path: location.pathname,
-    loading,
-    needsInitialSetup,
-    needsFirstUser,
-    firstClient,
-    clientStatus: firstClient?.status,
-    isAuthenticated,
-    isSetupComplete,
-    shouldShowSetup: firstClient && firstClient.status !== 'active'
-  })
-
   if (loading) {
     return fallback || <LoadingFallback />
   }
@@ -62,32 +50,27 @@ export function SetupRoute({ children, fallback }: SetupRouteProps) {
 
   // Priority 2: Check if initial setup is needed (no clients at all)
   if (needsInitialSetup) {
-    console.log('Showing SetupPage because no clients exist')
     return <SetupPage />
   }
 
   // Priority 3: Check if client exists but isn't active (needs Claude setup)
   if (firstClient && firstClient.status !== 'active') {
-    console.log('Showing SetupPage because client status is:', firstClient.status)
     return <SetupPage />
   }
 
   // Priority 4: Client is active but no users exist - show setup page to create first user
   if (needsFirstUser) {
-    console.log('Showing SetupPage because client is active but no users exist')
     return <SetupPage />
   }
 
   // Priority 5: Client is active but user not authenticated - show login/register
   if (!isAuthenticated) {
-    console.log('Showing AuthPage because not authenticated and client is active')
     return <AuthPage />
   }
 
   // Priority 6: Authenticated but setup not complete - show setup
   // This case should rarely happen given the checks above
   if (!isSetupComplete) {
-    console.log('Showing SetupPage because setup is not complete')
     return <SetupPage />
   }
 

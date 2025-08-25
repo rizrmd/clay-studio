@@ -387,3 +387,90 @@ pub async fn list_queries(
     res.render(Json(queries));
     Ok(())
 }
+
+#[handler]
+pub async fn get_claude_md(
+    req: &mut Request,
+    depot: &mut Depot,
+    res: &mut Response,
+) -> Result<(), AppError> {
+    let state = depot.obtain::<AppState>().unwrap();
+    let project_id = req.param::<String>("project_id")
+        .ok_or(AppError::BadRequest("Missing project_id".to_string()))?;
+    
+    // Get the first active client
+    let client_row = sqlx::query(
+        "SELECT id FROM clients WHERE status = 'active' LIMIT 1"
+    )
+    .fetch_optional(&state.db_pool)
+    .await
+    .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
+    
+    let client_id = if let Some(row) = client_row {
+        let id: Uuid = row.get("id");
+        id
+    } else {
+        return Err(AppError::ServiceUnavailable(
+            "No active client available. Please set up a client first.".to_string()
+        ));
+    };
+    
+    let project_manager = ProjectManager::new();
+    let content = project_manager.get_claude_md_content(client_id, &project_id)?;
+    
+    #[derive(Serialize)]
+    struct ClaudeMdResponse {
+        content: String,
+    }
+    
+    res.render(Json(ClaudeMdResponse { content }));
+    Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SaveClaudeMdRequest {
+    pub content: String,
+}
+
+#[handler]
+pub async fn save_claude_md(
+    req: &mut Request,
+    depot: &mut Depot,
+    res: &mut Response,
+) -> Result<(), AppError> {
+    let state = depot.obtain::<AppState>().unwrap();
+    let project_id = req.param::<String>("project_id")
+        .ok_or(AppError::BadRequest("Missing project_id".to_string()))?;
+    let save_req: SaveClaudeMdRequest = req.parse_json().await
+        .map_err(|_| AppError::BadRequest("Invalid request body".to_string()))?;
+    
+    // Get the first active client
+    let client_row = sqlx::query(
+        "SELECT id FROM clients WHERE status = 'active' LIMIT 1"
+    )
+    .fetch_optional(&state.db_pool)
+    .await
+    .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
+    
+    let client_id = if let Some(row) = client_row {
+        let id: Uuid = row.get("id");
+        id
+    } else {
+        return Err(AppError::ServiceUnavailable(
+            "No active client available. Please set up a client first.".to_string()
+        ));
+    };
+    
+    let project_manager = ProjectManager::new();
+    project_manager.save_claude_md_content(client_id, &project_id, &save_req.content)?;
+    
+    #[derive(Serialize)]
+    struct SaveClaudeMdResponse {
+        message: String,
+    }
+    
+    res.render(Json(SaveClaudeMdResponse {
+        message: "CLAUDE.md saved successfully".to_string(),
+    }));
+    Ok(())
+}

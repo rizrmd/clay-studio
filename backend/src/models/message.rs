@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use chrono::Utc;
 use uuid::Uuid;
+use crate::models::file_upload::FileUploadResponse;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
@@ -11,6 +12,7 @@ pub struct Message {
     pub created_at: Option<String>,
     pub clay_tools_used: Option<Vec<String>>,
     pub processing_time_ms: Option<i64>,
+    pub file_attachments: Option<Vec<FileUploadResponse>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -30,6 +32,7 @@ impl Message {
             created_at: Some(Utc::now().to_rfc3339()),
             clay_tools_used: None,
             processing_time_ms: None,
+            file_attachments: None,
         }
     }
 
@@ -41,6 +44,12 @@ impl Message {
             created_at: Some(Utc::now().to_rfc3339()),
             clay_tools_used: None,
             processing_time_ms: None,
+            file_attachments: None,
         }
+    }
+
+    pub fn with_files(mut self, files: Vec<FileUploadResponse>) -> Self {
+        self.file_attachments = if files.is_empty() { None } else { Some(files) };
+        self
     }
 }

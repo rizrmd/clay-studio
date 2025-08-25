@@ -40,4 +40,6 @@ pub struct Conversation {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub message_count: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_title_manually_set: Option<bool>,
 }

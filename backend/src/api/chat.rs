@@ -22,7 +22,8 @@ async fn ensure_conversation(
     pool: &PgPool,
     conversation_id: &str,
     project_id: &str,
-) -> Result<(), AppError> {
+    initial_message: Option<&str>,
+) -> Result<bool, AppError> {
     // Check if conversation exists
     let exists = sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS(SELECT 1 FROM conversations WHERE id = $1)"
@@ -33,21 +34,115 @@ async fn ensure_conversation(
     .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
 
     if !exists {
+        // Generate title from initial message if provided, otherwise use a descriptive placeholder
+        let title = initial_message
+            .map(generate_title_from_message)
+            .unwrap_or_else(|| "Untitled conversation".to_string());
+        
         // Create conversation if it doesn't exist
         sqlx::query(
-            "INSERT INTO conversations (id, project_id, title, message_count, created_at, updated_at) 
-             VALUES ($1, $2, $3, 0, $4, $4)"
+            "INSERT INTO conversations (id, project_id, title, message_count, created_at, updated_at, is_title_manually_set) 
+             VALUES ($1, $2, $3, 0, $4, $4, false)"
         )
         .bind(conversation_id)
         .bind(project_id)
-        .bind("New Conversation") // Default title
+        .bind(&title)
         .bind(Utc::now())
         .execute(pool)
         .await
         .map_err(|e| AppError::InternalServerError(format!("Failed to create conversation: {}", e)))?;
+        
+        tracing::info!("Created new conversation {} with title: {}", conversation_id, title);
+        return Ok(true); // Newly created
     }
 
-    Ok(())
+    Ok(false) // Already existed
+}
+
+// Helper function to generate conversation title from message
+fn generate_title_from_message(content: &str) -> String {
+    // Take first 100 characters or first sentence, whichever is shorter
+    let truncated = if content.len() > 100 {
+        // Find first sentence ending
+        let sentence_end = content[..100]
+            .find(|c: char| c == '.' || c == '?' || c == '!')
+            .map(|i| i + 1)
+            .unwrap_or(100);
+        
+        let end_pos = sentence_end.min(100);
+        let mut title = content[..end_pos].to_string();
+        
+        // Add ellipsis if truncated
+        if end_pos == 100 && !title.ends_with('.') && !title.ends_with('?') && !title.ends_with('!') {
+            title.push_str("...");
+        }
+        
+        title
+    } else {
+        content.to_string()
+    };
+    
+    // Clean up whitespace and ensure it's not empty
+    let cleaned = truncated.trim().to_string();
+    if cleaned.is_empty() {
+        "Untitled conversation".to_string()
+    } else {
+        cleaned
+    }
+}
+
+// Helper function to detect if topic has changed significantly
+fn has_topic_changed(current_title: &str, new_message: &str, message_count: i32) -> bool {
+    // Only consider topic change after at least 5 messages
+    if message_count < 5 {
+        return false;
+    }
+    
+    // Check if new message is substantially different from title topic
+    // Simple heuristic: check for question words or topic-changing phrases
+    let topic_change_indicators = [
+        "let's talk about",
+        "change topic",
+        "different question",
+        "another topic",
+        "switching gears",
+        "moving on to",
+        "now about",
+        "new question",
+        "unrelated",
+    ];
+    
+    let lower_message = new_message.to_lowercase();
+    let lower_title = current_title.to_lowercase();
+    
+    // Check for explicit topic change indicators
+    for indicator in &topic_change_indicators {
+        if lower_message.contains(indicator) {
+            return true;
+        }
+    }
+    
+    // Check if the message is a completely different question (starts with question word)
+    let question_words = ["what", "how", "why", "when", "where", "who", "which", "can you", "could you", "would you"];
+    let starts_with_question = question_words.iter().any(|&word| lower_message.starts_with(word));
+    
+    // If it's a new question and doesn't contain key words from the title, likely a topic change
+    if starts_with_question {
+        // Extract key words from title (words longer than 3 chars)
+        let title_keywords: Vec<String> = lower_title
+            .split_whitespace()
+            .filter(|w| w.len() > 3)
+            .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()).to_string())
+            .collect();
+        
+        // Check if any title keywords appear in the new message
+        let has_common_keywords = title_keywords.iter()
+            .any(|keyword| lower_message.contains(keyword));
+        
+        return !has_common_keywords;
+    }
+    
+    false
 }
 
 // Helper function to save message to database
@@ -119,9 +214,10 @@ pub async fn handle_chat_stream(
     let chat_request: ChatRequest = req.parse_json().await
         .map_err(|_| AppError::BadRequest("Invalid request body".to_string()))?;
 
-    let _last_message = chat_request.messages.last()
-        .ok_or_else(|| AppError::BadRequest("No messages provided".to_string()))?
-        .clone();
+    // Validate that messages are provided
+    if chat_request.messages.is_empty() {
+        return Err(AppError::BadRequest("No messages provided".to_string()));
+    }
 
     // Determine conversation ID
     // Treat "new" as if no conversation_id was provided
@@ -138,8 +234,18 @@ pub async fn handle_chat_stream(
         Some(id) => id.to_string(),
     };
 
-    // Ensure conversation exists
-    ensure_conversation(&state.db_pool, &conversation_id, &chat_request.project_id).await?;
+    // Get the first user message content for title generation
+    let first_user_message = chat_request.messages.iter()
+        .find(|m| m.role == MessageRole::User)
+        .map(|m| m.content.as_str());
+    
+    // Ensure conversation exists and check if it's new
+    let is_new_conversation = ensure_conversation(
+        &state.db_pool, 
+        &conversation_id, 
+        &chat_request.project_id,
+        first_user_message
+    ).await?;
 
     // Get the first active client from the database
     let client_row = sqlx::query(
@@ -207,8 +313,56 @@ pub async fn handle_chat_stream(
                 created_at: Some(Utc::now().to_rfc3339()),
                 clay_tools_used: None,
                 processing_time_ms: None,
+                file_attachments: None,
             };
             save_message(&state.db_pool, &conversation_id, &user_msg_with_id).await?;
+            
+            // Check conversation state for title updates (only if not a new conversation)
+            if !is_new_conversation {
+                let conv_info = sqlx::query_as::<_, (Option<String>, Option<bool>, i32)>(
+                    "SELECT title, is_title_manually_set, message_count FROM conversations WHERE id = $1"
+                )
+                .bind(&conversation_id)
+                .fetch_one(&state.db_pool)
+                .await
+                .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
+                
+                let (current_title, is_manually_set, message_count) = conv_info;
+                let is_manually_set = is_manually_set.unwrap_or(false);
+                
+                // Only update title if it wasn't manually set
+                if !is_manually_set {
+                    let should_update = if let Some(ref title) = current_title {
+                        // Check if it's still a placeholder or topic has changed
+                        if title == "Untitled conversation" || title.is_empty() {
+                            true
+                        } else {
+                            has_topic_changed(title, &last_msg.content, message_count)
+                        }
+                    } else {
+                        true // No title yet
+                    };
+                    
+                    if should_update {
+                        let new_title = generate_title_from_message(&last_msg.content);
+                        sqlx::query(
+                            "UPDATE conversations SET title = $1, updated_at = $2 WHERE id = $3"
+                        )
+                        .bind(&new_title)
+                        .bind(Utc::now())
+                        .bind(&conversation_id)
+                        .execute(&state.db_pool)
+                        .await
+                        .map_err(|e| AppError::InternalServerError(format!("Failed to update conversation title: {}", e)))?;
+                        
+                        tracing::info!("Updated conversation {} title from '{}' to: '{}' (topic change detected)", 
+                            conversation_id, 
+                            current_title.unwrap_or_else(|| "None".to_string()),
+                            new_title
+                        );
+                    }
+                }
+            }
         }
         
         // Add the new message to conversation context
@@ -318,7 +472,7 @@ pub async fn handle_chat_stream(
                         }
                         ClaudeMessage::Result { result } => {
                             // If we get an explicit result, use it instead of accumulated
-                            tracing::info!("Received Result message with content: {}", result);
+                            tracing::debug!("Received Result message with content: {}", result);
                             assistant_content = result.clone();
                             accumulated_text.clear();
                             
@@ -357,6 +511,7 @@ pub async fn handle_chat_stream(
                         created_at: Some(Utc::now().to_rfc3339()),
                         clay_tools_used: if tools_used.is_empty() { None } else { Some(tools_used.clone()) },
                         processing_time_ms: Some(processing_time_ms),
+                        file_attachments: None,
                     };
                     
                     tracing::info!("Saving assistant message to database - ID: {}, Content length: {}", 

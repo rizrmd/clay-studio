@@ -1,9 +1,11 @@
 import { useAuth } from "@/contexts/AuthContext";
-import { StepProgressCard } from "@/components/setup/step-progress-card";
-import { ClientCreateForm } from "@/components/setup/client-create-form";
-import { ClaudeSetupStep } from "@/components/setup/claude-setup-step";
-import { SetupCompleteStep } from "@/components/setup/setup-complete-step";
-import { CreateFirstUserStep } from "@/components/setup/create-first-user-step";
+import { 
+  StepProgressCard,
+  ClientCreateForm,
+  ClaudeSetupStep,
+  SetupCompleteStep,
+  CreateFirstUserStep
+} from "@/components/setup";
 import { useClaudeSetup } from "@/hooks/use-claude-setup";
 
 export function SetupPage() {

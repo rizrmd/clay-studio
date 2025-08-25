@@ -67,7 +67,7 @@ export function ClientSetup({ onClientAdded }: ClientSetupProps = {}) {
       const response = await axios.get('/clients')
       setClients(response.data)
     } catch (error) {
-      console.error('Failed to load clients:', error)
+      // Failed to load clients
     }
   }
 
@@ -121,7 +121,7 @@ export function ClientSetup({ onClientAdded }: ClientSetupProps = {}) {
       setIsDialogOpen(false)
       setEditingClient(null)
     } catch (error: any) {
-      console.error('Failed to save client:', error)
+      // Failed to save client
       // You could add error handling/toast here
     } finally {
       setIsLoading(false)
@@ -168,14 +168,12 @@ export function ClientSetup({ onClientAdded }: ClientSetupProps = {}) {
       }
       
       eventSource.onerror = (error) => {
-        console.error('EventSource failed:', error)
         setTokenSetupStep("error")
         setStreamOutput(prev => [...prev, "Connection error occurred"])
         eventSource.close()
       }
       
     } catch (error) {
-      console.error('Failed to start token setup stream:', error)
       setTokenSetupStep("error")
       setIsSettingUpToken(false)
     }
@@ -207,7 +205,7 @@ export function ClientSetup({ onClientAdded }: ClientSetupProps = {}) {
       await axios.delete(`/clients/${id}`)
       setClients(prev => prev.filter(c => c.id !== id))
     } catch (error) {
-      console.error('Failed to delete client:', error)
+      // Failed to delete client
     }
   }
 

@@ -1,0 +1,1 @@
+export { MultimodalInput } from './multimodal-input'

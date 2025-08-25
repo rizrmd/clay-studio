@@ -20,8 +20,8 @@ pub async fn get_conversation_context(
         .ok_or(AppError::BadRequest("Missing conversation_id".to_string()))?;
 
     // Fetch conversation from database
-    let conversation = sqlx::query_as::<_, (String, String, Option<String>, i32)>(
-        "SELECT id, project_id, title, message_count FROM conversations WHERE id = $1"
+    let conversation = sqlx::query_as::<_, (String, String, Option<String>, i32, Option<bool>)>(
+        "SELECT id, project_id, title, message_count, is_title_manually_set FROM conversations WHERE id = $1"
     )
     .bind(&conversation_id)
     .fetch_optional(&state.db_pool)
@@ -142,7 +142,7 @@ pub async fn list_conversations(
     // Build query based on filters
     let conversations = if let Some(pid) = project_id {
         sqlx::query(
-            "SELECT id, project_id, title, message_count, created_at, updated_at 
+            "SELECT id, project_id, title, message_count, created_at, updated_at, is_title_manually_set 
              FROM conversations 
              WHERE project_id = $1 
              ORDER BY updated_at DESC 
@@ -153,7 +153,7 @@ pub async fn list_conversations(
         .await
     } else {
         sqlx::query(
-            "SELECT id, project_id, title, message_count, created_at, updated_at 
+            "SELECT id, project_id, title, message_count, created_at, updated_at, is_title_manually_set 
              FROM conversations 
              ORDER BY updated_at DESC 
              LIMIT 100"
@@ -172,6 +172,7 @@ pub async fn list_conversations(
             created_at: row.get("created_at"),
             updated_at: row.get("updated_at"),
             message_count: row.get("message_count"),
+            is_title_manually_set: row.get("is_title_manually_set"),
         });
     }
 
@@ -190,7 +191,7 @@ pub async fn get_conversation(
         .ok_or(AppError::BadRequest("Missing conversation_id".to_string()))?;
     
     let conversation = sqlx::query(
-        "SELECT id, project_id, title, message_count, created_at, updated_at 
+        "SELECT id, project_id, title, message_count, created_at, updated_at, is_title_manually_set 
          FROM conversations 
          WHERE id = $1"
     )
@@ -207,6 +208,7 @@ pub async fn get_conversation(
         created_at: conversation.get("created_at"),
         updated_at: conversation.get("updated_at"),
         message_count: conversation.get("message_count"),
+        is_title_manually_set: conversation.get("is_title_manually_set"),
     };
 
     res.render(Json(conversation));
@@ -232,17 +234,26 @@ pub async fn create_conversation(
     let conversation_id = Uuid::new_v4().to_string();
     let now = Utc::now();
     
+    // Use provided title or None (will be set from first message)
+    let title = create_req.title.as_ref()
+        .filter(|t| !t.trim().is_empty())
+        .cloned();
+    
+    // If title is explicitly provided, mark it as manually set
+    let is_manually_set = title.is_some();
+    
     // Insert into database
     sqlx::query(
-        "INSERT INTO conversations (id, project_id, title, message_count, created_at, updated_at) 
-         VALUES ($1, $2, $3, $4, $5, $6)"
+        "INSERT INTO conversations (id, project_id, title, message_count, created_at, updated_at, is_title_manually_set) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7)"
     )
     .bind(&conversation_id)
     .bind(&create_req.project_id)
-    .bind(&create_req.title)
+    .bind(&title)
     .bind(0i32)
-    .bind(&now)
-    .bind(&now)
+    .bind(now)
+    .bind(now)
+    .bind(is_manually_set)
     .execute(&state.db_pool)
     .await
     .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
@@ -250,10 +261,11 @@ pub async fn create_conversation(
     let conversation = Conversation {
         id: conversation_id,
         project_id: create_req.project_id,
-        title: create_req.title,
+        title,
         created_at: now,
         updated_at: now,
         message_count: 0,
+        is_title_manually_set: Some(is_manually_set),
     };
 
     res.render(Json(conversation));
@@ -280,22 +292,32 @@ pub async fn update_conversation(
     
     let now = Utc::now();
     
-    // Update in database
-    sqlx::query(
-        "UPDATE conversations 
-         SET title = COALESCE($1, title), updated_at = $2 
-         WHERE id = $3"
-    )
-    .bind(&update_req.title)
-    .bind(&now)
-    .bind(&conversation_id)
+    // Update in database and mark as manually set if title is provided
+    if update_req.title.is_some() {
+        sqlx::query(
+            "UPDATE conversations 
+             SET title = $1, is_title_manually_set = true, updated_at = $2 
+             WHERE id = $3"
+        )
+        .bind(&update_req.title)
+        .bind(now)
+        .bind(&conversation_id)
+    } else {
+        sqlx::query(
+            "UPDATE conversations 
+             SET updated_at = $1 
+             WHERE id = $2"
+        )
+        .bind(now)
+        .bind(&conversation_id)
+    }
     .execute(&state.db_pool)
     .await
     .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
     
     // Fetch updated conversation
     let updated = sqlx::query(
-        "SELECT id, project_id, title, message_count, created_at, updated_at 
+        "SELECT id, project_id, title, message_count, created_at, updated_at, is_title_manually_set 
          FROM conversations WHERE id = $1"
     )
     .bind(&conversation_id)
@@ -310,6 +332,7 @@ pub async fn update_conversation(
         created_at: updated.get("created_at"),
         updated_at: updated.get("updated_at"),
         message_count: updated.get("message_count"),
+        is_title_manually_set: updated.get("is_title_manually_set"),
     };
 
     res.render(Json(conversation));
