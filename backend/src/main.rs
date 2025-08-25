@@ -1,22 +1,17 @@
-mod config;
-mod db;
-mod error;
-mod handlers;
+mod core;
+mod utils;
+mod api;
 mod models;
-mod state;
-mod middleware;
-mod claude;
 
 use salvo::prelude::*;
 use salvo::serve_static::StaticDir;
 use salvo::session::SessionHandler;
-use salvo_session::MemoryStore;
 use dotenv::dotenv;
 
-use crate::config::Config;
-use crate::state::AppState;
-use crate::handlers::{auth, chat, clients, conversations, projects};
-use crate::middleware::{inject_state, auth::auth_required};
+use crate::utils::{Config, AppState};
+use crate::api::{auth, chat, clients, conversations, conversations_forget, projects, upload};
+use crate::utils::middleware::{inject_state, auth::auth_required};
+use crate::core::sessions::PostgresSessionStore;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -48,10 +43,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         session_secret
     };
     
+    // Use PostgreSQL session store for persistence
+    let postgres_store = PostgresSessionStore::new(state.db.clone());
+    
     let session_handler = SessionHandler::builder(
-        MemoryStore::new(),
+        postgres_store,
         session_key.as_bytes(),
     )
+    .cookie_name("clay_session")
+    .cookie_path("/")
+    .same_site_policy(salvo::http::cookie::SameSite::Lax)
     .build()
     .unwrap();
 
@@ -64,25 +65,56 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Protected routes (auth required)
     let protected_router = Router::new()
         .hoop(auth_required)
-        .push(Router::with_path("/chat").post(chat::handle_chat))
+        .push(Router::with_path("/chat/stream").post(chat::handle_chat_stream))
         .push(
-            Router::with_path("/conversations/<conversation_id>/context")
+            Router::with_path("/projects")
+                .get(projects::list_projects)
+                .post(projects::create_project)
+        )
+        .push(
+            Router::with_path("/projects/{project_id}/context")
+                .get(projects::get_project_context)
+        )
+        .push(
+            Router::with_path("/projects/{project_id}/queries")
+                .get(projects::list_queries)
+                .post(projects::save_query)
+        )
+        // Conversation routes - more specific paths first
+        .push(
+            Router::with_path("/conversations/{conversation_id}/messages")
+                .get(conversations::get_conversation_messages)
+        )
+        .push(
+            Router::with_path("/conversations/{conversation_id}/forget-after")
+                .put(conversations_forget::forget_messages_after)
+                .delete(conversations_forget::restore_forgotten_messages)
+                .get(conversations_forget::get_forgotten_status)
+        )
+        .push(
+            Router::with_path("/conversations/{conversation_id}/context")
                 .get(conversations::get_conversation_context)
         )
         .push(
-            Router::with_path("/projects/<project_id>/context")
-                .get(projects::get_project_context)
+            Router::with_path("/conversations/{conversation_id}")
+                .get(conversations::get_conversation)
+                .put(conversations::update_conversation)
+                .delete(conversations::delete_conversation)
         )
         .push(
             Router::with_path("/conversations")
                 .get(conversations::list_conversations)
                 .post(conversations::create_conversation)
         )
+        .push(Router::with_path("/upload").post(upload::handle_file_upload))
+        .push(Router::with_path("/uploads").get(upload::handle_list_uploads))
         .push(
-            Router::with_path("/conversations/<conversation_id>")
-                .get(conversations::get_conversation)
-                .put(conversations::update_conversation)
-                .delete(conversations::delete_conversation)
+            Router::with_path("/uploads/{file_id}/description")
+                .put(upload::handle_update_file_description)
+        )
+        .push(
+            Router::with_path("/uploads/{client_id}/{project_id}/{file_name}")
+                .get(upload::handle_file_download)
         )
 ;
 

@@ -15,5 +15,8 @@
   ],
   "peerDependencies": {
     "typescript": "^5"
+  },
+  "dependencies": {
+    "playwright": "^1.55.0"
   }
 }

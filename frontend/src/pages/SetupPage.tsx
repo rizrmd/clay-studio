@@ -1,10 +1,10 @@
 import { useAuth } from "@/contexts/AuthContext";
-import { StepProgressCard } from "@/components/setup/StepProgressCard";
-import { ClientCreateForm } from "@/components/setup/ClientCreateForm";
-import { ClaudeSetupStep } from "@/components/setup/ClaudeSetupStep";
-import { SetupCompleteStep } from "@/components/setup/SetupCompleteStep";
-import { CreateFirstUserStep } from "@/components/setup/CreateFirstUserStep";
-import { useClaudeSetup } from "@/hooks/useClaudeSetup";
+import { StepProgressCard } from "@/components/setup/step-progress-card";
+import { ClientCreateForm } from "@/components/setup/client-create-form";
+import { ClaudeSetupStep } from "@/components/setup/claude-setup-step";
+import { SetupCompleteStep } from "@/components/setup/setup-complete-step";
+import { CreateFirstUserStep } from "@/components/setup/create-first-user-step";
+import { useClaudeSetup } from "@/hooks/use-claude-setup";
 
 export function SetupPage() {
   const { user, firstClient, needsInitialSetup } = useAuth();
@@ -25,7 +25,7 @@ export function SetupPage() {
   // 0: Create client
   // 1: Claude setup
   // 2: Create first user
-  // 3: Complete
+  // 3: Complete (but since isSetupComplete now requires projects, this won't be reached)
   const currentStep = !firstClient
     ? 0
     : firstClient.status !== "active"

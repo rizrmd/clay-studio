@@ -33,10 +33,17 @@ RUN apt-get update && \
 COPY --from=backend-builder /app/target/release/clay-studio-backend /app/clay-studio-backend
 COPY --from=frontend-builder /app/dist /app/frontend/dist
 
+# Create .clients directory for client data
+RUN mkdir -p /app/.clients && chmod 755 /app/.clients
+
 # Set environment variables
 ENV RUST_LOG=info
 ENV PORT=7680
 ENV STATIC_FILES_PATH=/app/frontend/dist
+ENV CLIENTS_DIR=/app/.clients
+
+# Declare volume for persistent client data
+VOLUME ["/app/.clients"]
 
 # Expose the backend port
 EXPOSE 7680

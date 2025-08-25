@@ -1,12 +1,25 @@
 import { useState, useEffect } from 'react'
-import { LoginForm } from '@/components/auth/LoginForm'
-import { RegisterForm } from '@/components/auth/RegisterForm'
+import { LoginForm } from '@/components/auth/login-form'
+import { RegisterForm } from '@/components/auth/register-form'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useAuth } from '@/contexts/AuthContext'
+import { Navigate } from 'react-router-dom'
 
 export function AuthPage() {
   const [activeTab, setActiveTab] = useState<'login' | 'register'>('login')
-  const { registrationEnabled, firstClient } = useAuth()
+  const { registrationEnabled, firstClient, isAuthenticated, isSetupComplete } = useAuth()
+
+  // If user is already authenticated, redirect them
+  if (isAuthenticated) {
+    // If setup is complete, go to projects
+    if (isSetupComplete) {
+      return <Navigate to="/projects" replace />
+    } else {
+      // If setup is not complete (no projects), still go to projects page
+      // where they can create their first project
+      return <Navigate to="/projects" replace />
+    }
+  }
 
   // If registration is disabled, always show login tab
   useEffect(() => {

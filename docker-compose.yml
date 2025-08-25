@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  clay-studio:
+    build: .
+    image: clay-studio:latest
+    container_name: clay-studio
+    ports:
+      - "7680:7680"
+    environment:
+      - RUST_LOG=info
+      - PORT=7680
+      - STATIC_FILES_PATH=/app/frontend/dist
+      - CLIENTS_DIR=/app/.clients
+      # Add your database and other environment variables here
+      # - DATABASE_URL=your_database_url
+      # - JWT_SECRET=your_jwt_secret
+    volumes:
+      # Named volume for persistent client data
+      - clay-clients:/app/.clients
+      # Optional: Mount local .env file if needed
+      # - ./.env:/app/.env:ro
+    restart: unless-stopped
+    networks:
+      - clay-network
+
+volumes:
+  clay-clients:
+    name: clay-studio-clients
+    driver: local
+
+networks:
+  clay-network:
+    name: clay-studio-network
+    driver: bridge

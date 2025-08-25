@@ -58,14 +58,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const initializeApp = async () => {
     try {
-      // Run both checks in parallel
-      const [, clientData] = await Promise.all([
-        checkAuthStatus(),
-        fetchFirstClient()
-      ])
+      // First fetch the client data
+      const clientData = await fetchFirstClient()
       
-      // After fetching client, check if users exist (only if client is active)
-      if (clientData?.status === 'active' && clientData?.id) {
+      // Then check auth status (this needs the client to be set for proper context)
+      const userData = await checkAuthStatus()
+      
+      // After fetching client, check if users exist (only if client is active and no user is logged in)
+      if (!userData && clientData?.status === 'active' && clientData?.id) {
         await checkUsersExist(clientData.id)
       }
     } finally {
@@ -75,12 +75,19 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const checkAuthStatus = async () => {
     try {
-      const response = await axios.get('/api/auth/me')
+      const response = await axios.get('/auth/me')
+      console.log('Auth check successful:', response.data)
       setUser(response.data.user)
       setIsSetupComplete(response.data.is_setup_complete)
-    } catch (error) {
+      return response.data.user
+    } catch (error: any) {
+      // Only log if it's not a 401 (which is expected when no user is logged in)
+      if (error.response?.status !== 401) {
+        console.error('Auth check failed:', error)
+      }
       setUser(null)
       setIsSetupComplete(false)
+      return null
     }
   }
 
@@ -88,7 +95,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try {
       // First try to get all clients (including incomplete ones)
       // This endpoint should work even when not authenticated
-      const response = await axios.get('/api/clients')
+      const response = await axios.get('/clients')
       console.log('Fetched clients:', response.data)
       if (response.data && response.data.length > 0) {
         const client = response.data[0]
@@ -96,6 +103,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
         console.log('Client status:', client.status)
         console.log('Client has status field:', 'status' in client)
         setFirstClient(client)
+        // Store the active client ID in localStorage for file uploads
+        if (client.id) {
+          localStorage.setItem('activeClientId', client.id)
+        }
         // Only need initial setup if no clients exist at all
         setNeedsInitialSetup(false)
         return client // Return client for further processing
@@ -117,7 +128,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const checkUsersExist = async (clientId: string) => {
     try {
-      const response = await axios.get('/api/auth/users/exists', {
+      const response = await axios.get('/auth/users/exists', {
         params: { client_id: clientId }
       })
       const usersExist = response.data.users_exist
@@ -135,7 +146,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     if (!firstClient) return
     
     try {
-      const response = await axios.get('/api/auth/registration-status', {
+      const response = await axios.get('/auth/registration-status', {
         params: { client_id: firstClient.id }
       })
       setRegistrationEnabled(response.data.registration_enabled)
@@ -153,14 +164,25 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
     
     try {
-      const response = await axios.post('/api/auth/login', {
+      const response = await axios.post('/auth/login', {
         client_id: firstClient.id,
         username,
         password,
       })
       setUser(response.data.user)
-      // After login, check if setup is complete
-      await checkAuthStatus()
+      
+      // After login, fetch the complete auth status including isSetupComplete
+      // Use a small delay to ensure session cookie is set
+      await new Promise(resolve => setTimeout(resolve, 100))
+      
+      try {
+        const meResponse = await axios.get('/auth/me')
+        setIsSetupComplete(meResponse.data.is_setup_complete)
+      } catch (error) {
+        // If we can't get the setup status, assume it's not complete
+        // This is safer than assuming it's complete
+        setIsSetupComplete(false)
+      }
     } catch (error: any) {
       if (error.response?.data?.error) {
         throw new Error(error.response.data.error)
@@ -175,15 +197,26 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
     
     try {
-      const response = await axios.post('/api/auth/register', {
+      const response = await axios.post('/auth/register', {
         client_id: firstClient.id,
         username,
         password,
         invite_code: inviteCode,
       })
       setUser(response.data.user)
-      // After registration, check setup status
-      await checkAuthStatus()
+      
+      // After registration, fetch the complete auth status including isSetupComplete
+      // Use a small delay to ensure session cookie is set
+      await new Promise(resolve => setTimeout(resolve, 100))
+      
+      try {
+        const meResponse = await axios.get('/auth/me')
+        setIsSetupComplete(meResponse.data.is_setup_complete)
+      } catch (error) {
+        // If we can't get the setup status, assume it's not complete
+        // This is safer than assuming it's complete
+        setIsSetupComplete(false)
+      }
     } catch (error: any) {
       if (error.response?.data?.error) {
         throw new Error(error.response.data.error)
@@ -194,7 +227,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const logout = async () => {
     try {
-      await axios.post('/api/auth/logout')
+      await axios.post('/auth/logout')
     } catch (error) {
       console.error('Logout error:', error)
     } finally {
