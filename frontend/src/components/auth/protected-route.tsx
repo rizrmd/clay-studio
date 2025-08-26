@@ -1,4 +1,4 @@
-import { useAuth } from '@/contexts/AuthContext'
+import { useValtioAuth } from '@/hooks/use-valtio-auth'
 import { AuthPage } from '@/pages/AuthPage'
 import { ClientSetup } from '@/components/setup/client-setup'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -10,7 +10,7 @@ interface ProtectedRouteProps {
 }
 
 export function ProtectedRoute({ children, fallback, requireSetup = true }: ProtectedRouteProps) {
-  const { isAuthenticated, loading, isSetupComplete } = useAuth()
+  const { isAuthenticated, loading, isSetupComplete } = useValtioAuth()
 
   if (loading) {
     return fallback || <LoadingFallback />

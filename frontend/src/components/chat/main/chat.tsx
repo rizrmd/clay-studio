@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Messages } from "../display";
 import { MultimodalInput } from "../input/multimodal-input";
-import { useClayChat } from "@/hooks/use-clay-chat";
+import { useValtioChat } from "@/hooks/use-valtio-chat";
+import { useInputState } from "@/hooks/use-input-state";
 import { FileText } from "lucide-react";
 
 interface ChatProps {
@@ -14,15 +15,13 @@ export function Chat({
   projectId,
   conversationId: propConversationId,
 }: ChatProps) {
-  const [input, setInput] = useState("");
   const [isDraggingOver, setIsDraggingOver] = useState(false);
-  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [shouldFocusInput, setShouldFocusInput] = useState(false);
   const dragCounter = useRef(0);
   const navigate = useNavigate();
   const previousPropConversationId = useRef(propConversationId);
 
-  // Use conversation ID from props
+  // Use the new Valtio-based chat hook
   const {
     messages,
     sendMessage,
@@ -38,7 +37,15 @@ export function Chat({
     uploadedFiles,
     hasForgottenMessages,
     forgottenCount,
-  } = useClayChat(projectId || "", propConversationId);
+  } = useValtioChat(projectId || "", propConversationId);
+
+  // Use the input state hook to persist input across conversation switches
+  const {
+    draftMessage: input,
+    setDraftMessage: setInput,
+    attachments: pendingFiles,
+    setAttachments: setPendingFiles,
+  } = useInputState(propConversationId || "new");
 
   // Handle navigation when a new conversation is created
   useEffect(() => {
@@ -123,7 +130,7 @@ export function Chat({
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const droppedFiles = Array.from(e.dataTransfer.files);
 
-      setPendingFiles((prev) => [...prev, ...droppedFiles]);
+      setPendingFiles([...pendingFiles, ...droppedFiles]);
       e.dataTransfer.clearData();
     }
   };
@@ -134,20 +141,6 @@ export function Chat({
 
   return (
     <>
-      {/* Forgotten messages indicator */}
-      {hasForgottenMessages && (
-        <div className="fixed top-5 w-[800px] z-10 mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 flex items-center justify-between">
-          <p className="text-sm text-amber-800">
-            {forgottenCount} message{forgottenCount !== 1 ? "s" : ""} hidden
-          </p>
-          <button
-            onClick={restoreForgottenMessages}
-            className="text-sm px-3 py-1 bg-amber-600 text-white rounded hover:bg-amber-700 transition-colors"
-          >
-            Restore All
-          </button>
-        </div>
-      )}
       <div
         className="group w-full overflow-auto pl-0 peer-[[data-state=open]]:lg:pl-[250px] peer-[[data-state=open]]:xl:pl-[300px] relative"
         onDragEnter={handleContainerDragEnter}
@@ -155,6 +148,21 @@ export function Chat({
         onDragOver={handleContainerDragOver}
         onDrop={handleContainerDrop}
       >
+        {hasForgottenMessages && (
+          <div className="absolute left-0 right-0 bg-white pt-5 top-0 w-full z-10 ">
+            <div className="flex max-w-[44rem] mx-auto mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3  items-center justify-between">
+              <p className="text-sm text-amber-800">
+                {forgottenCount} message{forgottenCount !== 1 ? "s" : ""} forgotten.
+              </p>
+              <button
+                onClick={restoreForgottenMessages}
+                className="text-sm px-3 py-1 bg-amber-600 text-white rounded hover:bg-amber-700 transition-colors"
+              >
+                Restore All
+              </button>
+            </div>
+          </div>
+        )}
         {/* Full-screen drop zone overlay */}
         {isDraggingOver && (
           <div className="fixed inset-0 z-40 bg-primary/10 backdrop-blur-sm flex items-center justify-center pointer-events-none">
@@ -170,8 +178,8 @@ export function Chat({
           </div>
         )}
 
-        <div className="pb-[200px] pt-4 md:pt-10">
-          <div className="mx-auto max-w-2xl px-4">
+        <div style={{ height: "100vh" }}>
+          <div className="h-full flex flex-col">
             {/* Error display */}
             {error && (
               <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-4 text-red-800">
@@ -206,28 +214,37 @@ export function Chat({
                 </p>
               </div>
             ) : isLoadingMessages ? (
-              <div className="text-center py-12">
+              <div className="text-center py-12 mt-20">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
                 <p className="text-sm text-muted-foreground">
                   Loading conversation...
                 </p>
               </div>
             ) : (
-              <Messages
-                messages={messages.map((msg) => ({
-                  ...msg,
-                  createdAt: msg.createdAt
-                    ? new Date(msg.createdAt)
-                    : new Date(),
-                }))}
-                isLoading={isLoading}
-                onForgetFrom={forgetMessagesFrom}
-              />
+              <div className="flex-1 overflow-hidden">
+                <Messages
+                  messages={messages.map((msg) => ({
+                    ...msg,
+                    createdAt: msg.createdAt
+                      ? new Date(msg.createdAt)
+                      : new Date(),
+                    clay_tools_used: msg.clay_tools_used
+                      ? [...msg.clay_tools_used]
+                      : undefined,
+                    file_attachments: msg.file_attachments
+                      ? [...msg.file_attachments]
+                      : undefined,
+                  }))}
+                  isLoading={isLoading}
+                  onForgetFrom={forgetMessagesFrom}
+                  conversationId={hookConversationId}
+                />
+              </div>
             )}
           </div>
         </div>
-        <div className="fixed inset-x-0 bottom-0 w-full bg-gradient-to-b from-muted/30 from-0% to-muted/30 to-50% duration-300 ease-in-out animate-in dark:from-background/10 dark:from-10% dark:to-background/80 peer-[[data-state=open]]:group-[]:lg:pl-[250px] peer-[[data-state=open]]:group-[]:xl:pl-[300px]">
-          <div className="mx-auto max-w-2xl px-4">
+        <div className="w-full absolute bottom-0 right-0">
+          <div className="mx-auto max-w-2xl px-4 ">
             <MultimodalInput
               input={input}
               setInput={setInput}
@@ -237,10 +254,11 @@ export function Chat({
               canStop={canStop}
               stop={stop}
               projectId={projectId}
-              uploadedFiles={uploadedFiles}
-              externalFiles={pendingFiles}
+              uploadedFiles={uploadedFiles ? [...uploadedFiles] : []}
+              externalFiles={pendingFiles ? [...pendingFiles] : []}
               onExternalFilesChange={setPendingFiles}
               shouldFocus={shouldFocusInput}
+              className={"-ml-2"}
             />
           </div>
         </div>

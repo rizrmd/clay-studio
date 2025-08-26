@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
-import { useAuth } from '@/contexts/AuthContext'
+import { useValtioAuth } from '@/hooks/use-valtio-auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
@@ -20,7 +20,7 @@ interface RegisterFormProps {
 }
 
 export function RegisterForm({ onSwitchToLogin }: RegisterFormProps) {
-  const { register, firstClient, requireInviteCode } = useAuth()
+  const { register, firstClient, requireInviteCode } = useValtioAuth()
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
 

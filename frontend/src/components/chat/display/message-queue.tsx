@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import type { QueuedMessage } from "@/hooks/use-clay-chat";
+import type { QueuedMessage } from "@/hooks/use-valtio-chat";
 
 interface MessageQueueProps {
   messageQueue: QueuedMessage[];

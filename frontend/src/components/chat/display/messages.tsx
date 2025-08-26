@@ -1,4 +1,6 @@
-import { useEffect, useRef, memo, useMemo, useState } from "react";
+import React, { useEffect, useRef, memo, useMemo, useState } from "react";
+import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
+import { css } from "goober";
 import {
   Bot,
   User,
@@ -6,6 +8,7 @@ import {
   Trash2,
   FileText,
   Download,
+  ArrowDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import ReactMarkdown from "react-markdown";
@@ -45,6 +48,7 @@ interface MessagesProps {
   messages: Message[];
   isLoading?: boolean;
   onForgetFrom?: (messageId: string) => void;
+  conversationId?: string; // Add conversationId to detect conversation switches
 }
 
 // Helper function to format file size
@@ -88,100 +92,143 @@ const MessageItem = memo(
     onForgetFrom?: (messageId: string) => void;
   }) => {
     return (
-      <div
-        className={cn(
-          "flex gap-3 max-w-2xl mb-6 relative group",
-          message.role === "user" ? "ml-auto flex-row-reverse" : "mr-auto"
-        )}
-      >
-        <div className="flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-md bg-muted">
-          {message.role === "user" ? (
-            <User className="h-4 w-4" />
-          ) : (
-            <Bot className="h-4 w-4" />
+      <div className="flex max-w-[45rem] mx-auto cursor-default">
+        <div
+          className={cn(
+            "flex flex-1 relative p-2",
+            css`
+              &:hover .option-menu {
+                opacity: 1;
+              }
+            `
           )}
-        </div>
-        <div className="flex flex-col gap-1 flex-1">
-          <div>
+        >
+          <div
+            className={cn(
+              "gap-3 flex flex-1 pr-[45px]",
+              message.role === "user" ? "justify-end" : "justify-start"
+            )}
+          >
+            {message.role !== "user" && (
+              <div className="flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-md bg-muted">
+                <Bot className="h-4 w-4" />
+              </div>
+            )}
             <div
               className={cn(
-                "rounded-lg p-3 text-sm",
-                message.role === "user"
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-muted"
+                "flex flex-col gap-1",
+                message.role === "user" ? "max-w-[70%]" : "max-w-[70%]"
               )}
             >
-              <div className="prose prose-sm max-w-none dark:prose-invert">
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
-                  rehypePlugins={[rehypeHighlight, rehypeRaw]}
+              <div>
+                <div
+                  className={cn(
+                    "rounded-lg p-3 text-sm",
+                    message.role === "user"
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted"
+                  )}
                 >
-                  {message.content}
-                </ReactMarkdown>
+                  <div
+                    className={cn(
+                      "prose prose-sm max-w-none dark:prose-invert whitespace-pre-wrap break-words",
+                      css`
+                        .language-md {
+                          font-size: 13px;
+                          white-space: pre-wrap;
+                        }
+                      `
+                    )}
+                  >
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      rehypePlugins={[rehypeHighlight, rehypeRaw]}
+                    >
+                      {message.content}
+                    </ReactMarkdown>
+                  </div>
+                </div>
+              </div>
+              {message.file_attachments &&
+                message.file_attachments.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {message.file_attachments.map((file) => (
+                      <Badge
+                        key={file.id}
+                        variant="outline"
+                        className="flex items-center gap-1 pr-1 cursor-pointer hover:bg-accent"
+                        onClick={() => handleDownloadFile(file)}
+                      >
+                        <FileText className="h-3 w-3" />
+                        <span className="max-w-[150px] truncate text-xs">
+                          {file.original_name}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          ({formatFileSize(file.file_size)})
+                        </span>
+                        <Download className="h-3 w-3 ml-1" />
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+              <div className="text-xs text-muted-foreground">
+                {message.createdAt.toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  hour12: false,
+                })}
               </div>
             </div>
+            {message.role === "user" && (
+              <div className="flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-md bg-primary text-primary-foreground">
+                <User className="h-4 w-4" />
+              </div>
+            )}
           </div>
-          {message.file_attachments && message.file_attachments.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-2">
-              {message.file_attachments.map((file) => (
-                <Badge
-                  key={file.id}
-                  variant="outline"
-                  className="flex items-center gap-1 pr-1 cursor-pointer hover:bg-accent"
-                  onClick={() => handleDownloadFile(file)}
-                >
-                  <FileText className="h-3 w-3" />
-                  <span className="max-w-[150px] truncate text-xs">
-                    {file.original_name}
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    ({formatFileSize(file.file_size)})
-                  </span>
-                  <Download className="h-3 w-3 ml-1" />
-                </Badge>
-              ))}
+          {onForgetFrom && (
+            <div
+              className={cn(
+                "absolute top-2 right-3 option-menu",
+                "opacity-0 hover:opacity-100 transition-opacity ml-2 "
+              )}
+            >
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-8 w-8 p-0">
+                    <MoreVertical className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    onClick={() => onForgetFrom(message.id)}
+                    className="text-destructive"
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Forget after this
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           )}
-          <div className="text-xs text-muted-foreground">
-            {message.createdAt.toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-              hour12: false,
-            })}
-          </div>
         </div>
-        {onForgetFrom && (
-          <div className="absolute -right-10 top-0 opacity-0 group-hover:opacity-100 transition-opacity">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                  <MoreVertical className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem
-                  onClick={() => onForgetFrom(message.id)}
-                  className="text-destructive"
-                >
-                  <Trash2 className="mr-2 h-4 w-4" />
-                  Forget after this
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        )}
       </div>
     );
   }
 );
 
-export function Messages({ messages, isLoading, onForgetFrom }: MessagesProps) {
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const [_visibleRange, _setVisibleRange] = useState({
-    start: 0,
-    end: messages.length,
-  });
+export function Messages({
+  messages,
+  isLoading,
+  onForgetFrom,
+  conversationId,
+}: MessagesProps) {
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [hasScrolledOnFirstLoad, setHasScrolledOnFirstLoad] = useState(false);
+  const previousConversationId = useRef(conversationId);
+  const [showNewMessageAlert, setShowNewMessageAlert] = useState(false);
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const previousMessageCount = useRef(messages.length);
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Fun thinking words to display while loading
   const thinkingWords = useMemo(
@@ -250,8 +297,8 @@ export function Messages({ messages, isLoading, onForgetFrom }: MessagesProps) {
     []
   );
 
-  const [thinkingWordIndex, setThinkingWordIndex] = useState(
-    () => Math.floor(Math.random() * thinkingWords.length)
+  const [thinkingWordIndex, setThinkingWordIndex] = useState(() =>
+    Math.floor(Math.random() * thinkingWords.length)
   );
 
   // Rotate thinking word every 3-5 seconds while loading
@@ -273,30 +320,107 @@ export function Messages({ messages, isLoading, onForgetFrom }: MessagesProps) {
     return () => clearInterval(interval);
   }, [isLoading, thinkingWords.length]);
 
-  // For performance with large message counts, only render recent messages
-  const visibleMessages = useMemo(() => {
-    if (messages.length <= 20) {
-      return messages; // Render all messages if count is reasonable
-    }
-
-    // For large lists, show last 15 messages + some buffer for scrolling
-    const startIndex = Math.max(0, messages.length - 20);
-    return messages.slice(startIndex);
-  }, [messages]);
-
+  // Cleanup scroll timeout on unmount
   useEffect(() => {
-    if (messages.length > 0 && !hasScrolledOnFirstLoad) {
-      // Instant scroll on first load
-      messagesEndRef.current?.scrollIntoView({ behavior: "instant" });
-      setHasScrolledOnFirstLoad(true);
-    } else if (hasScrolledOnFirstLoad) {
-      // Smooth scroll for subsequent updates
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    return () => {
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Combine messages with loading indicator
+  const allItems = useMemo(() => {
+    const items = [...messages];
+    if (isLoading) {
+      items.push({
+        id: "loading",
+        content: "",
+        role: "assistant" as const,
+        createdAt: new Date(),
+      });
     }
-  }, [messages, isLoading, hasScrolledOnFirstLoad]);
+    return items;
+  }, [messages, isLoading]);
+
+  // Utility function to scroll with debouncing
+  const smoothScrollToBottom = (delay = 0) => {
+    if (scrollTimeoutRef.current) {
+      clearTimeout(scrollTimeoutRef.current);
+    }
+    
+    scrollTimeoutRef.current = setTimeout(() => {
+      virtuosoRef.current?.scrollToIndex({
+        index: allItems.length - 1,
+        behavior: "smooth",
+        align: "end",
+      });
+      scrollTimeoutRef.current = null;
+    }, delay);
+  };
+
+  // Scroll to bottom on initial load only
+  useEffect(() => {
+    // Reset when conversation changes
+    if (conversationId !== previousConversationId.current) {
+      setHasScrolledOnFirstLoad(false);
+      setShowNewMessageAlert(false);
+      previousConversationId.current = conversationId;
+      previousMessageCount.current = messages.length;
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+        scrollTimeoutRef.current = null;
+      }
+    }
+
+    if (allItems.length > 0 && !hasScrolledOnFirstLoad) {
+      // Initial scroll to bottom - use requestAnimationFrame for better timing
+      requestAnimationFrame(() => {
+        virtuosoRef.current?.scrollToIndex({
+          index: allItems.length - 1,
+          behavior: "auto",
+          align: "end",
+        });
+        setHasScrolledOnFirstLoad(true);
+      });
+    }
+  }, [allItems.length, conversationId]);
+
+  // Handle new messages scrolling behavior
+  useEffect(() => {
+    if (
+      hasScrolledOnFirstLoad &&
+      messages.length > previousMessageCount.current
+    ) {
+      // New message received
+      const lastMessage = messages[messages.length - 1];
+
+      // Always scroll to bottom for user messages (when user sends a message)
+      if (lastMessage.role === "user") {
+        smoothScrollToBottom(50);
+        setShowNewMessageAlert(false);
+      }
+      // For assistant messages
+      else if (lastMessage.role === "assistant") {
+        if (isAtBottom) {
+          // Auto-scroll if user is at bottom
+          smoothScrollToBottom(50);
+        } else {
+          // Show alert if user has scrolled up
+          setShowNewMessageAlert(true);
+        }
+      }
+    }
+    previousMessageCount.current = messages.length;
+  }, [messages.length, isAtBottom, hasScrolledOnFirstLoad, allItems.length]);
+
+  const handleScrollToBottom = () => {
+    smoothScrollToBottom(0);
+    setShowNewMessageAlert(false);
+  };
 
   return (
-    <div className="flex flex-col flex-1">
+    <div className="flex flex-col h-full">
       {messages.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center text-center">
           <div className="flex h-20 w-20 items-center justify-center rounded-full bg-muted">
@@ -309,47 +433,92 @@ export function Messages({ messages, isLoading, onForgetFrom }: MessagesProps) {
           </p>
         </div>
       ) : (
-        <div className="flex flex-col gap-6 p-4">
-          {/* Show indicator if messages are truncated */}
-          {messages.length > 20 && (
-            <div className="text-center py-2 text-sm text-muted-foreground border-b border-muted">
-              Showing recent {visibleMessages.length} of {messages.length}{" "}
-              messages
-            </div>
-          )}
+        <div className="flex-1 relative">
+          <Virtuoso
+            ref={virtuosoRef}
+            data={allItems}
+            initialTopMostItemIndex={
+              allItems.length > 0 ? allItems.length - 1 : 0
+            }
+            atBottomStateChange={(atBottom) => {
+              setIsAtBottom(atBottom);
+              if (atBottom) {
+                setShowNewMessageAlert(false);
+              }
+            }}
+            atBottomThreshold={100}
+            overscan={50}
+            itemContent={(index, item) => {
+              // Add top padding for first item
+              const topPadding =
+                index === 0 ? <div style={{ height: "100px" }} /> : null;
+              // Add bottom padding for last item
+              const bottomPadding =
+                index === allItems.length - 1 ? (
+                  <div style={{ height: "200px" }} />
+                ) : null;
 
-          {visibleMessages.map((message) => (
-            <MessageItem
-              key={message.id}
-              message={message}
-              onForgetFrom={onForgetFrom}
-            />
-          ))}
-
-          {isLoading && (
-            <div className="flex gap-3 max-w-2xl mr-auto">
-              <div className="flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-md bg-muted">
-                <Bot className="h-4 w-4" />
-              </div>
-              <div className="flex flex-row gap-2 flex-1 items-center">
-                <div className="rounded-lg p-3 text-sm bg-muted">
-                  <div className="flex items-center space-x-2">
-                    <div className="flex items-center space-x-1">
-                      <div className="h-1 w-1 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.3s]"></div>
-                      <div className="h-1 w-1 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.15s]"></div>
-                      <div className="h-1 w-1 animate-bounce rounded-full bg-muted-foreground"></div>
+              // Loading indicator
+              if (item.id === "loading") {
+                return (
+                  <>
+                    {topPadding}
+                    <div className="flex max-w-[45rem] mx-auto cursor-default">
+                      <div className="flex flex-1 relative p-2 rounded-lg">
+                        <div className="flex gap-3 justify-start flex-1 pr-[45px]">
+                          <div className="flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-md bg-muted">
+                            <Bot className="h-4 w-4" />
+                          </div>
+                          <div className="flex flex-row gap-2 items-center max-w-[70%]">
+                            <div className="rounded-lg p-3 text-sm bg-muted whitespace-pre-wrap break-words">
+                              <div className="flex items-center space-x-2">
+                                <div className="flex items-center space-x-1">
+                                  <div className="h-1 w-1 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.3s]"></div>
+                                  <div className="h-1 w-1 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.15s]"></div>
+                                  <div className="h-1 w-1 animate-bounce rounded-full bg-muted-foreground"></div>
+                                </div>
+                              </div>
+                            </div>
+                            <span className="text-muted-foreground text-sm animate-pulse font-medium">
+                              {thinkingWords[thinkingWordIndex]}...
+                            </span>
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
-                <span className="text-muted-foreground text-sm animate-pulse font-medium">
-                  {thinkingWords[thinkingWordIndex]}
-                </span>
-              </div>
+                    {bottomPadding}
+                  </>
+                );
+              }
+
+              // Regular message
+              return (
+                <>
+                  {topPadding}
+                  <MessageItem message={item} onForgetFrom={onForgetFrom} />
+                  {bottomPadding}
+                </>
+              );
+            }}
+            followOutput={false}
+            className="flex-1"
+          />
+
+          {/* New message indicator */}
+          {showNewMessageAlert && (
+            <div className="absolute bottom-[60px] left-1/2 transform -translate-x-1/2 z-10">
+              <Button
+                onClick={handleScrollToBottom}
+                size="sm"
+                className="rounded-full shadow-lg animate-in fade-in slide-in-from-bottom-2 duration-300"
+              >
+                <ArrowDown className="h-4 w-4 mr-2" />
+                New message
+              </Button>
             </div>
           )}
         </div>
       )}
-      <div ref={messagesEndRef} />
     </div>
   );
 }

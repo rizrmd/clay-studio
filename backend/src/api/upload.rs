@@ -380,11 +380,10 @@ pub async fn handle_delete_upload(
     .ok_or_else(|| AppError::NotFound("File not found".to_string()))?;
     
     // Delete the physical file
-    if let Ok(path) = PathBuf::from_str(&file.file_path) {
-        if path.exists() {
-            if let Err(e) = fs::remove_file(&path).await {
-                tracing::warn!("Failed to delete physical file {}: {}", file.file_path, e);
-            }
+    let path = PathBuf::from_str(&file.file_path).unwrap();
+    if path.exists() {
+        if let Err(e) = fs::remove_file(&path).await {
+            tracing::warn!("Failed to delete physical file {}: {}", file.file_path, e);
         }
     }
     

@@ -1,4 +1,4 @@
-import { useAuth } from '@/contexts/AuthContext'
+import { useValtioAuth } from '@/hooks/use-valtio-auth'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -12,7 +12,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { LogOut, Settings, User } from 'lucide-react'
 
 export function UserMenu() {
-  const { user, logout, firstClient } = useAuth()
+  const { user, logout, firstClient } = useValtioAuth()
 
   if (!user) {
     return null

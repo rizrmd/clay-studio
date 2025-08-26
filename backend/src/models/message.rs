@@ -48,6 +48,7 @@ impl Message {
         }
     }
 
+    #[allow(dead_code)]
     pub fn with_files(mut self, files: Vec<FileUploadResponse>) -> Self {
         self.file_attachments = if files.is_empty() { None } else { Some(files) };
         self

@@ -6,14 +6,14 @@ import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { User, Lock, Loader2 } from 'lucide-react'
 import axios from '@/lib/axios'
-import { useAuth } from '@/contexts/AuthContext'
+import { useValtioAuth } from '@/hooks/use-valtio-auth'
 
 interface CreateFirstUserStepProps {
   onSuccess: () => void
 }
 
 export function CreateFirstUserStep({ onSuccess }: CreateFirstUserStepProps) {
-  const { firstClient } = useAuth()
+  const { firstClient } = useValtioAuth()
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
   const [formData, setFormData] = useState({

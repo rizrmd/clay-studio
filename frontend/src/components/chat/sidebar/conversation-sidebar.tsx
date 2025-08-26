@@ -29,7 +29,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { API_BASE_URL } from "@/lib/url";
 import { cn } from "@/lib/utils";
-import { useAuth } from "@/contexts/AuthContext";
+import { useValtioAuth } from "@/hooks/use-valtio-auth";
 import { ClaudeMdModal } from "./claude-md-modal";
 
 interface Conversation {
@@ -65,7 +65,7 @@ export function ConversationSidebar({
   const [renamingConversation, setRenamingConversation] = useState<Conversation | null>(null);
   const [newTitle, setNewTitle] = useState("");
   const [claudeMdModalOpen, setClaudeMdModalOpen] = useState(false);
-  const { isAuthenticated, isSetupComplete, user, logout } = useAuth();
+  const { isAuthenticated, isSetupComplete, user, logout } = useValtioAuth();
   const navigate = useNavigate();
 
   // Fetch conversations when projectId changes and user is authenticated

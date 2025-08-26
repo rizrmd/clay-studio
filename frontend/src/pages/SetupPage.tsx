@@ -1,4 +1,4 @@
-import { useAuth } from "@/contexts/AuthContext";
+import { useValtioAuth } from "@/hooks/use-valtio-auth";
 import { 
   StepProgressCard,
   ClientCreateForm,
@@ -9,7 +9,7 @@ import {
 import { useClaudeSetup } from "@/hooks/use-claude-setup";
 
 export function SetupPage() {
-  const { user, firstClient, needsInitialSetup } = useAuth();
+  const { user, firstClient, needsInitialSetup } = useValtioAuth();
   
   const {
     error,

@@ -489,33 +489,107 @@ impl McpHandlers {
         let source_type: String = source.get("source_type");
         let connection_config: Value = source.get("connection_config");
         
-        // For now, just verify the data source exists and has connection config
-        // In a real implementation, you would actually test the connection
-        if connection_config.is_object() && !connection_config.as_object().unwrap().is_empty() {
-            // Update last_tested_at
-            sqlx::query(
-                "UPDATE data_sources 
-                 SET last_tested_at = NOW() 
-                 WHERE id = $1"
-            )
-            .bind(datasource_id)
-            .execute(&self.db_pool)
-            .await
-            .map_err(|e| JsonRpcError {
-                code: INTERNAL_ERROR,
-                message: format!("Failed to update last_tested_at: {}", e),
-                data: None,
-            })?;
-            
-            Ok(format!(
-                "✅ Connection successful for '{}' ({} data source)",
-                name, source_type
-            ))
-        } else {
-            Ok(format!(
-                "⚠️ Connection config missing for '{}' ({} data source)",
-                name, source_type
-            ))
+        // Actually test the connection using the appropriate connector
+        match create_connector(&source_type, &connection_config).await {
+            Ok(connector) => {
+                // Try to test the actual connection
+                match connector.test_connection().await {
+                    Ok(true) => {
+                        // Connection successful - update last_tested_at and fetch schema
+                        sqlx::query(
+                            "UPDATE data_sources 
+                             SET last_tested_at = NOW(), is_active = true 
+                             WHERE id = $1"
+                        )
+                        .bind(datasource_id)
+                        .execute(&self.db_pool)
+                        .await
+                        .map_err(|e| JsonRpcError {
+                            code: INTERNAL_ERROR,
+                            message: format!("Failed to update data source status: {}", e),
+                            data: None,
+                        })?;
+                        
+                        // Try to fetch and update schema information
+                        let mut schema_info = String::new();
+                        if let Ok(schema) = connector.fetch_schema().await {
+                            // Update schema information in the database
+                            sqlx::query(
+                                "UPDATE data_sources 
+                                 SET schema_info = $1 
+                                 WHERE id = $2"
+                            )
+                            .bind(&schema)
+                            .bind(datasource_id)
+                            .execute(&self.db_pool)
+                            .await.ok();
+                            
+                            // Count tables for the success message
+                            if let Some(tables) = schema.get("tables").and_then(|t| t.as_object()) {
+                                schema_info = format!(" Found {} tables.", tables.len());
+                            }
+                        }
+                        
+                        // Try to fetch and update table list
+                        if let Ok(tables) = connector.list_tables().await {
+                            let table_list = json!(tables);
+                            sqlx::query(
+                                "UPDATE data_sources 
+                                 SET table_list = $1 
+                                 WHERE id = $2"
+                            )
+                            .bind(&table_list)
+                            .bind(datasource_id)
+                            .execute(&self.db_pool)
+                            .await.ok();
+                        }
+                        
+                        Ok(format!(
+                            "✅ Connection successful for '{}' ({} data source).{}",
+                            name, source_type, schema_info
+                        ))
+                    }
+                    Ok(false) => {
+                        // Connection failed - mark as inactive
+                        sqlx::query(
+                            "UPDATE data_sources 
+                             SET is_active = false 
+                             WHERE id = $1"
+                        )
+                        .bind(datasource_id)
+                        .execute(&self.db_pool)
+                        .await.ok();
+                        
+                        Ok(format!(
+                            "❌ Connection test returned false for '{}' ({} data source)",
+                            name, source_type
+                        ))
+                    }
+                    Err(e) => {
+                        // Connection error - mark as inactive
+                        sqlx::query(
+                            "UPDATE data_sources 
+                             SET is_active = false 
+                             WHERE id = $1"
+                        )
+                        .bind(datasource_id)
+                        .execute(&self.db_pool)
+                        .await.ok();
+                        
+                        Ok(format!(
+                            "❌ Connection failed for '{}' ({} data source): {}",
+                            name, source_type, e
+                        ))
+                    }
+                }
+            }
+            Err(e) => {
+                // Failed to create connector
+                Ok(format!(
+                    "❌ Failed to create connector for '{}' ({} data source): {}",
+                    name, source_type, e
+                ))
+            }
         }
     }
     async fn query_datasource(&self, args: &serde_json::Map<String, Value>) -> Result<String, JsonRpcError> {

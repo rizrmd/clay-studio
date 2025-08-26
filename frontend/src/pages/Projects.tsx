@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { Plus, FolderOpen, Calendar, ChevronRight, MessageSquare, Database, LogOut, Settings } from "lucide-react";
 import { API_BASE_URL } from "@/lib/url";
-import { useAuth } from "@/contexts/AuthContext";
+import { useValtioAuth } from "@/hooks/use-valtio-auth";
 
 interface Project {
   id: string;
@@ -21,7 +21,7 @@ export function ProjectsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
-  const { logout, user } = useAuth();
+  const { logout, user } = useValtioAuth();
 
   useEffect(() => {
     fetchProjects();

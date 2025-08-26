@@ -139,7 +139,7 @@ impl ClaudeSDK {
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped());
             
-            tracing::info!("Executing Claude CLI command: {:?}", cmd);
+            tracing::debug!("Executing Claude CLI command: {:?}", cmd);
             
             let mut cmd = cmd
                 .spawn()
@@ -241,7 +241,7 @@ impl ClaudeSDK {
                 _ => {}
             }
             
-            info!("Query completed for client {}", client_id);
+            tracing::debug!("Query completed for client {}", client_id);
         });
         
         Ok(rx)

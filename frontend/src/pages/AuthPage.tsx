@@ -2,12 +2,12 @@ import { useState, useEffect } from 'react'
 import { LoginForm } from '@/components/auth/login-form'
 import { RegisterForm } from '@/components/auth/register-form'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { useAuth } from '@/contexts/AuthContext'
+import { useValtioAuth } from '@/hooks/use-valtio-auth'
 import { Navigate } from 'react-router-dom'
 
 export function AuthPage() {
   const [activeTab, setActiveTab] = useState<'login' | 'register'>('login')
-  const { registrationEnabled, firstClient, isAuthenticated, isSetupComplete } = useAuth()
+  const { registrationEnabled, firstClient, isAuthenticated, isSetupComplete } = useValtioAuth()
 
   // If user is already authenticated, redirect them
   if (isAuthenticated) {

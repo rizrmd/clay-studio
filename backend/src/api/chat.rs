@@ -520,7 +520,7 @@ pub async fn handle_chat_stream(
                     if let Err(e) = save_message(&db_pool, &conversation_id_clone, &assistant_message).await {
                         tracing::error!("Failed to save assistant message: {}", e);
                     } else {
-                        tracing::info!("Successfully saved assistant message to database");
+                        tracing::debug!("Successfully saved assistant message to database");
                     }
                 } else {
                     tracing::warn!("Assistant content is empty, not saving to database");
