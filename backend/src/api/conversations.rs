@@ -45,8 +45,10 @@ pub async fn get_conversation_context(
 
     let mut message_list = Vec::new();
     for row in messages {
-        let role: String = row.get("role");
-        let content: String = row.get("content");
+        let role: String = row.try_get("role")
+            .map_err(|e| AppError::InternalServerError(format!("Failed to get role: {}", e)))?;
+        let content: String = row.try_get("content")
+            .map_err(|e| AppError::InternalServerError(format!("Failed to get content: {}", e)))?;
         let msg = match role.as_str() {
             "user" => Message::new_user(content),
             "assistant" => Message::new_assistant(content),
@@ -69,15 +71,22 @@ pub async fn get_conversation_context(
     let mut data_source_list = Vec::new();
     for row in data_sources {
         data_source_list.push(DataSourceContext {
-            id: row.get("id"),
-            name: row.get("name"),
-            source_type: row.get("source_type"),
-            connection_config: row.get("connection_config"),
-            schema_info: row.get("schema_info"),
-            preview_data: row.get("preview_data"),
-            table_list: row.get("table_list"),
-            last_tested_at: row.get("last_tested_at"),
-            is_active: row.get("is_active"),
+            id: row.try_get("id")
+                .map_err(|e| AppError::InternalServerError(format!("Failed to get id: {}", e)))?,
+            name: row.try_get("name")
+                .map_err(|e| AppError::InternalServerError(format!("Failed to get name: {}", e)))?,
+            source_type: row.try_get("source_type")
+                .map_err(|e| AppError::InternalServerError(format!("Failed to get source_type: {}", e)))?,
+            connection_config: row.try_get("connection_config")
+                .map_err(|e| AppError::InternalServerError(format!("Failed to get connection_config: {}", e)))?,
+            schema_info: row.try_get("schema_info").ok(),
+            preview_data: row.try_get("preview_data").ok(),
+            table_list: row.try_get("table_list").ok(),
+            last_tested_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("last_tested_at")
+                .map(|dt_opt| dt_opt.map(|dt| dt.to_rfc3339()))
+                .unwrap_or(None),
+            is_active: row.try_get("is_active")
+                .map_err(|e| AppError::InternalServerError(format!("Failed to get is_active: {}", e)))?,
         });
     }
 
@@ -166,13 +175,18 @@ pub async fn list_conversations(
     let mut conversation_list = Vec::new();
     for row in conversations {
         conversation_list.push(Conversation {
-            id: row.get("id"),
-            project_id: row.get("project_id"),
-            title: row.get("title"),
-            created_at: row.get("created_at"),
-            updated_at: row.get("updated_at"),
-            message_count: row.get("message_count"),
-            is_title_manually_set: row.get("is_title_manually_set"),
+            id: row.try_get("id")
+                .map_err(|e| AppError::InternalServerError(format!("Failed to get id: {}", e)))?,
+            project_id: row.try_get("project_id")
+                .map_err(|e| AppError::InternalServerError(format!("Failed to get project_id: {}", e)))?,
+            title: row.try_get("title").ok(),
+            created_at: row.try_get("created_at")
+                .map_err(|e| AppError::InternalServerError(format!("Failed to get created_at: {}", e)))?,
+            updated_at: row.try_get("updated_at")
+                .map_err(|e| AppError::InternalServerError(format!("Failed to get updated_at: {}", e)))?,
+            message_count: row.try_get("message_count")
+                .map_err(|e| AppError::InternalServerError(format!("Failed to get message_count: {}", e)))?,
+            is_title_manually_set: row.try_get("is_title_manually_set").ok(),
         });
     }
 
@@ -190,7 +204,7 @@ pub async fn get_conversation(
     let conversation_id = req.param::<String>("conversation_id")
         .ok_or(AppError::BadRequest("Missing conversation_id".to_string()))?;
     
-    let conversation = sqlx::query(
+    let conversation_row = sqlx::query(
         "SELECT id, project_id, title, message_count, created_at, updated_at, is_title_manually_set 
          FROM conversations 
          WHERE id = $1"
@@ -202,13 +216,18 @@ pub async fn get_conversation(
     .ok_or(AppError::NotFound(format!("Conversation {} not found", conversation_id)))?;
     
     let conversation = Conversation {
-        id: conversation.get("id"),
-        project_id: conversation.get("project_id"),
-        title: conversation.get("title"),
-        created_at: conversation.get("created_at"),
-        updated_at: conversation.get("updated_at"),
-        message_count: conversation.get("message_count"),
-        is_title_manually_set: conversation.get("is_title_manually_set"),
+        id: conversation_row.try_get("id")
+            .map_err(|e| AppError::InternalServerError(format!("Failed to get id: {}", e)))?,
+        project_id: conversation_row.try_get("project_id")
+            .map_err(|e| AppError::InternalServerError(format!("Failed to get project_id: {}", e)))?,
+        title: conversation_row.try_get("title").ok(),
+        created_at: conversation_row.try_get("created_at")
+            .map_err(|e| AppError::InternalServerError(format!("Failed to get created_at: {}", e)))?,
+        updated_at: conversation_row.try_get("updated_at")
+            .map_err(|e| AppError::InternalServerError(format!("Failed to get updated_at: {}", e)))?,
+        message_count: conversation_row.try_get("message_count")
+            .map_err(|e| AppError::InternalServerError(format!("Failed to get message_count: {}", e)))?,
+        is_title_manually_set: conversation_row.try_get("is_title_manually_set").ok(),
     };
 
     res.render(Json(conversation));
@@ -326,13 +345,18 @@ pub async fn update_conversation(
     .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
     
     let conversation = Conversation {
-        id: updated.get("id"),
-        project_id: updated.get("project_id"),
-        title: updated.get("title"),
-        created_at: updated.get("created_at"),
-        updated_at: updated.get("updated_at"),
-        message_count: updated.get("message_count"),
-        is_title_manually_set: updated.get("is_title_manually_set"),
+        id: updated.try_get("id")
+            .map_err(|e| AppError::InternalServerError(format!("Failed to get id: {}", e)))?,
+        project_id: updated.try_get("project_id")
+            .map_err(|e| AppError::InternalServerError(format!("Failed to get project_id: {}", e)))?,
+        title: updated.try_get("title").ok(),
+        created_at: updated.try_get("created_at")
+            .map_err(|e| AppError::InternalServerError(format!("Failed to get created_at: {}", e)))?,
+        updated_at: updated.try_get("updated_at")
+            .map_err(|e| AppError::InternalServerError(format!("Failed to get updated_at: {}", e)))?,
+        message_count: updated.try_get("message_count")
+            .map_err(|e| AppError::InternalServerError(format!("Failed to get message_count: {}", e)))?,
+        is_title_manually_set: updated.try_get("is_title_manually_set").ok(),
     };
 
     res.render(Json(conversation));
@@ -422,7 +446,7 @@ pub async fn get_conversation_messages(
     
     let mut message_responses = Vec::new();
     for row in messages {
-        let tools_json: Option<serde_json::Value> = row.get("clay_tools_used");
+        let tools_json: Option<serde_json::Value> = row.try_get("clay_tools_used").ok();
         let tools = tools_json.and_then(|v| {
             if v.is_array() {
                 v.as_array().map(|arr| {
@@ -436,12 +460,17 @@ pub async fn get_conversation_messages(
         });
         
         message_responses.push(MessageResponse {
-            id: row.get("id"),
-            content: row.get("content"),
-            role: row.get("role"),
-            created_at: row.get::<chrono::DateTime<Utc>, _>("created_at").to_rfc3339(),
+            id: row.try_get("id")
+                .map_err(|e| AppError::InternalServerError(format!("Failed to get id: {}", e)))?,
+            content: row.try_get("content")
+                .map_err(|e| AppError::InternalServerError(format!("Failed to get content: {}", e)))?,
+            role: row.try_get("role")
+                .map_err(|e| AppError::InternalServerError(format!("Failed to get role: {}", e)))?,
+            created_at: row.try_get::<chrono::DateTime<Utc>, _>("created_at")
+                .map_err(|e| AppError::InternalServerError(format!("Failed to get created_at: {}", e)))?
+                .to_rfc3339(),
             clay_tools_used: tools,
-            processing_time_ms: row.get("processing_time_ms"),
+            processing_time_ms: row.try_get("processing_time_ms").ok(),
         });
     }
     

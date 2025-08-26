@@ -2,6 +2,7 @@ use salvo::prelude::*;
 use crate::models::*;
 use crate::utils::AppState;
 use crate::utils::AppError;
+use crate::utils::claude_md_template;
 use crate::core::projects::{ProjectManager, ProjectInfo};
 use crate::core::tools::ToolApplicabilityChecker;
 use chrono::Utc;
@@ -162,6 +163,36 @@ pub async fn get_project_context(
     recent_activity.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
     recent_activity.truncate(10); // Keep only the 10 most recent activities
 
+    // Update CLAUDE.md with current datasource information if client is available
+    if let Ok(Some(client_row)) = sqlx::query(
+        "SELECT id FROM clients WHERE status = 'active' LIMIT 1"
+    )
+    .fetch_optional(&state.db_pool)
+    .await {
+        let client_id: Uuid = client_row.get("id");
+        
+        // Get datasources for CLAUDE.md generation
+        let datasource_values: Vec<serde_json::Value> = data_sources.iter().map(|ds| {
+            serde_json::json!({
+                "id": ds.id,
+                "name": ds.name,
+                "source_type": ds.source_type,
+                "schema_info": ds.schema_info,
+            })
+        }).collect();
+        
+        // Generate enhanced CLAUDE.md with datasource information
+        let claude_md_content = claude_md_template::generate_claude_md_with_datasources(
+            &project_id,
+            &project_name,
+            datasource_values
+        ).await;
+        
+        // Save the updated CLAUDE.md
+        let project_manager = ProjectManager::new();
+        let _ = project_manager.save_claude_md_content(client_id, &project_id, &claude_md_content);
+    }
+
     let project_context = ProjectContextResponse {
         project_id: project_id.clone(),
         project_settings: ProjectSettings {
@@ -232,6 +263,10 @@ pub async fn create_project(
     // Create project directory using the UUID string
     let project_manager = ProjectManager::new();
     project_manager.ensure_project_directory(client_id, &project_id)?;
+    
+    // Generate and save initial CLAUDE.md
+    let claude_md_content = claude_md_template::generate_claude_md(&project_id, &project_name);
+    project_manager.save_claude_md_content(client_id, &project_id, &claude_md_content)?;
     
     // Create project info
     let project_info = ProjectInfo {

@@ -31,6 +31,7 @@ import { API_BASE_URL } from "@/lib/url";
 import { cn } from "@/lib/utils";
 import { useValtioAuth } from "@/hooks/use-valtio-auth";
 import { ClaudeMdModal } from "./claude-md-modal";
+import { store } from "@/store";
 
 interface Conversation {
   id: string;
@@ -47,7 +48,6 @@ interface ConversationSidebarProps {
   projectId?: string;
   currentConversationId?: string;
   onConversationSelect?: (conversationId: string) => void;
-  refreshTrigger?: number; // Can be used to trigger refresh from parent
 }
 
 export function ConversationSidebar({
@@ -56,19 +56,35 @@ export function ConversationSidebar({
   projectId,
   currentConversationId,
   onConversationSelect: _onConversationSelect,
-  refreshTrigger,
 }: ConversationSidebarProps) {
+  // Get the active conversation ID from store to handle /new -> real ID transition
+  const actualConversationId = currentConversationId === 'new' && store.activeConversationId
+    ? store.activeConversationId
+    : currentConversationId;
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
-  const [renamingConversation, setRenamingConversation] = useState<Conversation | null>(null);
+  const [renamingConversation, setRenamingConversation] =
+    useState<Conversation | null>(null);
   const [newTitle, setNewTitle] = useState("");
   const [claudeMdModalOpen, setClaudeMdModalOpen] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const { isAuthenticated, isSetupComplete, user, logout } = useValtioAuth();
   const navigate = useNavigate();
 
-  // Fetch conversations when projectId changes and user is authenticated
+  // Auto-close mobile menu on larger screens
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth >= 768) {
+        setIsMobileMenuOpen(false);
+      }
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  // Fetch conversations when projectId changes, user is authenticated, or when we navigate to a new conversation
   useEffect(() => {
     if (!projectId || !isAuthenticated || !isSetupComplete) return;
 
@@ -88,7 +104,6 @@ export function ConversationSidebar({
         });
 
         if (!response.ok) {
-          const errorText = await response.text();
           throw new Error(
             `Failed to fetch conversations: ${response.status} - ${response.statusText}`
           );
@@ -106,7 +121,21 @@ export function ConversationSidebar({
     };
 
     fetchConversations();
-  }, [projectId, refreshTrigger, isAuthenticated, isSetupComplete]);
+    
+    // Listen for conversation creation events to refresh the list
+    const handleConversationCreated = (event: CustomEvent) => {
+      if (event.detail?.projectId === projectId) {
+        console.log('[ConversationSidebar] New conversation created, refreshing list');
+        fetchConversations();
+      }
+    };
+    
+    window.addEventListener('conversation-created', handleConversationCreated as EventListener);
+    
+    return () => {
+      window.removeEventListener('conversation-created', handleConversationCreated as EventListener);
+    };
+  }, [projectId, currentConversationId, isAuthenticated, isSetupComplete]);
 
   // Handle conversation click
   const handleConversationClick = (
@@ -116,12 +145,18 @@ export function ConversationSidebar({
     e.preventDefault();
 
     // Don't navigate if already on this conversation
-    if (currentConversationId === conversationId) return;
+    if (actualConversationId === conversationId) {
+      // Close mobile menu if open
+      setIsMobileMenuOpen(false);
+      return;
+    }
 
     // Navigate to the conversation
     navigate(`/chat/${projectId}/${conversationId}`);
-  };
 
+    // Close mobile menu after navigation
+    setIsMobileMenuOpen(false);
+  };
 
   // Handle logout
   const handleLogout = async () => {
@@ -171,10 +206,12 @@ export function ConversationSidebar({
       }
 
       const updatedConversation = await response.json();
-      
+
       // Update local state
-      setConversations(convs => 
-        convs.map(c => c.id === renamingConversation.id ? updatedConversation : c)
+      setConversations((convs) =>
+        convs.map((c) =>
+          c.id === renamingConversation.id ? updatedConversation : c
+        )
       );
 
       // Close dialog and reset state
@@ -188,7 +225,13 @@ export function ConversationSidebar({
 
   // Handle conversation delete
   const handleDeleteConversation = async (conversation: Conversation) => {
-    if (!confirm(`Are you sure you want to delete "${conversation.title || 'New Conversation'}"?`)) {
+    if (
+      !confirm(
+        `Are you sure you want to delete "${
+          conversation.title || "New Conversation"
+        }"?`
+      )
+    ) {
       return;
     }
 
@@ -206,10 +249,12 @@ export function ConversationSidebar({
       }
 
       // Update local state
-      setConversations(convs => convs.filter(c => c.id !== conversation.id));
-      
+      setConversations((convs) =>
+        convs.filter((c) => c.id !== conversation.id)
+      );
+
       // If we're currently viewing this conversation, navigate away
-      if (currentConversationId === conversation.id) {
+      if (actualConversationId === conversation.id) {
         navigate(`/chat/${projectId}/new`);
       }
     } catch (err) {
@@ -225,255 +270,310 @@ export function ConversationSidebar({
   };
 
   return (
-    <div
-      className={`${
-        isCollapsed ? "w-12" : "w-64"
-      } border-r bg-background flex flex-col transition-all duration-300`}
-    >
-      {/* Header with toggle and new chat */}
-      <div className="p-3 border-b">
-        <div className="flex items-center justify-between">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onToggle}
-            className="h-8 w-8 p-0"
-          >
-            {isCollapsed ? (
-              <PanelLeftOpen className="h-4 w-4" />
-            ) : (
-              <PanelLeftClose className="h-4 w-4" />
-            )}
-          </Button>
+    <>
+      {/* Mobile overlay */}
+      {isMobileMenuOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 z-40 md:hidden"
+          onClick={() => setIsMobileMenuOpen(false)}
+        />
+      )}
 
-          {!isCollapsed && projectId && (
+      {/* Sidebar */}
+      <div
+        className={cn(
+          "border-r bg-background flex flex-col transition-all duration-300",
+          // Desktop width
+          isCollapsed ? "md:w-12" : "md:w-64",
+          // Mobile: full height overlay or hidden
+          "fixed md:relative inset-y-0 left-0 z-50",
+          isMobileMenuOpen ? "w-64" : "w-0 md:w-auto",
+          !isMobileMenuOpen && "overflow-hidden md:overflow-visible"
+        )}
+      >
+        {/* Header with toggle and new chat */}
+        <div className="p-3 border-b">
+          <div className="flex items-center justify-between">
             <Button
               variant="ghost"
               size="sm"
               onClick={() => {
-                navigate(`/chat/${projectId}/new`);
+                // On mobile, close the menu
+                if (window.innerWidth < 768) {
+                  setIsMobileMenuOpen(false);
+                } else {
+                  // On desktop, toggle collapse
+                  onToggle();
+                }
               }}
-              className="h-8 px-3 gap-1"
-              type="button"
+              className="h-8 w-8 p-0"
             >
-              <Plus className="h-4 w-4" />
-              New Chat
+              {isCollapsed && window.innerWidth >= 768 ? (
+                <PanelLeftOpen className="h-4 w-4" />
+              ) : (
+                <PanelLeftClose className="h-4 w-4" />
+              )}
             </Button>
-          )}
-        </div>
-      </div>
 
-      {/* Conversations area */}
-      {!isCollapsed && (
-        <div className="flex-1 overflow-y-auto">
-          {loading ? (
-            <div className="p-4">
-              <div className="animate-pulse">
-                <div className="h-4 bg-gray-200 rounded mb-2"></div>
-                <div className="h-4 bg-gray-200 rounded mb-2"></div>
-                <div className="h-4 bg-gray-200 rounded"></div>
-              </div>
-            </div>
-          ) : error ? (
-            <div className="p-4">
-              <p className="text-sm text-red-500">{error}</p>
-            </div>
-          ) : conversations.length === 0 ? (
-            <div className="p-4">
-              <p className="text-sm text-muted-foreground">
-                Your conversations will appear here once you start chatting!
-              </p>
-            </div>
-          ) : (
-            <div className="p-2">
-              {conversations.map((conversation) => (
-                <div
-                  key={conversation.id}
-                  className={cn(
-                    "block w-full text-left p-2 rounded-md hover:bg-muted transition-colors mb-1 group cursor-pointer relative",
-                    currentConversationId === conversation.id && "bg-muted"
-                  )}
-                >
-                  <div 
-                    onClick={(e) => handleConversationClick(conversation.id, e)}
-                    className="flex items-start gap-2 pr-8"
-                  >
-                    <MessageSquare className="h-4 w-4 mt-0.5 text-muted-foreground" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">
-                        {conversation.title || "New Conversation"}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {conversation.message_count}{" "}
-                        chat{conversation.message_count !== 1 ? "s" : ""} •{" "}
-                        {new Date(conversation.updated_at).toLocaleDateString()} {new Date(conversation.updated_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', hour12: false})}
-                      </p>
-                    </div>
-                  </div>
+            {!isCollapsed && projectId && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  // Clear any existing state for new conversations
+                  if (store.activeConversationId) {
+                    store.activeConversationId = null;
+                  }
                   
-                  {/* Actions dropdown */}
-                  <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 w-6 p-0"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <MoreHorizontal className="h-3 w-3" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openRenameDialog(conversation);
-                          }}
-                        >
-                          <Edit className="h-4 w-4 mr-2" />
-                          Rename
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteConversation(conversation);
-                          }}
-                          className="text-red-600 focus:text-red-600"
-                        >
-                          <Trash2 className="h-4 w-4 mr-2" />
-                          Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* CLAUDE.md Button */}
-      {projectId && (
-        <div className="p-3 border-t">
-          <Button
-            onClick={() => setClaudeMdModalOpen(true)}
-            variant="ghost"
-            size="sm"
-            className={`w-full ${isCollapsed ? 'justify-center' : 'justify-start'} gap-2`}
-          >
-            <FileText className="h-4 w-4" />
-            {!isCollapsed && "Edit CLAUDE.md"}
-          </Button>
-        </div>
-      )}
-
-      {/* Bottom user section */}
-      <div className="border-t p-3 relative z-10">
-        {isCollapsed ? (
-          <button
-            className="h-8 w-8 p-0 cursor-pointer hover:bg-accent rounded-md flex items-center justify-center pointer-events-auto"
-            onClick={handleLogout}
-            type="button"
-          >
-            <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center text-primary font-medium text-xs pointer-events-none">
-              {(user?.username || "G").charAt(0).toUpperCase()}
-            </div>
-          </button>
-        ) : (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                className="w-full justify-between p-2 cursor-pointer hover:bg-accent rounded-md flex items-center pointer-events-auto"
+                  // Navigate to new chat
+                  navigate(`/chat/${projectId}/new`);
+                  // Close mobile menu after navigation
+                  setIsMobileMenuOpen(false);
+                }}
+                className="h-8 px-3 gap-1"
                 type="button"
               >
-                <div className="flex items-center gap-2 pointer-events-none">
-                  <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center text-primary font-medium text-xs">
-                    {(user?.username || "G").charAt(0).toUpperCase()}
-                  </div>
-                  <span className="text-sm">{user?.username || "Guest"}</span>
-                </div>
-                <ChevronDown className="h-4 w-4 pointer-events-none" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-56 z-50">
-              <DropdownMenuItem
-                onClick={handleProfile}
-                className="cursor-pointer"
-              >
-                Profile
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={handleSettings}
-                className="cursor-pointer"
-              >
-                Settings
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={handleLogout}
-                className="cursor-pointer"
-              >
-                Sign out
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-      </div>
-      
-      {/* CLAUDE.md Modal */}
-      {projectId && (
-        <ClaudeMdModal
-          projectId={projectId}
-          isOpen={claudeMdModalOpen}
-          onOpenChange={setClaudeMdModalOpen}
-        />
-      )}
-
-      {/* Rename Dialog */}
-      <Dialog open={renameDialogOpen} onOpenChange={setRenameDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Rename Conversation</DialogTitle>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="title" className="text-right">
-                Title
-              </Label>
-              <Input
-                id="title"
-                value={newTitle}
-                onChange={(e) => setNewTitle(e.target.value)}
-                className="col-span-3"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    handleRenameConversation();
-                  }
-                }}
-                placeholder="Enter conversation title"
-                autoFocus
-              />
-            </div>
+                <Plus className="h-4 w-4" />
+                New Chat
+              </Button>
+            )}
           </div>
-          <DialogFooter>
+        </div>
+
+        {/* Conversations area */}
+        {(!isCollapsed || isMobileMenuOpen) && (
+          <div className="flex-1 overflow-y-auto">
+            {loading ? (
+              <div className="p-4">
+                <div className="animate-pulse">
+                  <div className="h-4 bg-gray-200 rounded mb-2"></div>
+                  <div className="h-4 bg-gray-200 rounded mb-2"></div>
+                  <div className="h-4 bg-gray-200 rounded"></div>
+                </div>
+              </div>
+            ) : error ? (
+              <div className="p-4">
+                <p className="text-sm text-red-500">{error}</p>
+              </div>
+            ) : conversations.length === 0 ? (
+              <div className="p-4">
+                <p className="text-sm text-muted-foreground">Ummm...</p>
+              </div>
+            ) : (
+              <div className="p-2">
+                {conversations.map((conversation) => (
+                  <div
+                    key={conversation.id}
+                    className={cn(
+                      "block w-full text-left p-2 rounded-md hover:bg-muted border border-transparent transition-colors mb-1 group cursor-pointer relative",
+                      actualConversationId === conversation.id && "bg-muted border-blue-900/20"
+                    )}
+                    onClick={(e) => handleConversationClick(conversation.id, e)}
+                  >
+                    <div className="flex items-start gap-2 pr-8 w-[200px] overflow-hidden">
+                      <MessageSquare className="h-4 w-4 mt-0.5 text-muted-foreground " />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">
+                          {conversation.title || "New Conversation"}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {conversation.message_count} chat
+                          {conversation.message_count !== 1 ? "s" : ""} •{" "}
+                          {new Date(
+                            conversation.updated_at
+                          ).toLocaleDateString()}{" "}
+                          {new Date(conversation.updated_at).toLocaleTimeString(
+                            [],
+                            {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                              hour12: false,
+                            }
+                          )}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Actions dropdown */}
+                    <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <MoreHorizontal className="h-3 w-3" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openRenameDialog(conversation);
+                            }}
+                          >
+                            <Edit className="h-4 w-4 mr-2" />
+                            Rename
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteConversation(conversation);
+                            }}
+                            className="text-red-600 focus:text-red-600"
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* CLAUDE.md Button */}
+        {projectId && (
+          <div className="p-3 border-t">
             <Button
-              type="button"
-              variant="outline"
-              onClick={() => setRenameDialogOpen(false)}
+              onClick={() => setClaudeMdModalOpen(true)}
+              variant="ghost"
+              size="sm"
+              className={`w-full ${
+                isCollapsed ? "justify-center" : "justify-start"
+              } gap-2`}
             >
-              Cancel
+              <FileText className="h-4 w-4" />
+              {!isCollapsed && "Edit CLAUDE.md"}
             </Button>
-            <Button
+          </div>
+        )}
+
+        {/* Bottom user section */}
+        <div className="border-t p-3 relative z-10">
+          {isCollapsed ? (
+            <button
+              className="h-8 w-8 p-0 cursor-pointer hover:bg-accent rounded-md flex items-center justify-center pointer-events-auto"
+              onClick={handleLogout}
               type="button"
-              onClick={handleRenameConversation}
-              disabled={!newTitle.trim()}
             >
-              Save
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
+              <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center text-primary font-medium text-xs pointer-events-none">
+                {(user?.username || "G").charAt(0).toUpperCase()}
+              </div>
+            </button>
+          ) : (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  className="w-full justify-between p-2 cursor-pointer hover:bg-accent rounded-md flex items-center pointer-events-auto"
+                  type="button"
+                >
+                  <div className="flex items-center gap-2 pointer-events-none">
+                    <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center text-primary font-medium text-xs">
+                      {(user?.username || "G").charAt(0).toUpperCase()}
+                    </div>
+                    <span className="text-sm">{user?.username || "Guest"}</span>
+                  </div>
+                  <ChevronDown className="h-4 w-4 pointer-events-none" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-56 z-50">
+                <DropdownMenuItem
+                  onClick={handleProfile}
+                  className="cursor-pointer"
+                >
+                  Profile
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={handleSettings}
+                  className="cursor-pointer"
+                >
+                  Settings
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={handleLogout}
+                  className="cursor-pointer"
+                >
+                  Sign out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
+
+        {/* CLAUDE.md Modal */}
+        {projectId && (
+          <ClaudeMdModal
+            projectId={projectId}
+            isOpen={claudeMdModalOpen}
+            onOpenChange={setClaudeMdModalOpen}
+          />
+        )}
+
+        {/* Rename Dialog */}
+        <Dialog open={renameDialogOpen} onOpenChange={setRenameDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Rename Conversation</DialogTitle>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="title" className="text-right">
+                  Title
+                </Label>
+                <Input
+                  id="title"
+                  value={newTitle}
+                  onChange={(e) => setNewTitle(e.target.value)}
+                  className="col-span-3"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      handleRenameConversation();
+                    }
+                  }}
+                  placeholder="Enter conversation title"
+                  autoFocus
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setRenameDialogOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={handleRenameConversation}
+                disabled={!newTitle.trim()}
+              >
+                Save
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      {/* Mobile menu toggle button */}
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+        className="fixed top-4 left-4 z-40 h-10 w-10 p-0 md:hidden rounded-full shadow-lg bg-background border"
+      >
+        {isMobileMenuOpen ? (
+          <PanelLeftClose className="h-5 w-5" />
+        ) : (
+          <PanelLeftOpen className="h-5 w-5" />
+        )}
+      </Button>
+    </>
   );
 }

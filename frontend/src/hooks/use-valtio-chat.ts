@@ -1,5 +1,5 @@
-import { useCallback, useEffect } from "react";
-import { useSnapshot } from 'valtio';
+import { useCallback, useEffect, useRef } from "react";
+import { useSnapshot } from "valtio";
 import { useQuery } from "@tanstack/react-query";
 import { API_BASE_URL } from "@/lib/url";
 import {
@@ -17,12 +17,16 @@ import {
   setConversationAbortController,
   getConversationAbortController,
   setConversationForgotten,
-  setConversationStarted,
   setConversationContext,
-  cacheProjectContext
-} from '../store';
+  cacheProjectContext,
+  addToMessageQueue,
+  removeFromMessageQueue,
+  updateMessageInQueue,
+  addActiveTool,
+  clearActiveTools,
+} from "../store";
 
-// Re-export types from the original hook
+// Re-export types
 export type {
   FileAttachment,
   Message,
@@ -33,25 +37,15 @@ export type {
   ProjectSettings,
   AnalysisPreferences,
   ProjectContextResponse,
-  RecentActivity
-} from './use-clay-chat';
-
-// Additional types for our Valtio implementation
-export interface QueuedMessage {
-  id: string;
-  content: string;
-  timestamp: Date;
-  status: 'pending' | 'processing' | 'completed' | 'failed';
-  isEditable?: boolean;
-  files?: File[];
-}
+  RecentActivity,
+} from "../types/chat";
 
 /**
  * Hook for managing conversation-specific context using Valtio
  */
 export function useConversationContext(conversationId: string | null) {
   // const snapshot = useSnapshot(store);
-  
+
   const {
     data: context,
     isLoading,
@@ -69,12 +63,12 @@ export function useConversationContext(conversationId: string | null) {
       if (!response.ok) throw new Error("Failed to fetch conversation context");
 
       const data = await response.json();
-      
+
       // Cache the context in our store
       if (conversationId) {
         setConversationContext(conversationId, data);
       }
-      
+
       return data;
     },
     enabled: !!conversationId,
@@ -90,7 +84,8 @@ export function useConversationContext(conversationId: string | null) {
     // Derived convenience properties
     hasLongHistory: context ? context.total_messages > 20 : false,
     contextStrategy: context?.context_strategy,
-    activeTools: context?.available_tools.filter((t: any) => t.applicable) || [],
+    activeTools:
+      context?.available_tools.filter((t: any) => t.applicable) || [],
     dataSourceCount: context?.data_sources.length || 0,
   };
 }
@@ -100,7 +95,7 @@ export function useConversationContext(conversationId: string | null) {
  */
 export function useProjectContext(projectId: string | null) {
   // const snapshot = useSnapshot(store);
-  
+
   const {
     data: projectContext,
     isLoading,
@@ -118,10 +113,10 @@ export function useProjectContext(projectId: string | null) {
       if (!response.ok) throw new Error("Failed to fetch project context");
 
       const data = await response.json();
-      
+
       // Cache the context in our store
       cacheProjectContext(projectId, data);
-      
+
       return data;
     },
     enabled: !!projectId,
@@ -136,16 +131,22 @@ export function useProjectContext(projectId: string | null) {
     refresh: refetch,
     // Derived properties
     dataSourcesByType:
-      projectContext?.data_sources.reduce((acc: Record<string, number>, ds: any) => {
-        acc[ds.source_type] = (acc[ds.source_type] || 0) + 1;
-        return acc;
-      }, {} as Record<string, number>) || {},
+      projectContext?.data_sources.reduce(
+        (acc: Record<string, number>, ds: any) => {
+          acc[ds.source_type] = (acc[ds.source_type] || 0) + 1;
+          return acc;
+        },
+        {} as Record<string, number>
+      ) || {},
     toolsByCategory:
-      projectContext?.available_tools.reduce((acc: Record<string, any[]>, tool: any) => {
-        if (!acc[tool.category]) acc[tool.category] = [];
-        acc[tool.category].push(tool);
-        return acc;
-      }, {} as Record<string, any[]>) || {},
+      projectContext?.available_tools.reduce(
+        (acc: Record<string, any[]>, tool: any) => {
+          if (!acc[tool.category]) acc[tool.category] = [];
+          acc[tool.category].push(tool);
+          return acc;
+        },
+        {} as Record<string, any[]>
+      ) || {},
     recentConversations:
       projectContext?.recent_activity.filter(
         (a: any) => a.activity_type === "message" && a.conversation_id
@@ -158,20 +159,20 @@ export function useProjectContext(projectId: string | null) {
  */
 export function useValtioChat(projectId: string, conversationId?: string) {
   const snapshot = useSnapshot(store);
-  const currentConversationId = conversationId || 'new';
-  
+  const currentConversationId = conversationId || "new";
+
   // Get conversation state from store
   const conversationState = snapshot.conversations[currentConversationId];
   const messages = conversationState?.messages || [];
-  const isLoading = conversationState?.isLoading || false;
   const isLoadingMessages = conversationState?.isLoadingMessages || false;
   const error = conversationState?.error || null;
   const isStreaming = conversationState?.isStreaming || false;
   const uploadedFiles = conversationState?.uploadedFiles || [];
-  const forgottenAfterMessageId = conversationState?.forgottenAfterMessageId || null;
+  const forgottenAfterMessageId =
+    conversationState?.forgottenAfterMessageId || null;
   const forgottenCount = conversationState?.forgottenCount || 0;
-  const hasStartedNewConversation = conversationState?.hasStartedNewConversation || false;
-  const currentAbortController = conversationState?.currentAbortController || null;
+  const currentAbortController =
+    conversationState?.currentAbortController || null;
 
   // Set active conversation
   useEffect(() => {
@@ -180,13 +181,13 @@ export function useValtioChat(projectId: string, conversationId?: string) {
 
   // Function to load uploaded files for a conversation
   const loadUploadedFiles = useCallback(async () => {
-    if (!projectId || !conversationId || conversationId === 'new') {
+    if (!projectId || !conversationId || conversationId === "new") {
       setConversationUploadedFiles(currentConversationId, []);
       return;
     }
 
     try {
-      const clientId = localStorage.getItem('activeClientId');
+      const clientId = localStorage.getItem("activeClientId");
       if (!clientId) return;
 
       const response = await fetch(
@@ -206,16 +207,22 @@ export function useValtioChat(projectId: string, conversationId?: string) {
   // Load messages when conversation changes
   useEffect(() => {
     if (!conversationId) return;
-    
-    if (conversationId === 'new') {
+
+    if (conversationId === "new") {
       // Initialize empty state for new conversation
-      const state = getConversationState('new');
+      const state = getConversationState("new");
+      // Always reset when navigating to 'new' to ensure clean slate
       state.messages = [];
       state.error = null;
       state.forgottenAfterMessageId = null;
       state.forgottenCount = 0;
       state.uploadedFiles = [];
-      state.hasStartedNewConversation = false;
+      state.isLoading = false;
+      state.isStreaming = false;
+      state.messageQueue = [];
+      state.activeTools = [];
+      // Clear active conversation ID when navigating to new
+      store.activeConversationId = null;
     } else {
       // Check if we already have messages for this conversation
       const existingState = snapshot.conversations[conversationId];
@@ -229,23 +236,26 @@ export function useValtioChat(projectId: string, conversationId?: string) {
       state.messages = [];
       state.error = null;
       state.isLoadingMessages = true;
-      
+
       fetch(`${API_BASE_URL}/conversations/${conversationId}/messages`, {
         credentials: "include",
       })
-        .then(async res => {
+        .then(async (res) => {
           if (!res.ok) {
             let errorMessage = "Failed to load conversation";
-            
+
             switch (res.status) {
               case 404:
-                errorMessage = "This conversation doesn't exist or has been deleted";
+                errorMessage =
+                  "This conversation doesn't exist or has been deleted";
                 break;
               case 403:
-                errorMessage = "You don't have permission to access this conversation";
+                errorMessage =
+                  "You don't have permission to access this conversation";
                 break;
               case 500:
-                errorMessage = "Server error while loading the conversation. Please try again";
+                errorMessage =
+                  "Server error while loading the conversation. Please try again";
                 break;
               default:
                 try {
@@ -255,112 +265,385 @@ export function useValtioChat(projectId: string, conversationId?: string) {
                   errorMessage = `Failed to load conversation (${res.status})`;
                 }
             }
-            
+
             throw new Error(errorMessage);
           }
           return res.json();
         })
-        .then(data => {
+        .then((data) => {
           updateConversationMessages(conversationId, [...data]);
           setConversationError(conversationId, null);
           const convState = getConversationState(conversationId);
           convState.isLoadingMessages = false;
           loadUploadedFiles();
         })
-        .catch(err => {
+        .catch((err) => {
           setConversationError(conversationId, err.message);
           const convState = getConversationState(conversationId);
           convState.isLoadingMessages = false;
         });
-      
+
       // Check forgotten status
       fetch(`${API_BASE_URL}/conversations/${conversationId}/forget-after`, {
         credentials: "include",
       })
-        .then(res => {
+        .then((res) => {
           if (res.ok) {
             return res.json();
           }
           return null;
         })
-        .then(data => {
+        .then((data) => {
           if (data && data.has_forgotten) {
-            setConversationForgotten(conversationId, data.forgotten_after_message_id, data.forgotten_count || 0);
+            setConversationForgotten(
+              conversationId,
+              data.forgotten_after_message_id,
+              data.forgotten_count || 0
+            );
           }
         })
         .catch(() => {
           // Silently handle forgotten status errors
         });
     }
-  }, [conversationId, projectId, loadUploadedFiles, snapshot.conversations]);
+  }, [conversationId, projectId, loadUploadedFiles]);
 
   // Load context for the conversation or project
   const { context: conversationContext } = useConversationContext(
-    conversationId && conversationId !== 'new' ? conversationId : null
+    conversationId && conversationId !== "new" ? conversationId : null
   );
   const { projectContext } = useProjectContext(projectId);
 
   // Function to restore forgotten messages
-  const restoreForgottenMessages = useCallback(
-    async () => {
-      if (!currentConversationId || !forgottenAfterMessageId) return;
+  const restoreForgottenMessages = useCallback(async () => {
+    if (!currentConversationId || !forgottenAfterMessageId) return;
 
-      try {
-        const response = await fetch(
-          `${API_BASE_URL}/conversations/${currentConversationId}/forget-after`,
-          {
-            method: "DELETE",
-            credentials: "include",
-          }
-        );
-
-        if (!response.ok) {
-          throw new Error("Failed to restore messages");
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/conversations/${currentConversationId}/forget-after`,
+        {
+          method: "DELETE",
+          credentials: "include",
         }
+      );
 
-        // Clear forgotten state
-        setConversationForgotten(currentConversationId, null, 0);
-        
-        // Reload all messages
-        const messagesResponse = await fetch(
-          `${API_BASE_URL}/conversations/${currentConversationId}/messages`,
-          {
-            credentials: "include",
-          }
-        );
-        
-        if (messagesResponse.ok) {
-          const allMessages = await messagesResponse.json();
-          updateConversationMessages(currentConversationId, [...allMessages]);
-        }
-      } catch (err) {
-        setConversationError(currentConversationId, err instanceof Error ? err.message : "Failed to restore messages");
+      if (!response.ok) {
+        throw new Error("Failed to restore messages");
       }
-    },
-    [currentConversationId, forgottenAfterMessageId]
-  );
 
-  const sendMessage = useCallback(
-    async (content: string, useStreaming = true, files?: File[]) => {
+      // Clear forgotten state
+      setConversationForgotten(currentConversationId, null, 0);
+
+      // Reload all messages
+      const messagesResponse = await fetch(
+        `${API_BASE_URL}/conversations/${currentConversationId}/messages`,
+        {
+          credentials: "include",
+        }
+      );
+
+      if (messagesResponse.ok) {
+        const allMessages = await messagesResponse.json();
+        updateConversationMessages(currentConversationId, [...allMessages]);
+      }
+    } catch (err) {
+      setConversationError(
+        currentConversationId,
+        err instanceof Error ? err.message : "Failed to restore messages"
+      );
+    }
+  }, [currentConversationId, forgottenAfterMessageId]);
+
+  const resendMessage = useCallback(
+    async (content: string) => {
       if (!projectId) {
         setConversationError(currentConversationId, "Project ID is required");
         return;
       }
 
-      // If there are forgotten messages, restore them first
+      // Check if we should queue the message instead
+      const state = getConversationState(currentConversationId);
+      if (state.isStreaming || state.isProcessingQueue) {
+        // Add to queue instead of sending immediately
+        addToMessageQueue(currentConversationId, {
+          id: `queue-${Date.now()}`,
+          content,
+          files: [],
+          timestamp: new Date(),
+        });
+        return;
+      }
+
+      // Remove the last assistant message if it exists
+      // This allows us to "resend" by regenerating the response to the existing user message
+      const currentMessages = state.messages;
+      if (
+        currentMessages.length > 0 &&
+        currentMessages[currentMessages.length - 1].role === "assistant"
+      ) {
+        // Remove the last assistant message
+        state.messages = currentMessages.slice(0, -1);
+      }
+
+      // Create AbortController for this request
+      const abortController = new AbortController();
+      setConversationAbortController(currentConversationId, abortController);
+
+      setConversationLoading(currentConversationId, true);
+      setConversationError(currentConversationId, null);
+
+      try {
+        // Always use streaming endpoint
+        setConversationStreaming(currentConversationId, true);
+        let assistantContent = "";
+
+        const response = await fetch(`${API_BASE_URL}/chat/stream`, {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            messages: [
+              {
+                id: `msg-${Date.now()}`,
+                role: "user",
+                content,
+              },
+            ],
+            project_id: projectId,
+            conversation_id: currentConversationId,
+          }),
+          signal: abortController.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
+
+        if (!reader) {
+          throw new Error("No response body");
+        }
+
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value, { stream: true });
+          buffer += chunk;
+          const lines = buffer.split("\n");
+
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            const trimmedLine = line.trim();
+            if (trimmedLine.startsWith("data:")) {
+              const data = trimmedLine.slice(5).trim();
+              if (data === "[DONE]") continue;
+              if (!data) continue;
+
+              try {
+                const event = JSON.parse(data);
+
+                switch (event.type) {
+                  case "start":
+                    // Update conversation ID when we get the real ID from backend
+                    if (
+                      event.conversation_id &&
+                      event.conversation_id !== "new" &&
+                      currentConversationId === "new"
+                    ) {
+                      // Transfer the state from 'new' to the real conversation ID BEFORE setting active
+                      const newState = getConversationState("new");
+                      const realState = getConversationState(
+                        event.conversation_id
+                      );
+                      // Deep copy messages to avoid reference issues
+                      realState.messages = [...newState.messages];
+                      realState.isLoading = newState.isLoading;
+                      realState.isStreaming = newState.isStreaming;
+                      realState.error = newState.error;
+                      realState.uploadedFiles = [...newState.uploadedFiles];
+
+                      // Only set active conversation AFTER state is transferred
+                      setActiveConversation(event.conversation_id);
+                      
+                      // Dispatch a custom event to notify the sidebar to refresh
+                      window.dispatchEvent(new CustomEvent('conversation-created', {
+                        detail: { conversationId: event.conversation_id, projectId }
+                      }));
+                    }
+                    break;
+                  case "progress":
+                    try {
+                      const streamJson = JSON.parse(event.content);
+
+                      if (
+                        streamJson.type === "text" ||
+                        streamJson.type === "progress"
+                      ) {
+                        const textContent =
+                          streamJson.text || streamJson.content || "";
+                        if (textContent) {
+                          assistantContent += textContent;
+                          // Use the active conversation ID from the store, fallback to current if not set
+                          const activeId =
+                            store.activeConversationId || currentConversationId;
+                          const currentMessages =
+                            getConversationState(activeId).messages;
+                          const lastMessage =
+                            currentMessages[currentMessages.length - 1];
+                          if (lastMessage && lastMessage.role === "assistant") {
+                            updateLastMessage(activeId, {
+                              content: assistantContent,
+                            });
+                          } else {
+                            addMessage(activeId, {
+                              id: `streaming-${Date.now()}`,
+                              role: "assistant",
+                              content: assistantContent,
+                              createdAt: new Date().toISOString(),
+                            });
+                          }
+                        }
+                      }
+                    } catch (parseError) {
+                      // Skip non-JSON messages
+                    }
+                    break;
+                  case "tool_use":
+                    if (event.tool) {
+                      const activeId =
+                        store.activeConversationId || currentConversationId;
+                      addActiveTool(activeId, event.tool);
+                    }
+                    break;
+                  case "content":
+                    if (event.content) {
+                      const activeId =
+                        store.activeConversationId || currentConversationId;
+                      const currentMessages =
+                        getConversationState(activeId).messages;
+                      const lastMessage =
+                        currentMessages[currentMessages.length - 1];
+                      if (lastMessage && lastMessage.role === "assistant") {
+                        updateLastMessage(activeId, { content: event.content });
+                      } else if (!assistantContent) {
+                        addMessage(activeId, {
+                          id: `streaming-${Date.now()}`,
+                          role: "assistant",
+                          content: event.content,
+                          createdAt: new Date().toISOString(),
+                        });
+                      }
+                    }
+                    break;
+                  case "complete":
+                    const activeId =
+                      store.activeConversationId || currentConversationId;
+                    updateLastMessage(activeId, {
+                      id: event.id,
+                      clay_tools_used:
+                        event.tools_used.length > 0
+                          ? event.tools_used
+                          : undefined,
+                      processing_time_ms: event.processing_time_ms,
+                    });
+                    // Clear active tools when response is complete
+                    clearActiveTools(activeId);
+                    // Clear loading state for both 'new' and actual conversation ID
+                    setConversationLoading(activeId, false);
+                    if (currentConversationId === "new" && activeId !== "new") {
+                      setConversationLoading("new", false);
+                    }
+                    break;
+                  case "error":
+                    const errorActiveId =
+                      store.activeConversationId || currentConversationId;
+                    setConversationError(errorActiveId, event.error);
+                    // Clear active tools on error
+                    clearActiveTools(errorActiveId);
+                    break;
+                }
+              } catch (e) {
+                // Failed to parse SSE event
+              }
+            }
+          }
+        }
+        setConversationStreaming(currentConversationId, false);
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") {
+          // Request was cancelled - don't show error message
+        } else {
+          setConversationError(
+            currentConversationId,
+            err instanceof Error ? err.message : "An error occurred"
+          );
+        }
+      } finally {
+        const finalActiveId =
+          store.activeConversationId || currentConversationId;
+        setConversationLoading(finalActiveId, false);
+        setConversationStreaming(finalActiveId, false);
+        setConversationAbortController(finalActiveId, null);
+        // Clear active tools when streaming ends (cleanup)
+        clearActiveTools(finalActiveId);
+        // Also clear for 'new' if we transitioned
+        if (currentConversationId === "new" && finalActiveId !== "new") {
+          setConversationLoading("new", false);
+          setConversationStreaming("new", false);
+          setConversationAbortController("new", null);
+          clearActiveTools("new");
+        }
+      }
+    },
+    [projectId, currentConversationId]
+  );
+
+  const sendMessage = useCallback(
+    async (content: string, files?: File[], isFromQueue: boolean = false) => {
+      if (!projectId) {
+        setConversationError(currentConversationId, "Project ID is required");
+        return;
+      }
+
+      // Check if we should queue the message instead (only if not already from queue)
+      const state = getConversationState(currentConversationId);
+      if (!isFromQueue && (state.isStreaming || state.isProcessingQueue)) {
+        // Add to queue instead of sending immediately
+        addToMessageQueue(currentConversationId, {
+          id: `queue-${Date.now()}`,
+          content,
+          files: files || [],
+          timestamp: new Date(),
+        });
+        return;
+      }
+
+      // When sending a new message with forgotten messages, the backend will delete them permanently
+      // Clear the forgotten state immediately to reflect this
       if (forgottenAfterMessageId) {
-        await restoreForgottenMessages();
+        setConversationForgotten(currentConversationId, null, 0);
       }
 
       // Upload files first if any
       let uploadedFilePaths: string[] = [];
       let reusedFiles: any[] = [];
-      
+
       if (files && files.length > 0) {
         try {
-          const clientId = localStorage.getItem('activeClientId');
+          const clientId = localStorage.getItem("activeClientId");
           if (!clientId) {
-            setConversationError(currentConversationId, "No active client found");
+            setConversationError(
+              currentConversationId,
+              "No active client found"
+            );
             return;
           }
 
@@ -377,13 +660,16 @@ export function useValtioChat(projectId: string, conversationId?: string) {
               });
             } else {
               const formData = new FormData();
-              formData.append('file', file);
+              formData.append("file", file);
 
-              const response = await fetch(`${API_BASE_URL}/upload?client_id=${clientId}&project_id=${projectId}`, {
-                method: 'POST',
-                credentials: 'include',
-                body: formData,
-              });
+              const response = await fetch(
+                `${API_BASE_URL}/upload?client_id=${clientId}&project_id=${projectId}`,
+                {
+                  method: "POST",
+                  credentials: "include",
+                  body: formData,
+                }
+              );
 
               if (!response.ok) {
                 throw new Error(`Failed to upload ${file.name}`);
@@ -394,15 +680,24 @@ export function useValtioChat(projectId: string, conversationId?: string) {
               addConversationUploadedFile(currentConversationId, result);
             }
           }
-          
+
           if (reusedFiles.length > 0) {
-            const existingFiles = getConversationState(currentConversationId).uploadedFiles;
-            const existingIds = new Set(existingFiles.map(f => f.id));
-            const newFiles = reusedFiles.filter(f => !existingIds.has(f.id));
-            newFiles.forEach(file => addConversationUploadedFile(currentConversationId, file));
+            const existingFiles = getConversationState(
+              currentConversationId
+            ).uploadedFiles;
+            const existingIds = new Set(existingFiles.map((f) => f.id));
+            const newFiles = reusedFiles.filter((f) => !existingIds.has(f.id));
+            newFiles.forEach((file) =>
+              addConversationUploadedFile(currentConversationId, file)
+            );
           }
         } catch (err) {
-          setConversationError(currentConversationId, `File upload failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+          setConversationError(
+            currentConversationId,
+            `File upload failed: ${
+              err instanceof Error ? err.message : "Unknown error"
+            }`
+          );
           setConversationLoading(currentConversationId, false);
           return;
         }
@@ -419,7 +714,9 @@ export function useValtioChat(projectId: string, conversationId?: string) {
         // Add user message to local state immediately
         let messageContent = content;
         if (uploadedFilePaths.length > 0) {
-          messageContent += `\n\nAttached files:\n${uploadedFilePaths.map(f => `- ${f}`).join('\n')}`;
+          messageContent += `\n\nAttached files:\n${uploadedFilePaths
+            .map((f) => `- ${f}`)
+            .join("\n")}`;
         }
 
         const userMessage = {
@@ -430,186 +727,230 @@ export function useValtioChat(projectId: string, conversationId?: string) {
         };
         addMessage(currentConversationId, userMessage);
 
-        // If we're sending a message from /new, mark that we're starting a new conversation
-        if (currentConversationId === 'new') {
-          setConversationStarted(currentConversationId, true);
+        // Always use streaming endpoint (non-streaming endpoint doesn't exist)
+        setConversationStreaming(currentConversationId, true);
+        let assistantContent = "";
+
+        const response = await fetch(`${API_BASE_URL}/chat/stream`, {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            messages: [
+              {
+                id: `msg-${Date.now()}`,
+                role: "user",
+                content,
+              },
+            ],
+            project_id: projectId,
+            conversation_id: currentConversationId,
+          }),
+          signal: abortController.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
         }
 
-        if (useStreaming) {
-          // Use streaming endpoint
-          setConversationStreaming(currentConversationId, true);
-          let assistantContent = "";
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
 
-          const response = await fetch(`${API_BASE_URL}/chat/stream`, {
-            method: "POST",
-            credentials: "include",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              messages: [
-                {
-                  id: `msg-${Date.now()}`,
-                  role: "user",
-                  content,
-                },
-              ],
-              project_id: projectId,
-              conversation_id: currentConversationId,
-            }),
-            signal: abortController.signal,
-          });
+        if (!reader) {
+          throw new Error("No response body");
+        }
 
-          if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-          }
+        let buffer = "";
 
-          const reader = response.body?.getReader();
-          const decoder = new TextDecoder();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-          if (!reader) {
-            throw new Error("No response body");
-          }
+          const chunk = decoder.decode(value, { stream: true });
+          buffer += chunk;
+          const lines = buffer.split("\n");
 
-          let buffer = '';
-          
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
+          buffer = lines.pop() || "";
 
-            const chunk = decoder.decode(value, { stream: true });
-            buffer += chunk;
-            const lines = buffer.split("\n");
-            
-            buffer = lines.pop() || '';
+          for (const line of lines) {
+            const trimmedLine = line.trim();
+            if (trimmedLine.startsWith("data:")) {
+              const data = trimmedLine.slice(5).trim();
+              if (data === "[DONE]") continue;
+              if (!data) continue;
 
-            for (const line of lines) {
-              const trimmedLine = line.trim();
-              if (trimmedLine.startsWith("data:")) {
-                const data = trimmedLine.slice(5).trim();
-                if (data === "[DONE]") continue;
-                if (!data) continue;
+              try {
+                const event = JSON.parse(data);
 
-                try {
-                  const event = JSON.parse(data);
-                  
-                  switch (event.type) {
-                    case "start":
-                      if (event.conversation_id && event.conversation_id !== 'new' && (!currentConversationId || currentConversationId === 'new')) {
-                        // Handle conversation ID update if needed
-                      }
-                      break;
-                    case "progress":
-                      try {
-                        const streamJson = JSON.parse(event.content);
-                        
-                        if (streamJson.type === 'text' || streamJson.type === 'progress') {
-                          const textContent = streamJson.text || streamJson.content || '';
-                          if (textContent) {
-                            assistantContent += textContent;
-                            const currentMessages = getConversationState(currentConversationId).messages;
-                            const lastMessage = currentMessages[currentMessages.length - 1];
-                            if (lastMessage && lastMessage.role === "assistant") {
-                              updateLastMessage(currentConversationId, { content: assistantContent });
-                            } else {
-                              addMessage(currentConversationId, {
-                                id: `streaming-${Date.now()}`,
-                                role: "assistant",
-                                content: assistantContent,
-                                createdAt: new Date().toISOString(),
-                              });
-                            }
+                switch (event.type) {
+                  case "start":
+                    // Update conversation ID when we get the real ID from backend
+                    if (
+                      event.conversation_id &&
+                      event.conversation_id !== "new" &&
+                      currentConversationId === "new"
+                    ) {
+                      console.log(
+                        "[useValtioChat] Received real conversation ID:",
+                        event.conversation_id
+                      );
+
+                      // Don't use pushState, let React Router handle navigation
+                      // The navigation will happen via effect in the Chat component
+
+                      // Transfer the state from 'new' to the real conversation ID BEFORE setting active
+                      const newState = getConversationState("new");
+                      const realState = getConversationState(
+                        event.conversation_id
+                      );
+                      // Deep copy messages to avoid reference issues
+                      realState.messages = [...newState.messages];
+                      realState.isLoading = newState.isLoading;
+                      realState.isStreaming = newState.isStreaming;
+                      realState.error = newState.error;
+                      realState.uploadedFiles = [...newState.uploadedFiles];
+
+                      // Only set active conversation AFTER state is transferred
+                      setActiveConversation(event.conversation_id);
+                      
+                      // Dispatch a custom event to notify the sidebar to refresh
+                      window.dispatchEvent(new CustomEvent('conversation-created', {
+                        detail: { conversationId: event.conversation_id, projectId }
+                      }));
+                    }
+                    break;
+                  case "progress":
+                    try {
+                      const streamJson = JSON.parse(event.content);
+
+                      if (
+                        streamJson.type === "text" ||
+                        streamJson.type === "progress"
+                      ) {
+                        const textContent =
+                          streamJson.text || streamJson.content || "";
+                        if (textContent) {
+                          assistantContent += textContent;
+                          // Use the active conversation ID from the store, fallback to current if not set
+                          const activeId =
+                            store.activeConversationId || currentConversationId;
+                          const currentMessages =
+                            getConversationState(activeId).messages;
+                          const lastMessage =
+                            currentMessages[currentMessages.length - 1];
+                          if (lastMessage && lastMessage.role === "assistant") {
+                            updateLastMessage(activeId, {
+                              content: assistantContent,
+                            });
+                          } else {
+                            addMessage(activeId, {
+                              id: `streaming-${Date.now()}`,
+                              role: "assistant",
+                              content: assistantContent,
+                              createdAt: new Date().toISOString(),
+                            });
                           }
                         }
-                      } catch (parseError) {
-                        // Skip non-JSON messages
                       }
-                      break;
-                    case "content":
-                      if (event.content) {
-                        const currentMessages = getConversationState(currentConversationId).messages;
-                        const lastMessage = currentMessages[currentMessages.length - 1];
-                        if (lastMessage && lastMessage.role === "assistant") {
-                          updateLastMessage(currentConversationId, { content: event.content });
-                        } else if (!assistantContent) {
-                          addMessage(currentConversationId, {
-                            id: `streaming-${Date.now()}`,
-                            role: "assistant",
-                            content: event.content,
-                            createdAt: new Date().toISOString(),
-                          });
-                        }
+                    } catch (parseError) {
+                      // Skip non-JSON messages
+                    }
+                    break;
+                  case "tool_use":
+                    if (event.tool) {
+                      const activeId =
+                        store.activeConversationId || currentConversationId;
+                      addActiveTool(activeId, event.tool);
+                    }
+                    break;
+                  case "content":
+                    if (event.content) {
+                      const activeId =
+                        store.activeConversationId || currentConversationId;
+                      const currentMessages =
+                        getConversationState(activeId).messages;
+                      const lastMessage =
+                        currentMessages[currentMessages.length - 1];
+                      if (lastMessage && lastMessage.role === "assistant") {
+                        updateLastMessage(activeId, { content: event.content });
+                      } else if (!assistantContent) {
+                        addMessage(activeId, {
+                          id: `streaming-${Date.now()}`,
+                          role: "assistant",
+                          content: event.content,
+                          createdAt: new Date().toISOString(),
+                        });
                       }
-                      break;
-                    case "complete":
-                      updateLastMessage(currentConversationId, {
-                        id: event.id,
-                        clay_tools_used: event.tools_used.length > 0 ? event.tools_used : undefined,
-                        processing_time_ms: event.processing_time_ms,
-                      });
-                      break;
-                    case "error":
-                      setConversationError(currentConversationId, event.error);
-                      break;
-                  }
-                } catch (e) {
-                  // Failed to parse SSE event
+                    }
+                    break;
+                  case "complete":
+                    const activeId =
+                      store.activeConversationId || currentConversationId;
+                    updateLastMessage(activeId, {
+                      id: event.id,
+                      clay_tools_used:
+                        event.tools_used.length > 0
+                          ? event.tools_used
+                          : undefined,
+                      processing_time_ms: event.processing_time_ms,
+                    });
+                    // Clear active tools when response is complete
+                    clearActiveTools(activeId);
+                    // Clear loading state for both 'new' and actual conversation ID
+                    setConversationLoading(activeId, false);
+                    if (currentConversationId === "new" && activeId !== "new") {
+                      setConversationLoading("new", false);
+                    }
+                    break;
+                  case "error":
+                    const errorActiveId =
+                      store.activeConversationId || currentConversationId;
+                    setConversationError(errorActiveId, event.error);
+                    // Clear active tools on error
+                    clearActiveTools(errorActiveId);
+                    break;
                 }
+              } catch (e) {
+                // Failed to parse SSE event
               }
             }
           }
-          setConversationStreaming(currentConversationId, false);
-        } else {
-          // Non-streaming fallback (same logic as original)
-          const response = await fetch(`${API_BASE_URL}/chat/one-shot`, {
-            method: "POST",
-            credentials: "include",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              messages: [
-                {
-                  id: `msg-${Date.now()}`,
-                  role: "user",
-                  content,
-                },
-              ],
-              project_id: projectId,
-              conversation_id: currentConversationId,
-            }),
-            signal: abortController.signal,
-          });
-
-          if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-          }
-
-          const assistantResponse = await response.json();
-
-          const assistantMessage = {
-            id: assistantResponse.id,
-            role: "assistant" as const,
-            content: assistantResponse.content,
-            createdAt: assistantResponse.createdAt,
-            clay_tools_used: assistantResponse.clay_tools_used,
-            processing_time_ms: assistantResponse.processing_time_ms,
-          };
-          addMessage(currentConversationId, assistantMessage);
         }
+        setConversationStreaming(currentConversationId, false);
       } catch (err) {
-        if (err instanceof DOMException && err.name === 'AbortError') {
+        if (err instanceof DOMException && err.name === "AbortError") {
           // Request was cancelled - don't show error message
         } else {
-          setConversationError(currentConversationId, err instanceof Error ? err.message : "An error occurred");
+          setConversationError(
+            currentConversationId,
+            err instanceof Error ? err.message : "An error occurred"
+          );
         }
       } finally {
-        setConversationLoading(currentConversationId, false);
-        setConversationStreaming(currentConversationId, false);
-        setConversationAbortController(currentConversationId, null);
+        const finalActiveId =
+          store.activeConversationId || currentConversationId;
+        setConversationLoading(finalActiveId, false);
+        setConversationStreaming(finalActiveId, false);
+        setConversationAbortController(finalActiveId, null);
+        // Clear active tools when streaming ends (cleanup)
+        clearActiveTools(finalActiveId);
+        // Also clear for 'new' if we transitioned
+        if (currentConversationId === "new" && finalActiveId !== "new") {
+          setConversationLoading("new", false);
+          setConversationStreaming("new", false);
+          setConversationAbortController("new", null);
+          clearActiveTools("new");
+        }
       }
     },
-    [projectId, currentConversationId, forgottenAfterMessageId, restoreForgottenMessages]
+    [
+      projectId,
+      currentConversationId,
+      forgottenAfterMessageId,
+      restoreForgottenMessages,
+    ]
   );
 
   // Function to stop/cancel current request
@@ -651,45 +992,164 @@ export function useValtioChat(projectId: string, conversationId?: string) {
         }
 
         const result = await response.json();
-        
-        setConversationForgotten(currentConversationId, messageId, result.forgotten_count || 0);
-        
+
+        setConversationForgotten(
+          currentConversationId,
+          messageId,
+          result.forgotten_count || 0
+        );
+
         // Filter messages locally to only show those up to and including the forgotten point
-        const messageIndex = messages.findIndex(m => m.id === messageId);
+        const messageIndex = messages.findIndex((m) => m.id === messageId);
         if (messageIndex !== -1) {
-          updateConversationMessages(currentConversationId, [...messages.slice(0, messageIndex + 1)]);
+          const filteredMessages = messages
+            .slice(0, messageIndex + 1)
+            .map((msg) => ({
+              ...msg,
+              clay_tools_used: msg.clay_tools_used
+                ? [...msg.clay_tools_used]
+                : undefined,
+              file_attachments: msg.file_attachments
+                ? [...msg.file_attachments]
+                : undefined,
+            }));
+          updateConversationMessages(currentConversationId, filteredMessages);
         }
       } catch (err) {
-        setConversationError(currentConversationId, err instanceof Error ? err.message : "Failed to forget messages");
+        setConversationError(
+          currentConversationId,
+          err instanceof Error ? err.message : "Failed to forget messages"
+        );
       }
     },
     [currentConversationId, messages, currentAbortController]
   );
 
+  // Get queue state early to use in dependencies
+  const messageQueue = conversationState?.messageQueue || [];
+  const isProcessingQueue = conversationState?.isProcessingQueue || false;
+
+  // Queue management functions
+  const editQueuedMessage = useCallback(
+    (messageId: string, newContent: string) => {
+      updateMessageInQueue(currentConversationId, messageId, {
+        content: newContent,
+      });
+    },
+    [currentConversationId]
+  );
+
+  const cancelQueuedMessage = useCallback(
+    (messageId: string) => {
+      removeFromMessageQueue(currentConversationId, messageId);
+    },
+    [currentConversationId]
+  );
+
+  // Store sendMessage in a ref to avoid dependency issues
+  const sendMessageRef = useRef(sendMessage);
+  useEffect(() => {
+    sendMessageRef.current = sendMessage;
+  }, [sendMessage]);
+
+  // Auto-process queue after streaming completes
+  useEffect(() => {
+    const state = getConversationState(currentConversationId);
+    if (
+      !state.isStreaming &&
+      !state.isProcessingQueue &&
+      state.messageQueue.length > 0
+    ) {
+      // Process next message in queue
+      const nextMessage = state.messageQueue[0];
+      if (nextMessage) {
+        // Remove from queue first
+        removeFromMessageQueue(currentConversationId, nextMessage.id);
+
+        // Send the queued message with isFromQueue flag
+        const processQueuedMessage = async () => {
+          await sendMessageRef.current(
+            nextMessage.content,
+            nextMessage.files,
+            true
+          );
+        };
+
+        processQueuedMessage();
+      }
+    }
+  }, [currentConversationId, isStreaming, messageQueue.length]); // Watch queue length instead
+
   // Return the appropriate conversation ID and messages
-  const returnedConversationId = conversationId === 'new' 
-    ? (hasStartedNewConversation && currentConversationId && currentConversationId !== 'new' && currentConversationId.startsWith('conv-')
-       ? currentConversationId
-       : 'new')
-    : currentConversationId;
-  const returnedMessages = conversationId === 'new' ? [] : messages;
+  // When we're on /new, only return a different conversation ID if we've actually sent a message
+  // and received a real conversation ID from the backend
+  const activeConversationId = snapshot.activeConversationId;
+
+  // Check if we should navigate away from /new
+  // This happens when we've sent a message and received a real conversation ID
+  const shouldNavigateFromNew =
+    conversationId === "new" &&
+    activeConversationId &&
+    activeConversationId !== "new" &&
+    activeConversationId.startsWith("conv-");
+
+  const returnedConversationId =
+    conversationId === "new"
+      ? shouldNavigateFromNew
+        ? activeConversationId
+        : "new"
+      : currentConversationId;
+  // For messages, use the active conversation if we have it, otherwise use current messages
+  // If we're transitioning, prefer the new conversation's messages but fall back to current if empty
+  const returnedMessages =
+    conversationId === "new" &&
+    activeConversationId &&
+    activeConversationId !== "new"
+      ? snapshot.conversations[activeConversationId]?.messages?.length > 0
+        ? snapshot.conversations[activeConversationId].messages
+        : messages
+      : messages;
+
+  // For loading states, use the active conversation's state when we're in a new chat that has transitioned
+  const effectiveConversationId =
+    conversationId === "new" &&
+    activeConversationId &&
+    activeConversationId !== "new"
+      ? activeConversationId
+      : currentConversationId;
+  const effectiveIsLoading =
+    snapshot.conversations[effectiveConversationId]?.isLoading || false;
+  const effectiveIsStreaming =
+    snapshot.conversations[effectiveConversationId]?.isStreaming || false;
+  const effectiveActiveTools =
+    snapshot.conversations[effectiveConversationId]?.activeTools || [];
 
   return {
     messages: returnedMessages,
     sendMessage,
+    resendMessage,
     stopMessage,
     forgetMessagesFrom,
     restoreForgottenMessages,
-    isLoading,
+    isLoading: effectiveIsLoading,
     isLoadingMessages,
-    isStreaming,
+    isStreaming: effectiveIsStreaming,
     error,
-    canStop: currentConversationId ? getConversationAbortController(currentConversationId) !== null : false,
+    canStop: currentConversationId
+      ? getConversationAbortController(currentConversationId) !== null
+      : false,
     conversationId: returnedConversationId,
     uploadedFiles,
     forgottenAfterMessageId,
     forgottenCount,
     hasForgottenMessages: forgottenAfterMessageId !== null,
+    // Queue management
+    messageQueue,
+    isProcessingQueue,
+    editQueuedMessage,
+    cancelQueuedMessage,
+    // Tool usage indicators
+    activeTools: effectiveActiveTools,
     // Enhanced context information
     conversationContext,
     projectContext,

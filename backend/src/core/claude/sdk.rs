@@ -71,7 +71,8 @@ impl ClaudeSDK {
                 }
             };
             
-            // Create MCP servers configuration - MCP server will load DATABASE_URL from .env file
+            // Create MCP servers configuration - pass DATABASE_URL as environment variable
+            let database_url = std::env::var("DATABASE_URL").unwrap_or_default();
             let mcp_servers = json!({
                 "mcpServers": {
                     "data-analysis": {
@@ -80,7 +81,10 @@ impl ClaudeSDK {
                         "args": [
                             "--project-id", project_id,
                             "--client-id", self.client_id.to_string()
-                        ]
+                        ],
+                        "env": {
+                            "DATABASE_URL": database_url
+                        }
                     }
                 }
             });
@@ -91,11 +95,46 @@ impl ClaudeSDK {
         }
     }
     
+    async fn ensure_requirements_met(&self, tx: &mpsc::Sender<ClaudeMessage>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let bun_executable = self.bun_path.join("bin/bun");
+        let claude_cli = self.client_dir.join("node_modules/@anthropic-ai/claude-code/cli.js");
+        
+        // Check if global Bun executable exists (it should have been installed at server startup)
+        if !bun_executable.exists() {
+            return Err("Global Bun installation not found. This should have been installed at server startup.".into());
+        }
+        
+        // Check if Claude CLI is installed for this specific client
+        if !claude_cli.exists() {
+            tracing::info!("Claude CLI not found for client {}, installing...", self.client_id);
+            
+            let _ = tx.send(ClaudeMessage::Progress { 
+                content: "Setting up client environment - Installing Claude CLI package...".to_string() 
+            }).await;
+            
+            use crate::core::claude::setup::ClaudeSetup;
+            
+            let setup = ClaudeSetup::new(self.client_id);
+            setup.install_claude_code(None).await?;
+            
+            let _ = tx.send(ClaudeMessage::Progress { 
+                content: "Client environment setup complete!".to_string() 
+            }).await;
+            
+            tracing::info!("Claude CLI installation completed for client {}", self.client_id);
+        }
+        
+        Ok(())
+    }
+
     pub async fn query(
         &self,
         request: QueryRequest,
     ) -> Result<mpsc::Receiver<ClaudeMessage>, Box<dyn std::error::Error + Send + Sync>> {
         let (tx, rx) = mpsc::channel(100);
+        
+        // Ensure all requirements are met before proceeding
+        self.ensure_requirements_met(&tx).await?;
         
         let oauth_token = self.oauth_token.lock().await.clone()
             .ok_or("No OAuth token available")?;
@@ -159,37 +198,57 @@ impl ClaudeSDK {
                             if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
                                 // Check if this is the final assistant message
                                 if let Some(msg_type) = json.get("type").and_then(|v| v.as_str()) {
+                                    tracing::debug!("Received JSON message type: {}", msg_type);
                                     if msg_type == "assistant" {
                                         // This is the assistant message with content
                                         if let Some(message) = json.get("message") {
                                             if let Some(content) = message.get("content") {
-                                                // Extract text from content blocks
-                                                let text = if content.is_array() {
-                                                    content.as_array()
-                                                        .and_then(|blocks| {
-                                                            blocks.iter()
-                                                                .filter_map(|block| {
-                                                                    if block.get("type").and_then(|t| t.as_str()) == Some("text") {
-                                                                        block.get("text").and_then(|t| t.as_str())
-                                                                    } else {
-                                                                        None
+                                                // Check for tool use blocks in the content array
+                                                if content.is_array() {
+                                                    if let Some(blocks) = content.as_array() {
+                                                        for block in blocks {
+                                                            // Check for tool_use blocks
+                                                            if let Some(block_type) = block.get("type").and_then(|t| t.as_str()) {
+                                                                if block_type == "tool_use" {
+                                                                    // Extract tool name and send ToolUse event
+                                                                    if let Some(name) = block.get("name").and_then(|n| n.as_str()) {
+                                                                        tracing::info!("Detected tool usage: {}", name);
+                                                                        let args = block.get("input").cloned().unwrap_or(json!({}));
+                                                                        tracing::info!("Sending ToolUse event: {}", name);
+                                                                        let _ = tx_clone.send(ClaudeMessage::ToolUse {
+                                                                            tool: name.to_string(),
+                                                                            args,
+                                                                        }).await;
                                                                     }
-                                                                })
-                                                                .collect::<Vec<_>>()
-                                                                .join("")
-                                                                .into()
-                                                        })
-                                                        .unwrap_or_default()
+                                                                }
+                                                            }
+                                                        }
+                                                        
+                                                        // Extract text from content blocks
+                                                        let text = blocks.iter()
+                                                            .filter_map(|block| {
+                                                                if block.get("type").and_then(|t| t.as_str()) == Some("text") {
+                                                                    block.get("text").and_then(|t| t.as_str())
+                                                                } else {
+                                                                    None
+                                                                }
+                                                            })
+                                                            .collect::<Vec<_>>()
+                                                            .join("");
+                                                        
+                                                        if !text.is_empty() {
+                                                            let _ = tx_clone.send(ClaudeMessage::Result {
+                                                                result: text
+                                                            }).await;
+                                                        }
+                                                    }
                                                 } else if content.is_string() {
-                                                    content.as_str().unwrap_or("").to_string()
-                                                } else {
-                                                    String::new()
-                                                };
-                                                
-                                                if !text.is_empty() {
-                                                    let _ = tx_clone.send(ClaudeMessage::Result {
-                                                        result: text
-                                                    }).await;
+                                                    let text = content.as_str().unwrap_or("").to_string();
+                                                    if !text.is_empty() {
+                                                        let _ = tx_clone.send(ClaudeMessage::Result {
+                                                            result: text
+                                                        }).await;
+                                                    }
                                                 }
                                             }
                                         }
@@ -201,6 +260,17 @@ impl ClaudeSDK {
                                                     result: result.to_string()
                                                 }).await;
                                             }
+                                        }
+                                    } else if msg_type == "tool_call" || msg_type == "tool_execution" {
+                                        // Handle standalone tool execution messages
+                                        if let Some(tool_name) = json.get("tool").and_then(|t| t.as_str()) {
+                                            tracing::info!("Detected standalone tool call: {}", tool_name);
+                                            let args = json.get("arguments").cloned().unwrap_or(json!({}));
+                                            tracing::info!("Sending standalone ToolUse event: {}", tool_name);
+                                            let _ = tx_clone.send(ClaudeMessage::ToolUse {
+                                                tool: tool_name.to_string(),
+                                                args,
+                                            }).await;
                                         }
                                     }
                                 }

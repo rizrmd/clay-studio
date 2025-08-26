@@ -1,6 +1,8 @@
 // Entry point for the MCP server binary
 // This creates a separate executable that Claude CLI will spawn
 
+use chrono;
+
 fn main() {
     // Load environment variables from backend/.env file if present
     let backend_env_path = std::env::current_exe()
@@ -22,7 +24,11 @@ fn main() {
     }
     
     // Set up basic logging to stderr (so it doesn't interfere with stdout JSON-RPC)
-    eprintln!("MCP Server v0.1.0 starting...");
+    let start_time = chrono::Utc::now();
+    eprintln!(
+        "[{}] [INFO] MCP Server v0.1.0 starting...", 
+        start_time.format("%Y-%m-%d %H:%M:%S UTC")
+    );
     
     // Parse command line arguments
     let args: Vec<String> = std::env::args().collect();
@@ -38,7 +44,10 @@ fn main() {
                     project_id = args[i + 1].clone();
                     i += 2;
                 } else {
-                    eprintln!("Error: --project-id requires a value");
+                    eprintln!(
+                        "[{}] [ERROR] --project-id requires a value", 
+                        chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
+                    );
                     std::process::exit(1);
                 }
             }
@@ -47,7 +56,10 @@ fn main() {
                     client_id = args[i + 1].clone();
                     i += 2;
                 } else {
-                    eprintln!("Error: --client-id requires a value");
+                    eprintln!(
+                        "[{}] [ERROR] --client-id requires a value", 
+                        chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
+                    );
                     std::process::exit(1);
                 }
             }
@@ -56,7 +68,11 @@ fn main() {
                 std::process::exit(0);
             }
             _ => {
-                eprintln!("Unknown argument: {}", args[i]);
+                eprintln!(
+                    "[{}] [ERROR] Unknown argument: {}", 
+                    chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"), 
+                    args[i]
+                );
                 print_help();
                 std::process::exit(1);
             }
@@ -76,13 +92,19 @@ fn main() {
         }
     }
     
-    eprintln!("Configuration:");
+    eprintln!(
+        "[{}] [INFO] Configuration:", 
+        chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
+    );
     eprintln!("  Project ID: {}", project_id);
     eprintln!("  Client ID: {}", client_id);
     
     // Check for required DATABASE_URL
     if std::env::var("DATABASE_URL").is_err() {
-        eprintln!("Error: DATABASE_URL environment variable is required");
+        eprintln!(
+            "[{}] [FATAL] DATABASE_URL environment variable is required", 
+            chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
+        );
         eprintln!("Please set DATABASE_URL to your PostgreSQL connection string");
         std::process::exit(1);
     }

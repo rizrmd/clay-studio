@@ -18,11 +18,37 @@ services:
     volumes:
       # Named volume for persistent client data
       - clay-clients:/app/.clients
+      # Writable tmp directory for Claude CLI operations
+      - /tmp
       # Optional: Mount local .env file if needed
       # - ./.env:/app/.env:ro
+    tmpfs:
+      # Writable temporary filesystems
+      - /app/tmp:noexec,nosuid,size=100m
+      - /tmp:noexec,nosuid,size=100m
     restart: unless-stopped
     networks:
       - clay-network
+    # Security constraints
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    # Resource limits to prevent exhaustion
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    # Process limits
+    ulimits:
+      nproc: 1000
+      nofile: 8192
 
 volumes:
   clay-clients:

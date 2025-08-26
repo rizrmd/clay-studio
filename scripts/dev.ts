@@ -8,39 +8,45 @@ const rootDir = join(import.meta.dir, "..");
 const frontendDir = join(rootDir, "frontend");
 const backendDir = join(rootDir, "backend");
 
-// Kill processes on port 7680 (backend)
-spawnSync({
-  cmd: ["lsof", "-ti:7680"],
-  stdout: "pipe",
-  stderr: "pipe",
-})
-  .stdout?.toString()
-  .trim()
-  .split("\n")
-  .filter(Boolean)
-  .forEach((pid) => {
-    if (pid) {
-      spawnSync({ cmd: ["kill", "-9", pid] });
-      console.log(`  Killed process ${pid} on port 7680`);
-    }
+// Helper function to clean up a specific port
+const cleanupPort = (port: number) => {
+  const result = spawnSync({
+    cmd: ["lsof", "-ti:" + port],
+    stdout: "pipe",
+    stderr: "pipe",
   });
+  
+  result.stdout?.toString()
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .forEach((pid) => {
+      if (pid) {
+        spawnSync({ cmd: ["kill", "-9", pid] });
+        console.log(`  🧹 Cleaned up process ${pid} on port ${port}`);
+      }
+    });
+};
 
-// Kill processes on port 7690 (frontend)
-spawnSync({
-  cmd: ["lsof", "-ti:7690"],
+// Initial cleanup - kill processes on ports 7680 and 7690
+console.log("🧹 Cleaning up existing processes...");
+cleanupPort(7680); // backend
+cleanupPort(7690); // frontend
+
+// Build MCP server debug binary first
+console.log("🔧 Building MCP server debug binary...");
+const mcpBuildResult = spawnSync({
+  cmd: ["cargo", "build", "--bin", "mcp_server"],
+  cwd: backendDir,
   stdout: "pipe",
   stderr: "pipe",
-})
-  .stdout?.toString()
-  .trim()
-  .split("\n")
-  .filter(Boolean)
-  .forEach((pid) => {
-    if (pid) {
-      spawnSync({ cmd: ["kill", "-9", pid] });
-      console.log(`  Killed process ${pid} on port 7690`);
-    }
-  });
+});
+
+if (mcpBuildResult.exitCode === 0) {
+  console.log("✅ MCP server debug binary built successfully");
+} else {
+  console.error("❌ MCP server build failed:", new TextDecoder().decode(mcpBuildResult.stderr));
+}
 
 // Build and start backend with watching
 const backendProcess = spawn({
@@ -122,12 +128,46 @@ const monitorBackend = async () => {
         if (compilationInProgress && text.includes("Finished") && !hasErrors) {
           compilationInProgress = false;
           console.log("✅ Backend compiled successfully - starting...");
+          
+          // Also rebuild MCP server when backend recompiles
+          console.log("🔧 Rebuilding MCP server debug binary...");
+          try {
+            const mcpRebuild = spawn({
+              cmd: ["cargo", "build", "--bin", "mcp_server"],
+              cwd: backendDir,
+              stdout: "pipe",
+              stderr: "pipe",
+            });
+            
+            // Check if spawn was successful
+            if (mcpRebuild && mcpRebuild.exited) {
+              // Don't await - let it rebuild in background
+              mcpRebuild.exited.then((exitCode) => {
+                if (exitCode === 0) {
+                  console.log("✅ MCP server debug binary rebuilt successfully");
+                } else {
+                  console.error("❌ MCP server rebuild failed with exit code:", exitCode);
+                }
+              }).catch((error) => {
+                console.error("❌ MCP server rebuild error:", error);
+              });
+            } else {
+              console.error("❌ Failed to spawn MCP server rebuild process");
+            }
+          } catch (error) {
+            console.error("❌ Error starting MCP server rebuild:", error);
+          }
         }
         
         // Detect process crashes at runtime
-        if (text.includes("thread 'main' panicked") || text.includes("error: process didn't exit successfully")) {
+        if (text.includes("thread 'main' panicked") || text.includes("error: process didn't exit successfully") || text.includes("Address already in use")) {
           backendRunning = false;
-          console.error("💥 Backend crashed - cargo watch will restart it...");
+          console.error("💥 Backend crashed - cleaning up ports and restarting...");
+          
+          // Clean up port 7680 when we detect a crash
+          setTimeout(() => {
+            cleanupPort(7680);
+          }, 500);
         }
       }
     }

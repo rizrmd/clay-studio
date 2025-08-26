@@ -1,7 +1,14 @@
 import { proxy, subscribe } from 'valtio'
-import { Message, ConversationContext, ProjectContextResponse } from '../hooks/use-clay-chat'
+import { Message, ConversationContext, ProjectContextResponse } from '../types/chat'
 
 // Types for our global state
+export interface QueuedMessage {
+  id: string
+  content: string
+  files: File[]
+  timestamp: Date
+}
+
 export interface ConversationState {
   messages: Message[]
   isLoading: boolean
@@ -11,9 +18,11 @@ export interface ConversationState {
   uploadedFiles: any[]
   forgottenAfterMessageId: string | null
   forgottenCount: number
-  hasStartedNewConversation: boolean
   currentAbortController: AbortController | null
   conversationContext?: ConversationContext
+  messageQueue: QueuedMessage[]
+  isProcessingQueue: boolean
+  activeTools: string[]
 }
 
 export interface InputState {
@@ -81,6 +90,23 @@ export const store = proxy(initialState)
 // Helper functions to manage conversation state
 export const getConversationState = (conversationId: string): ConversationState => {
   if (!store.conversations[conversationId]) {
+    // Try to restore queue from sessionStorage
+    let restoredQueue: QueuedMessage[] = []
+    const savedQueue = sessionStorage.getItem(`clay_queue_${conversationId}`)
+    
+    if (savedQueue) {
+      try {
+        const parsed = JSON.parse(savedQueue)
+        restoredQueue = parsed.map((msg: any) => ({
+          ...msg,
+          files: [], // Files can't be restored from sessionStorage
+          timestamp: new Date(msg.timestamp)
+        }))
+      } catch (e) {
+        console.error('Failed to restore queue:', e)
+      }
+    }
+    
     store.conversations[conversationId] = {
       messages: [],
       isLoading: false,
@@ -90,8 +116,10 @@ export const getConversationState = (conversationId: string): ConversationState 
       uploadedFiles: [],
       forgottenAfterMessageId: null,
       forgottenCount: 0,
-      hasStartedNewConversation: false,
-      currentAbortController: null
+      currentAbortController: null,
+      messageQueue: restoredQueue,
+      isProcessingQueue: false,
+      activeTools: []
     }
   }
   return store.conversations[conversationId]
@@ -186,10 +214,6 @@ export const setConversationForgotten = (conversationId: string, messageId: stri
   state.forgottenCount = count
 }
 
-export const setConversationStarted = (conversationId: string, started: boolean) => {
-  const state = getConversationState(conversationId)
-  state.hasStartedNewConversation = started
-}
 
 export const setConversationContext = (conversationId: string, context: ConversationContext | undefined) => {
   const state = getConversationState(conversationId)
@@ -235,6 +259,75 @@ export const setFileSidebarOpen = (open: boolean) => {
 
 export const setActiveTab = (tab: string) => {
   store.ui.activeTab = tab
+}
+
+// Message queue management functions
+export const addToMessageQueue = (conversationId: string, message: QueuedMessage) => {
+  const state = getConversationState(conversationId)
+  state.messageQueue = [...state.messageQueue, message]
+  // Save to sessionStorage
+  saveQueueToStorage(conversationId, state.messageQueue)
+}
+
+export const removeFromMessageQueue = (conversationId: string, messageId: string) => {
+  const state = getConversationState(conversationId)
+  state.messageQueue = state.messageQueue.filter(m => m.id !== messageId)
+  // Save to sessionStorage
+  saveQueueToStorage(conversationId, state.messageQueue)
+}
+
+export const updateMessageInQueue = (conversationId: string, messageId: string, updates: Partial<QueuedMessage>) => {
+  const state = getConversationState(conversationId)
+  state.messageQueue = state.messageQueue.map(m => 
+    m.id === messageId ? { ...m, ...updates } : m
+  )
+  // Save to sessionStorage
+  saveQueueToStorage(conversationId, state.messageQueue)
+}
+
+export const clearMessageQueue = (conversationId: string) => {
+  const state = getConversationState(conversationId)
+  state.messageQueue = []
+  // Clear from sessionStorage
+  sessionStorage.removeItem(`clay_queue_${conversationId}`)
+}
+
+export const setIsProcessingQueue = (conversationId: string, isProcessing: boolean) => {
+  const state = getConversationState(conversationId)
+  state.isProcessingQueue = isProcessing
+}
+
+// Active tools management
+export const addActiveTool = (conversationId: string, tool: string) => {
+  const state = getConversationState(conversationId)
+  if (!state.activeTools.includes(tool)) {
+    state.activeTools = [...state.activeTools, tool]
+  }
+}
+
+export const removeActiveTool = (conversationId: string, tool: string) => {
+  const state = getConversationState(conversationId)
+  state.activeTools = state.activeTools.filter(t => t !== tool)
+}
+
+export const clearActiveTools = (conversationId: string) => {
+  const state = getConversationState(conversationId)
+  state.activeTools = []
+}
+
+// Helper to save queue to sessionStorage
+const saveQueueToStorage = (conversationId: string, queue: QueuedMessage[]) => {
+  if (queue.length > 0) {
+    const serializable = queue.map(m => ({
+      id: m.id,
+      content: m.content,
+      timestamp: m.timestamp,
+      hasFiles: m.files.length > 0
+    }))
+    sessionStorage.setItem(`clay_queue_${conversationId}`, JSON.stringify(serializable))
+  } else {
+    sessionStorage.removeItem(`clay_queue_${conversationId}`)
+  }
 }
 
 // Cleanup function to remove unused conversation state (prevent memory leaks)

@@ -4,7 +4,9 @@ import { Messages } from "../display";
 import { MultimodalInput } from "../input/multimodal-input";
 import { useValtioChat } from "@/hooks/use-valtio-chat";
 import { useInputState } from "@/hooks/use-input-state";
+import { updateConversationMessages } from "@/store";
 import { FileText } from "lucide-react";
+import type { Message } from "@/types/chat";
 
 interface ChatProps {
   projectId?: string;
@@ -37,6 +39,11 @@ export function Chat({
     uploadedFiles,
     hasForgottenMessages,
     forgottenCount,
+    messageQueue,
+    isProcessingQueue,
+    editQueuedMessage,
+    cancelQueuedMessage,
+    activeTools,
   } = useValtioChat(projectId || "", propConversationId);
 
   // Use the input state hook to persist input across conversation switches
@@ -48,24 +55,14 @@ export function Chat({
   } = useInputState(propConversationId || "new");
 
   // Handle navigation when a new conversation is created
+  // Navigate when we receive a real conversation ID from the backend
   useEffect(() => {
-    // Update the previous value for next render
-    previousPropConversationId.current = propConversationId;
-
-    // Only navigate away from /new when we receive a real conversation ID from the backend
-    // This happens after sending the first message
-    if (
-      propConversationId === "new" &&
-      hookConversationId &&
-      hookConversationId !== "new" &&
-      hookConversationId.startsWith("conv-")
-    ) {
-      const newUrl = `/chat/${projectId}/${hookConversationId}`;
-
-      // Navigate with replace to avoid adding to history
-      navigate(newUrl, { replace: true });
+    if (propConversationId === 'new' && hookConversationId && hookConversationId !== 'new') {
+      // Navigate to the real conversation URL
+      navigate(`/chat/${projectId}/${hookConversationId}`, { replace: true });
     }
-  }, [hookConversationId, propConversationId, projectId, navigate]);
+    previousPropConversationId.current = propConversationId;
+  }, [propConversationId, hookConversationId, projectId, navigate]);
 
   // Focus input when conversation changes (including navigating to /new)
   useEffect(() => {
@@ -83,7 +80,7 @@ export function Chat({
 
   const handleSubmit = async (e: React.FormEvent, files?: File[]) => {
     e.preventDefault();
-    if (!input.trim() || isLoading || !projectId) return;
+    if (!input.trim() || !projectId) return;
 
     const messageContent = input.trim();
     setInput("");
@@ -92,9 +89,39 @@ export function Chat({
     setPendingFiles([]);
     await sendMessage(
       messageContent,
-      true,
       allFiles.length > 0 ? allFiles : undefined
     );
+  };
+
+  const handleResendMessage = async (message: any) => {
+    if (!projectId) return;
+
+    // Extract the original content, removing any file attachment mentions
+    let content = message.content;
+
+    // Remove the "Attached files:" section if present
+    const attachedFilesIndex = content.indexOf("\n\nAttached files:");
+    if (attachedFilesIndex > -1) {
+      content = content.substring(0, attachedFilesIndex);
+    }
+
+    // Remove the current message from the messages array
+    const messageIndex = messages.findIndex((m) => m.id === message.id);
+    if (messageIndex !== -1) {
+      // Remove the current message and any subsequent assistant response
+      const messagesToKeep = messages.slice(0, messageIndex);
+
+      // Update the conversation state with the filtered messages
+      const currentConversationId =
+        hookConversationId || propConversationId || "new";
+      updateConversationMessages(
+        currentConversationId,
+        messagesToKeep as Message[]
+      );
+    }
+
+    // Send the message as a new message (not resend)
+    await sendMessage(content.trim());
   };
 
   // Container-level drag handlers for larger drop area
@@ -135,24 +162,21 @@ export function Chat({
     }
   };
 
-  const stop = () => {
-    stopMessage();
-  };
-
   return (
     <>
       <div
-        className="group w-full overflow-auto pl-0 peer-[[data-state=open]]:lg:pl-[250px] peer-[[data-state=open]]:xl:pl-[300px] relative"
+        className="group w-full overflow-auto pl-0 relative h-full"
         onDragEnter={handleContainerDragEnter}
         onDragLeave={handleContainerDragLeave}
         onDragOver={handleContainerDragOver}
         onDrop={handleContainerDrop}
       >
         {hasForgottenMessages && (
-          <div className="absolute left-0 right-0 bg-white pt-5 top-0 w-full z-10 ">
-            <div className="flex max-w-[44rem] mx-auto mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3  items-center justify-between">
+          <div className="absolute left-0 right-0 bg-white pt-5 top-0 w-full z-10 px-4">
+            <div className="flex max-w-[44rem] mx-auto mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 items-center justify-between">
               <p className="text-sm text-amber-800">
-                {forgottenCount} message{forgottenCount !== 1 ? "s" : ""} forgotten.
+                {forgottenCount} message{forgottenCount !== 1 ? "s" : ""}{" "}
+                forgotten.
               </p>
               <button
                 onClick={restoreForgottenMessages}
@@ -178,7 +202,7 @@ export function Chat({
           </div>
         )}
 
-        <div style={{ height: "100vh" }}>
+        <div className="h-full">
           <div className="h-full flex flex-col">
             {/* Error display */}
             {error && (
@@ -238,27 +262,37 @@ export function Chat({
                   isLoading={isLoading}
                   onForgetFrom={forgetMessagesFrom}
                   conversationId={hookConversationId}
+                  messageQueue={messageQueue.map((q) => ({
+                    ...q,
+                    files: [...q.files],
+                  }))}
+                  isProcessingQueue={isProcessingQueue}
+                  onEditQueued={editQueuedMessage}
+                  onCancelQueued={cancelQueuedMessage}
+                  isStreaming={isStreaming}
+                  canStop={canStop}
+                  onStop={stopMessage}
+                  activeTools={[...activeTools]}
+                  onResendMessage={handleResendMessage}
                 />
               </div>
             )}
           </div>
         </div>
         <div className="w-full absolute bottom-0 right-0">
-          <div className="mx-auto max-w-2xl px-4 ">
+          <div className="mx-auto max-w-2xl px-2 sm:px-4">
             <MultimodalInput
               input={input}
               setInput={setInput}
               handleSubmit={handleSubmit}
               isLoading={isLoading}
               isStreaming={isStreaming}
-              canStop={canStop}
-              stop={stop}
               projectId={projectId}
               uploadedFiles={uploadedFiles ? [...uploadedFiles] : []}
               externalFiles={pendingFiles ? [...pendingFiles] : []}
               onExternalFilesChange={setPendingFiles}
               shouldFocus={shouldFocusInput}
-              className={"-ml-2"}
+              className={""}
             />
           </div>
         </div>

@@ -1,29 +1,34 @@
-import React, { useEffect, useRef, memo, useMemo, useState } from "react";
-import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
-import { css } from "goober";
-import {
-  Bot,
-  User,
-  MoreVertical,
-  Trash2,
-  FileText,
-  Download,
-  ArrowDown,
-} from "lucide-react";
-import { cn } from "@/lib/utils";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeHighlight from "rehype-highlight";
-import rehypeRaw from "rehype-raw";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { ToolCallIndicator } from "./tool-call-indicator";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { API_BASE_URL } from "@/lib/url";
+import { cn } from "@/lib/utils";
+import { css } from "goober";
+import {
+  ArrowDown,
+  Bot,
+  Clock,
+  Download,
+  FileText,
+  MoreVertical,
+  Send,
+  Square,
+  Trash2,
+  User,
+} from "lucide-react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
+import rehypeHighlight from "rehype-highlight";
+import rehypeRaw from "rehype-raw";
+import remarkGfm from "remark-gfm";
 
 interface FileAttachment {
   id: string;
@@ -42,6 +47,14 @@ interface Message {
   role: "user" | "assistant" | "system";
   createdAt: Date;
   file_attachments?: FileAttachment[];
+  clay_tools_used?: string[];
+}
+
+interface QueuedMessage {
+  id: string;
+  content: string;
+  files: File[];
+  timestamp: Date;
 }
 
 interface MessagesProps {
@@ -49,6 +62,15 @@ interface MessagesProps {
   isLoading?: boolean;
   onForgetFrom?: (messageId: string) => void;
   conversationId?: string; // Add conversationId to detect conversation switches
+  messageQueue?: QueuedMessage[];
+  onEditQueued?: (messageId: string, newContent: string) => void;
+  onCancelQueued?: (messageId: string) => void;
+  isProcessingQueue?: boolean;
+  isStreaming?: boolean;
+  canStop?: boolean;
+  onStop?: () => void;
+  activeTools?: string[]; // Active tools being used
+  onResendMessage?: (message: Message) => void; // Add resend callback
 }
 
 // Helper function to format file size
@@ -82,17 +104,47 @@ const handleDownloadFile = async (file: FileAttachment) => {
   }
 };
 
+// Extended message type for display
+interface DisplayMessage extends Message {
+  isQueued?: boolean;
+  queuePosition?: number;
+  isEditing?: boolean;
+}
+
 // Memoized individual message component
 const MessageItem = memo(
   ({
     message,
     onForgetFrom,
+    onStartEdit,
+    onSaveEdit,
+    onCancelEdit,
+    onCancelQueued,
+    editingContent,
+    setEditingContent,
+    onResendMessage,
+    isLastUserMessage,
   }: {
-    message: Message;
+    message: DisplayMessage;
     onForgetFrom?: (messageId: string) => void;
+    onStartEdit?: (messageId: string) => void;
+    onSaveEdit?: () => void;
+    onCancelEdit?: () => void;
+    onCancelQueued?: (messageId: string) => void;
+    editingContent?: string;
+    setEditingContent?: (content: string) => void;
+    onResendMessage?: (message: Message) => void;
+    isLastUserMessage?: boolean;
   }) => {
+    const isQueued = message.isQueued;
+    const isEditing = message.isEditing;
     return (
-      <div className="flex max-w-[45rem] mx-auto cursor-default">
+      <div
+        className={cn(
+          "flex max-w-[45rem] mx-auto cursor-default",
+          isQueued && "opacity-70"
+        )}
+      >
         <div
           className={cn(
             "flex flex-1 relative p-2",
@@ -120,33 +172,127 @@ const MessageItem = memo(
                 message.role === "user" ? "max-w-[70%]" : "max-w-[70%]"
               )}
             >
+              {/* Queue indicator badge */}
+              {isQueued && (
+                <div className="flex items-center gap-2 mb-1">
+                  <Badge variant="outline" className="text-xs">
+                    <Clock className="h-3 w-3 mr-1" />
+                    Queued #{message.queuePosition}
+                  </Badge>
+                </div>
+              )}
               <div>
                 <div
                   className={cn(
                     "rounded-lg p-3 text-sm",
-                    message.role === "user"
+                    message.role === "user" && !isQueued
                       ? "bg-primary text-primary-foreground"
+                      : message.role === "user" && isQueued
+                      ? "bg-primary/20 text-foreground border-2 border-dashed border-primary/30"
                       : "bg-muted"
                   )}
                 >
-                  <div
-                    className={cn(
-                      "prose prose-sm max-w-none dark:prose-invert whitespace-pre-wrap break-words",
-                      css`
-                        .language-md {
-                          font-size: 13px;
-                          white-space: pre-wrap;
-                        }
-                      `
-                    )}
-                  >
-                    <ReactMarkdown
-                      remarkPlugins={[remarkGfm]}
-                      rehypePlugins={[rehypeHighlight, rehypeRaw]}
+                  {isEditing ? (
+                    <div className="space-y-2">
+                      <Textarea
+                        value={editingContent || message.content}
+                        onChange={(e) => setEditingContent?.(e.target.value)}
+                        className="min-h-[80px] text-sm bg-white border-0 min-w-[400px]"
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === "Escape") {
+                            onCancelEdit?.();
+                          } else if (
+                            e.key === "Enter" &&
+                            (e.metaKey || e.ctrlKey)
+                          ) {
+                            onSaveEdit?.();
+                          }
+                        }}
+                      />
+                      <div className="flex gap-2">
+                        <Button size="sm" onClick={onSaveEdit}>
+                          Save
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={onCancelEdit}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div
+                      className={cn(
+                        "prose prose-sm max-w-none dark:prose-invert overflow-hidden",
+                        css`
+                          & {
+                            margin-bottom: -5px;
+                          }
+                          code {
+                            font-size: 13px;
+                            background: white;
+                            padding: 2px 6px;
+                            border-radius: 4px;
+                          }
+                          h1,
+                          h2,
+                          h3,
+                          h4 {
+                            margin-top: 20px;
+                            margin-bottom: 5px;
+                          }
+                          h1 {
+                            font-size: 19px;
+                            border-bottom: 1px solid #ccc;
+                          }
+                          h2 {
+                            font-size: 18px;
+                            border-bottom: 1px solid #ddd;
+                          }
+                          h3 {
+                            font-size: 17px;
+                          }
+                          h4 {
+                            font-size: 16px;
+                          }
+
+                          p {
+                            margin-bottom: 5px;
+                          }
+                          ul,
+                          ol {
+                            margin-left: 10px;
+                            margin-bottom: 10px;
+                          }
+
+                          li {
+                            margin-left: 20px;
+                            list-style-type: square;
+                          }
+                          ol > li {
+                            margin-left: 20px;
+                            list-style-type: decimal;
+                          }
+                          pre {
+                            background: white;
+                            padding: 5px;
+                            overflow: auto;
+                            margin-bottom: 10px;
+                          }
+                        `
+                      )}
                     >
-                      {message.content}
-                    </ReactMarkdown>
-                  </div>
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        rehypePlugins={[rehypeHighlight, rehypeRaw]}
+                      >
+                        {message.content}
+                      </ReactMarkdown>
+                    </div>
+                  )}
                 </div>
               </div>
               {message.file_attachments &&
@@ -171,45 +317,115 @@ const MessageItem = memo(
                     ))}
                   </div>
                 )}
+              {/* Show tools used for completed messages */}
+              {message.clay_tools_used &&
+                message.clay_tools_used.length > 0 &&
+                !message.isQueued && (
+                  <div className=" flex items-center gap-2">
+                    <div className="border px-1 py-[2px] rounded-sm">
+                      <ToolCallIndicator
+                        tools={message.clay_tools_used}
+                        variant="compact"
+                        isCompleted={true}
+                      />
+                    </div>
+                    <div className="text-xs">
+                      {message.createdAt.toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        hour12: false,
+                      })}
+                    </div>
+                  </div>
+                )}
               <div className="text-xs text-muted-foreground">
-                {message.createdAt.toLocaleTimeString([], {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                  hour12: false,
-                })}
+                {isQueued && !isEditing ? (
+                  <div className="flex items-center gap-2">
+                    <span>Waiting to send...</span>
+                    {onStartEdit && (
+                      <button
+                        onClick={() => onStartEdit(message.id)}
+                        className="text-primary hover:underline"
+                      >
+                        Edit
+                      </button>
+                    )}
+                    {onCancelQueued && (
+                      <button
+                        onClick={() => onCancelQueued(message.id)}
+                        className="text-destructive hover:underline"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </div>
+                ) : !isQueued &&
+                  !(
+                    message.clay_tools_used &&
+                    message.clay_tools_used.length > 0
+                  ) ? (
+                  message.createdAt.toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    hour12: false,
+                  })
+                ) : null}
               </div>
             </div>
             {message.role === "user" && (
-              <div className="flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-md bg-primary text-primary-foreground">
+              <div
+                className={cn(
+                  "flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-md",
+                  isQueued
+                    ? "bg-primary/20 text-primary border-2 border-dashed border-primary/30"
+                    : "bg-primary text-primary-foreground"
+                )}
+              >
                 <User className="h-4 w-4" />
               </div>
             )}
           </div>
-          {onForgetFrom && (
-            <div
-              className={cn(
-                "absolute top-2 right-3 option-menu",
-                "opacity-0 hover:opacity-100 transition-opacity ml-2 "
-              )}
-            >
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm" className="h-8 w-8 p-0">
-                    <MoreVertical className="h-4 w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem
-                    onClick={() => onForgetFrom(message.id)}
-                    className="text-destructive"
-                  >
-                    <Trash2 className="mr-2 h-4 w-4" />
-                    Forget after this
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          )}
+          {(onForgetFrom ||
+            (onResendMessage &&
+              isLastUserMessage &&
+              message.role === "user")) &&
+            !isQueued && (
+              <div
+                className={cn(
+                  "absolute top-2 right-3 option-menu",
+                  "opacity-0 hover:opacity-100 transition-opacity ml-2 "
+                )}
+              >
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="h-8 w-8 p-0">
+                      <MoreVertical className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    {onResendMessage &&
+                      isLastUserMessage &&
+                      message.role === "user" && (
+                        <DropdownMenuItem
+                          onClick={() => onResendMessage(message)}
+                        >
+                          <Send className="mr-2 h-4 w-4" />
+                          Resend
+                        </DropdownMenuItem>
+                      )}
+                    {onForgetFrom && (
+                      <DropdownMenuItem
+                        onClick={() => onForgetFrom(message.id)}
+                        className="text-destructive"
+                      >
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        Forget after this
+                      </DropdownMenuItem>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            )}
         </div>
       </div>
     );
@@ -221,14 +437,47 @@ export function Messages({
   isLoading,
   onForgetFrom,
   conversationId,
+  messageQueue = [],
+  onEditQueued,
+  onCancelQueued,
+  isProcessingQueue: _isProcessingQueue = false,
+  isStreaming: _isStreaming = false,
+  canStop = false,
+  onStop,
+  activeTools = [],
+  onResendMessage,
 }: MessagesProps) {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
-  const [hasScrolledOnFirstLoad, setHasScrolledOnFirstLoad] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
   const previousConversationId = useRef(conversationId);
   const [showNewMessageAlert, setShowNewMessageAlert] = useState(false);
+  const [editingQueuedId, setEditingQueuedId] = useState<string | null>(null);
+  const [editingContent, setEditingContent] = useState("");
   const [isAtBottom, setIsAtBottom] = useState(true);
   const previousMessageCount = useRef(messages.length);
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Handlers for queue editing
+  const handleStartEdit = (messageId: string) => {
+    const queuedMessage = messageQueue.find((m) => m.id === messageId);
+    if (queuedMessage) {
+      setEditingQueuedId(messageId);
+      setEditingContent(queuedMessage.content);
+    }
+  };
+
+  const handleSaveEdit = () => {
+    if (editingQueuedId && onEditQueued) {
+      onEditQueued(editingQueuedId, editingContent);
+      setEditingQueuedId(null);
+      setEditingContent("");
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setEditingQueuedId(null);
+    setEditingContent("");
+  };
 
   // Fun thinking words to display while loading
   const thinkingWords = useMemo(
@@ -320,18 +569,11 @@ export function Messages({
     return () => clearInterval(interval);
   }, [isLoading, thinkingWords.length]);
 
-  // Cleanup scroll timeout on unmount
-  useEffect(() => {
-    return () => {
-      if (scrollTimeoutRef.current) {
-        clearTimeout(scrollTimeoutRef.current);
-      }
-    };
-  }, []);
-
-  // Combine messages with loading indicator
+  // Combine messages with loading indicator and queued messages
   const allItems = useMemo(() => {
-    const items = [...messages];
+    const items: DisplayMessage[] = [...messages];
+
+    // Add loading indicator if AI is responding
     if (isLoading) {
       items.push({
         id: "loading",
@@ -340,71 +582,89 @@ export function Messages({
         createdAt: new Date(),
       });
     }
-    return items;
-  }, [messages, isLoading]);
 
-  // Utility function to scroll with debouncing
-  const smoothScrollToBottom = (delay = 0) => {
+    // Add queued messages after loading indicator
+    if (messageQueue.length > 0) {
+      messageQueue.forEach((queuedMsg, index) => {
+        items.push({
+          id: queuedMsg.id,
+          content:
+            editingQueuedId === queuedMsg.id
+              ? editingContent
+              : queuedMsg.content,
+          role: "user" as const,
+          createdAt: queuedMsg.timestamp,
+          isQueued: true,
+          queuePosition: index + 1,
+          isEditing: editingQueuedId === queuedMsg.id,
+          file_attachments: queuedMsg.files?.map((f) => ({
+            id: `file-${f.name}`,
+            file_name: f.name,
+            original_name: f.name,
+            file_path: "",
+            file_size: f.size,
+          })),
+        });
+      });
+    }
+
+    return items;
+  }, [messages, isLoading, messageQueue, editingQueuedId, editingContent]);
+
+  // Find the last user message (excluding queued messages)
+  const lastUserMessageId = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === "user") {
+        return messages[i].id;
+      }
+    }
+    return null;
+  }, [messages]);
+
+  // Utility function to scroll to bottom
+  const scrollToBottom = (behavior: "smooth" | "auto" = "auto") => {
+    // Cancel any pending scroll operations
     if (scrollTimeoutRef.current) {
       clearTimeout(scrollTimeoutRef.current);
-    }
-    
-    scrollTimeoutRef.current = setTimeout(() => {
-      virtuosoRef.current?.scrollToIndex({
-        index: allItems.length - 1,
-        behavior: "smooth",
-        align: "end",
-      });
       scrollTimeoutRef.current = null;
-    }, delay);
+    }
+
+    virtuosoRef.current?.scrollToIndex({
+      index: allItems.length - 1,
+      behavior,
+      align: "end",
+    });
   };
 
   // Scroll to bottom on initial load only
   useEffect(() => {
     // Reset when conversation changes
     if (conversationId !== previousConversationId.current) {
-      setHasScrolledOnFirstLoad(false);
       setShowNewMessageAlert(false);
       previousConversationId.current = conversationId;
       previousMessageCount.current = messages.length;
-      if (scrollTimeoutRef.current) {
-        clearTimeout(scrollTimeoutRef.current);
-        scrollTimeoutRef.current = null;
-      }
-    }
-
-    if (allItems.length > 0 && !hasScrolledOnFirstLoad) {
-      // Initial scroll to bottom - use requestAnimationFrame for better timing
-      requestAnimationFrame(() => {
-        virtuosoRef.current?.scrollToIndex({
-          index: allItems.length - 1,
-          behavior: "auto",
-          align: "end",
-        });
-        setHasScrolledOnFirstLoad(true);
-      });
     }
   }, [allItems.length, conversationId]);
 
   // Handle new messages scrolling behavior
   useEffect(() => {
-    if (
-      hasScrolledOnFirstLoad &&
-      messages.length > previousMessageCount.current
-    ) {
+    if (messages.length > previousMessageCount.current) {
       // New message received
       const lastMessage = messages[messages.length - 1];
 
       // Always scroll to bottom for user messages (when user sends a message)
       if (lastMessage.role === "user") {
-        smoothScrollToBottom(50);
+        // Add a small delay to ensure the message is rendered
+        setTimeout(() => {
+          scrollToBottom("smooth");
+        }, 300);
         setShowNewMessageAlert(false);
       }
       // For assistant messages
       else if (lastMessage.role === "assistant") {
         if (isAtBottom) {
-          // Auto-scroll if user is at bottom
-          smoothScrollToBottom(50);
+          // Auto-scroll if user is at bottom - use auto for streaming messages
+          scrollToBottom("auto");
         } else {
           // Show alert if user has scrolled up
           setShowNewMessageAlert(true);
@@ -412,15 +672,15 @@ export function Messages({
       }
     }
     previousMessageCount.current = messages.length;
-  }, [messages.length, isAtBottom, hasScrolledOnFirstLoad, allItems.length]);
+  }, [messages.length, isAtBottom]);
 
   const handleScrollToBottom = () => {
-    smoothScrollToBottom(0);
+    scrollToBottom("smooth");
     setShowNewMessageAlert(false);
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className={cn("flex flex-col h-full")}>
       {messages.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center text-center">
           <div className="flex h-20 w-20 items-center justify-center rounded-full bg-muted">
@@ -433,89 +693,156 @@ export function Messages({
           </p>
         </div>
       ) : (
-        <div className="flex-1 relative">
-          <Virtuoso
-            ref={virtuosoRef}
-            data={allItems}
-            initialTopMostItemIndex={
-              allItems.length > 0 ? allItems.length - 1 : 0
-            }
-            atBottomStateChange={(atBottom) => {
-              setIsAtBottom(atBottom);
-              if (atBottom) {
-                setShowNewMessageAlert(false);
-              }
-            }}
-            atBottomThreshold={100}
-            overscan={50}
-            itemContent={(index, item) => {
-              // Add top padding for first item
-              const topPadding =
-                index === 0 ? <div style={{ height: "100px" }} /> : null;
-              // Add bottom padding for last item
-              const bottomPadding =
-                index === allItems.length - 1 ? (
-                  <div style={{ height: "200px" }} />
-                ) : null;
+        <div className={cn("flex-1 relative")} ref={containerRef}>
+          {previousConversationId.current === "new" ? (
+            <div className="flex absolute items-center justify-center inset-0">
+              <Button
+                size="sm"
+                disabled
+                className="rounded-full shadow-lg animate-in fade-in slide-in-from-bottom-2 duration-300"
+              >
+                Creating new chat...
+              </Button>
+            </div>
+          ) : (
+            <>
+              {previousConversationId.current === conversationId && (
+                <Virtuoso
+                  ref={virtuosoRef}
+                  data={allItems}
+                  initialTopMostItemIndex={allItems.length - 1}
+                  atBottomStateChange={(atBottom) => {
+                    setIsAtBottom(atBottom);
+                    if (atBottom) {
+                      setShowNewMessageAlert(false);
+                    }
+                  }}
+                  atBottomThreshold={50}
+                  overscan={200}
+                  itemContent={(index, item) => {
+                    // Add top padding for first item
+                    const topPadding =
+                      index === 0 ? <div style={{ height: "100px" }} /> : null;
+                    // Add bottom padding for last item
+                    const bottomPadding =
+                      index === allItems.length - 1 ? (
+                        <div style={{ height: "200px" }} />
+                      ) : null;
 
-              // Loading indicator
-              if (item.id === "loading") {
-                return (
-                  <>
-                    {topPadding}
-                    <div className="flex max-w-[45rem] mx-auto cursor-default">
-                      <div className="flex flex-1 relative p-2 rounded-lg">
-                        <div className="flex gap-3 justify-start flex-1 pr-[45px]">
-                          <div className="flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-md bg-muted">
-                            <Bot className="h-4 w-4" />
-                          </div>
-                          <div className="flex flex-row gap-2 items-center max-w-[70%]">
-                            <div className="rounded-lg p-3 text-sm bg-muted whitespace-pre-wrap break-words">
-                              <div className="flex items-center space-x-2">
-                                <div className="flex items-center space-x-1">
-                                  <div className="h-1 w-1 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.3s]"></div>
-                                  <div className="h-1 w-1 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.15s]"></div>
-                                  <div className="h-1 w-1 animate-bounce rounded-full bg-muted-foreground"></div>
+                    // Loading indicator
+                    if (item.id === "loading") {
+                      return (
+                        <>
+                          {topPadding}
+                          <div className="flex max-w-[45rem] mx-auto cursor-default">
+                            <div className="flex flex-1 relative p-2 rounded-lg">
+                              <div className="flex gap-3 justify-start flex-1 pr-[45px]">
+                                <div className="flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-md bg-muted">
+                                  <Bot className="h-4 w-4" />
+                                </div>
+                                <div className="flex flex-col gap-2 max-w-[70%]">
+                                  <div className="rounded-lg p-3 text-sm bg-muted">
+                                    <div className="flex items-center space-x-2">
+                                      {activeTools.length === 0 ? (
+                                        <div className="flex items-center space-x-2 flex-1">
+                                          <div className="flex items-center space-x-1">
+                                            <div className="h-1 w-1 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.3s]"></div>
+                                            <div className="h-1 w-1 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.15s]"></div>
+                                            <div className="h-1 w-1 animate-bounce rounded-full bg-muted-foreground"></div>
+                                          </div>
+
+                                          <span className="text-muted-foreground text-sm animate-pulse font-medium">
+                                            {thinkingWords[thinkingWordIndex]}
+                                            ...
+                                          </span>
+                                        </div>
+                                      ) : (
+                                        <>
+                                          <span
+                                            className={cn(
+                                              "text-muted-foreground text-sm animate-pulse font-medium",
+                                              (!canStop || !onStop) &&
+                                                "flex items-center justify-center flex-1"
+                                            )}
+                                          >
+                                            {thinkingWords[thinkingWordIndex]}{" "}
+                                            {activeTools.length > 1
+                                              ? "tools"
+                                              : "tool"}
+                                          </span>
+                                        </>
+                                      )}
+                                      {canStop && onStop && (
+                                        <div className="pl-6">
+                                          <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={onStop}
+                                            className="h-7 px-2"
+                                          >
+                                            <Square className="h-3 w-3 mr-1" />
+                                            Stop
+                                          </Button>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                  {/* Show active tools if any are being used */}
+                                  {activeTools.length > 0 && (
+                                    <ToolCallIndicator
+                                      tools={activeTools}
+                                      variant="full"
+                                      className="ml-3"
+                                    />
+                                  )}
                                 </div>
                               </div>
                             </div>
-                            <span className="text-muted-foreground text-sm animate-pulse font-medium">
-                              {thinkingWords[thinkingWordIndex]}...
-                            </span>
                           </div>
-                        </div>
-                      </div>
-                    </div>
-                    {bottomPadding}
-                  </>
-                );
-              }
+                          {bottomPadding}
+                        </>
+                      );
+                    }
 
-              // Regular message
-              return (
-                <>
-                  {topPadding}
-                  <MessageItem message={item} onForgetFrom={onForgetFrom} />
-                  {bottomPadding}
-                </>
-              );
-            }}
-            followOutput={false}
-            className="flex-1"
-          />
+                    // Regular message
+                    return (
+                      <>
+                        {topPadding}
+                        <MessageItem
+                          message={item}
+                          onForgetFrom={onForgetFrom}
+                          onStartEdit={handleStartEdit}
+                          onSaveEdit={handleSaveEdit}
+                          onCancelEdit={handleCancelEdit}
+                          onCancelQueued={onCancelQueued}
+                          editingContent={editingContent}
+                          setEditingContent={setEditingContent}
+                          onResendMessage={onResendMessage}
+                          isLastUserMessage={item.id === lastUserMessageId}
+                        />
+                        {bottomPadding}
+                      </>
+                    );
+                  }}
+                  followOutput={false}
+                  className="flex-1"
+                />
+              )}
 
-          {/* New message indicator */}
-          {showNewMessageAlert && (
-            <div className="absolute bottom-[60px] left-1/2 transform -translate-x-1/2 z-10">
-              <Button
-                onClick={handleScrollToBottom}
-                size="sm"
-                className="rounded-full shadow-lg animate-in fade-in slide-in-from-bottom-2 duration-300"
-              >
-                <ArrowDown className="h-4 w-4 mr-2" />
-                New message
-              </Button>
-            </div>
+              {/* New message indicator */}
+              {showNewMessageAlert && (
+                <div className="absolute bottom-[60px] left-1/2 transform -translate-x-1/2 z-10">
+                  <Button
+                    onClick={handleScrollToBottom}
+                    size="sm"
+                    className="rounded-full shadow-lg animate-in fade-in slide-in-from-bottom-2 duration-300"
+                  >
+                    <ArrowDown className="h-4 w-4 mr-2" />
+                    New message
+                  </Button>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}

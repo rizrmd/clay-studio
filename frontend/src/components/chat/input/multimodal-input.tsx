@@ -1,7 +1,6 @@
 import { useRef, useEffect, useState } from "react";
 import {
   Send,
-  Square,
   Paperclip,
   X,
   FileText,
@@ -20,6 +19,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { API_BASE_URL } from "@/lib/url";
 import { FileBrowser } from "./file-browser";
+import { css } from "goober";
 
 interface FileWithDescription extends File {
   description?: string;
@@ -33,8 +33,6 @@ interface MultimodalInputProps {
   handleSubmit: (e: React.FormEvent, files?: FileWithDescription[]) => void;
   isLoading?: boolean;
   isStreaming?: boolean;
-  canStop?: boolean;
-  stop?: () => void;
   projectId?: string;
   uploadedFiles?: Array<{
     id: string;
@@ -54,14 +52,11 @@ export function MultimodalInput({
   handleSubmit,
   isLoading,
   isStreaming,
-  canStop,
-  stop,
   projectId,
   uploadedFiles = [],
   externalFiles = [],
   onExternalFilesChange,
   shouldFocus,
-  className,
 }: MultimodalInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -105,7 +100,6 @@ export function MultimodalInput({
       localStorage.setItem("activeProjectId", projectId);
     }
   }, [projectId]);
-
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -288,8 +282,8 @@ export function MultimodalInput({
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Don't submit if files are uploading
-    if (isUploading) {
+    // Don't submit if files are uploading or no input
+    if (isUploading || !input.trim()) {
       return;
     }
 
@@ -681,23 +675,29 @@ export function MultimodalInput({
         onChange={(e) => setInput(e.target.value)}
         onEnterSubmit={(e) => handleFormSubmit(e as any)}
         placeholder={
-          isDragging
+          isLoading
+            ? "Continue typing"
+            : isDragging
             ? "Drop files here..."
             : isUploading
             ? "Uploading files..."
-            : "Ask me anything about your data..."
+            : "Type to chat..."
         }
         placeholderSecondary={
-          isDragging || isUploading
+          isLoading
+            ? "while the ai is thinking..."
+            : isDragging || isUploading
             ? undefined
             : "Enter to send, Shift+Enter for new line"
         }
         className={cn(
           "min-h-[60px] max-h-[200px] resize-none pr-12 bg-white",
           "focus-within:outline-none focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2",
-          (isDragging || isUploading) && "opacity-60"
+          css`
+            opacity: 1 !important;
+          `
         )}
-        disabled={isLoading || isDragging || isUploading}
+        disabled={isDragging || isUploading}
         rows={1}
       />
       <input
@@ -730,30 +730,20 @@ export function MultimodalInput({
             <TooltipContent>Upload files</TooltipContent>
           </Tooltip>
         </TooltipProvider>
-        {(isLoading || isStreaming) && canStop ? (
-          <Button
-            type="button"
-            variant={"ghost"}
-            size="lg"
-            className="h-10 px-4"
-            onClick={stop}
-          >
-            <Square className="h-4 w-4" />
-            <span className="sr-only">Stop generation</span>
-          </Button>
-        ) : (
-          <TooltipProvider>
+        <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
                   variant={
-                    !input.trim() || isLoading || isStreaming || isUploading
+                    !input.trim() || isUploading
                       ? "outline"
+                      : isLoading || isStreaming
+                      ? "secondary"
                       : "default"
                   }
                   type="submit"
                   disabled={
-                    !input.trim() || isLoading || isStreaming || isUploading
+                    !input.trim() || isUploading
                   }
                 >
                   <Send className="h-4 w-4" />
@@ -765,7 +755,6 @@ export function MultimodalInput({
               )}
             </Tooltip>
           </TooltipProvider>
-        )}
       </div>
 
       {projectId && (

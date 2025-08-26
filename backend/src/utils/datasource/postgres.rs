@@ -1,0 +1,640 @@
+use super::base::{DataSourceConnector, format_bytes};
+use serde_json::{json, Value};
+use sqlx::{postgres::PgPool, Row as SqlxRow, Column};
+use std::error::Error;
+use async_trait::async_trait;
+
+pub struct PostgreSQLConnector {
+    connection_string: String,
+}
+
+impl PostgreSQLConnector {
+    pub fn new(config: &Value) -> Result<Self, Box<dyn Error>> {
+        // Prefer URL if provided, otherwise construct from individual components
+        let connection_string = if let Some(url) = config.get("url").and_then(|v| v.as_str()) {
+            url.to_string()
+        } else {
+            // Fallback to individual components for backward compatibility
+            let host = config.get("host").and_then(|v| v.as_str()).unwrap_or("localhost");
+            let port = config.get("port").and_then(|v| v.as_u64()).unwrap_or(5432);
+            let database = config.get("database").and_then(|v| v.as_str()).ok_or("Missing database name")?;
+            let username = config.get("username").and_then(|v| v.as_str()).unwrap_or("postgres");
+            let password = config.get("password").and_then(|v| v.as_str()).unwrap_or("");
+            
+            // URL encode username and password to handle special characters
+            let encoded_username = urlencoding::encode(username);
+            let encoded_password = if password.is_empty() {
+                String::new()
+            } else {
+                urlencoding::encode(password).to_string()
+            };
+            
+            if encoded_password.is_empty() {
+                format!("postgres://{}@{}:{}/{}", encoded_username, host, port, database)
+            } else {
+                format!("postgres://{}:{}@{}:{}/{}", encoded_username, encoded_password, host, port, database)
+            }
+        };
+        
+        // Debug: Log the connection string (with password masked)
+        let masked_string = if connection_string.contains('@') {
+            let parts: Vec<&str> = connection_string.splitn(2, "://").collect();
+            if parts.len() == 2 {
+                let auth_and_rest: Vec<&str> = parts[1].splitn(2, '@').collect();
+                if auth_and_rest.len() == 2 {
+                    let auth_parts: Vec<&str> = auth_and_rest[0].splitn(2, ':').collect();
+                    if auth_parts.len() == 2 {
+                        format!("{}://{}:***@{}", parts[0], auth_parts[0], auth_and_rest[1])
+                    } else {
+                        format!("{}://{}@{}", parts[0], auth_parts[0], auth_and_rest[1])
+                    }
+                } else {
+                    connection_string.clone()
+                }
+            } else {
+                connection_string.clone()
+            }
+        } else {
+            connection_string.clone()
+        };
+        eprintln!("[DEBUG] PostgreSQL connection string (masked): {}", masked_string);
+        eprintln!("[DEBUG] Raw connection string length: {} chars", connection_string.len());
+        
+        Ok(Self { connection_string })
+    }
+}
+
+#[async_trait]
+impl DataSourceConnector for PostgreSQLConnector {
+    async fn test_connection(&self) -> Result<bool, Box<dyn Error>> {
+        let pool = PgPool::connect(&self.connection_string).await?;
+        sqlx::query("SELECT 1").fetch_one(&pool).await?;
+        Ok(true)
+    }
+    
+    async fn execute_query(&self, query: &str, limit: i32) -> Result<Value, Box<dyn Error>> {
+        let pool = PgPool::connect(&self.connection_string).await?;
+        
+        // Add LIMIT if not present
+        let query_with_limit = if query.to_lowercase().contains("limit") {
+            query.to_string()
+        } else {
+            format!("{} LIMIT {}", query, limit)
+        };
+        
+        let start = std::time::Instant::now();
+        let rows = sqlx::query(&query_with_limit).fetch_all(&pool).await?;
+        let execution_time_ms = start.elapsed().as_millis() as i64;
+        
+        if rows.is_empty() {
+            return Ok(json!({
+                "columns": [],
+                "rows": [],
+                "row_count": 0,
+                "execution_time_ms": execution_time_ms
+            }));
+        }
+        
+        // Get column names from the first row
+        let first_row = &rows[0];
+        let columns: Vec<String> = first_row.columns().iter().map(|c| c.name().to_string()).collect();
+        
+        // Convert rows to JSON
+        let mut result_rows = Vec::new();
+        for row in rows.iter() {
+            let mut row_data = Vec::new();
+            for (i, _col) in columns.iter().enumerate() {
+                // Try to get value as different types
+                if let Ok(val) = row.try_get::<String, _>(i) {
+                    row_data.push(val);
+                } else if let Ok(val) = row.try_get::<i32, _>(i) {
+                    row_data.push(val.to_string());
+                } else if let Ok(val) = row.try_get::<i64, _>(i) {
+                    row_data.push(val.to_string());
+                } else if let Ok(val) = row.try_get::<f64, _>(i) {
+                    row_data.push(val.to_string());
+                } else if let Ok(val) = row.try_get::<bool, _>(i) {
+                    row_data.push(val.to_string());
+                } else {
+                    row_data.push("NULL".to_string());
+                }
+            }
+            result_rows.push(row_data);
+        }
+        
+        Ok(json!({
+            "columns": columns,
+            "rows": result_rows,
+            "row_count": result_rows.len(),
+            "execution_time_ms": execution_time_ms
+        }))
+    }
+    
+    async fn fetch_schema(&self) -> Result<Value, Box<dyn Error>> {
+        let pool = PgPool::connect(&self.connection_string).await?;
+        
+        // Fetch table and column information
+        let tables = sqlx::query(
+            "SELECT 
+                t.table_name,
+                array_agg(
+                    json_build_object(
+                        'column_name', c.column_name,
+                        'data_type', c.data_type,
+                        'is_nullable', c.is_nullable
+                    ) ORDER BY c.ordinal_position
+                ) as columns
+             FROM information_schema.tables t
+             JOIN information_schema.columns c ON t.table_name = c.table_name
+             WHERE t.table_schema = 'public' 
+             AND t.table_type = 'BASE TABLE'
+             GROUP BY t.table_name
+             ORDER BY t.table_name"
+        )
+        .fetch_all(&pool)
+        .await?;
+        
+        let mut schema = json!({
+            "tables": {},
+            "refreshed_at": chrono::Utc::now().to_rfc3339()
+        });
+        
+        for row in tables {
+            let table_name: String = row.try_get("table_name")
+                .map_err(|e| format!("Failed to get table_name: {}", e))?;
+            let columns: Value = row.try_get("columns")
+                .map_err(|e| format!("Failed to get columns for table '{}': {}. This may be due to a PostgreSQL type compatibility issue with JSON/JSONB columns.", table_name, e))?;
+            schema["tables"][table_name] = columns;
+        }
+        
+        Ok(schema)
+    }
+    
+    async fn list_tables(&self) -> Result<Vec<String>, Box<dyn Error>> {
+        let pool = PgPool::connect(&self.connection_string).await?;
+        
+        let tables = sqlx::query(
+            "SELECT table_name 
+             FROM information_schema.tables 
+             WHERE table_schema = 'public' 
+             AND table_type = 'BASE TABLE'
+             ORDER BY table_name"
+        )
+        .fetch_all(&pool)
+        .await?;
+        
+        let mut table_names = Vec::new();
+        for row in &tables {
+            let table_name: String = row.try_get("table_name")
+                .map_err(|e| format!("Failed to get table_name: {}", e))?;
+            table_names.push(table_name);
+        }
+        Ok(table_names)
+    }
+    
+    async fn analyze_database(&self) -> Result<Value, Box<dyn Error>> {
+        let pool = PgPool::connect(&self.connection_string).await?;
+        
+        // Get basic statistics
+        let stats = sqlx::query(
+            "SELECT 
+                COUNT(DISTINCT table_name) as table_count,
+                SUM(pg_total_relation_size(quote_ident(table_schema)||'.'||quote_ident(table_name)::text)) as total_size
+             FROM information_schema.tables
+             WHERE table_schema = 'public' AND table_type = 'BASE TABLE'"
+        )
+        .fetch_one(&pool)
+        .await?;
+        
+        let table_count: i64 = stats.try_get("table_count")
+            .map_err(|e| format!("Failed to get table_count: {}", e))?;
+        let total_size: Option<i64> = match stats.try_get("total_size") {
+            Ok(size) => size,
+            Err(e) => {
+                tracing::warn!("Failed to decode total_size column: {}", e);
+                // Return user-friendly error instead of panicking
+                return Err(format!("Database type compatibility issue: Unable to read table size statistics. This is likely due to a PostgreSQL version or configuration difference. Error: {}", e).into());
+            }
+        };
+        
+        // Get detailed table information with safer query
+        let tables = sqlx::query(
+            "SELECT 
+                t.table_name,
+                pg_total_relation_size(quote_ident(t.table_schema)||'.'||quote_ident(t.table_name)::text) as size_bytes,
+                obj_description((quote_ident(t.table_schema)||'.'||quote_ident(t.table_name))::regclass) as description
+             FROM information_schema.tables t
+             WHERE t.table_schema = 'public' AND t.table_type = 'BASE TABLE'
+             ORDER BY pg_total_relation_size(quote_ident(t.table_schema)||'.'||quote_ident(t.table_name)::text) DESC NULLS LAST"
+        )
+        .fetch_all(&pool)
+        .await?;
+        
+        // Get table relationships (foreign keys)
+        let relationships = sqlx::query(
+            "SELECT 
+                tc.table_name,
+                kcu.column_name,
+                ccu.table_name AS foreign_table_name,
+                ccu.column_name AS foreign_column_name
+             FROM information_schema.table_constraints AS tc
+             JOIN information_schema.key_column_usage AS kcu
+                 ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
+             JOIN information_schema.constraint_column_usage AS ccu
+                 ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
+             WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public'"
+        )
+        .fetch_all(&pool)
+        .await?;
+        
+        // Build the analysis result
+        let mut key_tables = Vec::new();
+        let mut largest_tables = Vec::new();
+        let mut table_names = Vec::new();
+        
+        for (idx, table) in tables.iter().enumerate() {
+            let table_name: String = table.try_get("table_name")
+                .map_err(|e| format!("Failed to get table_name: {}", e))?;
+            let size_bytes: Option<i64> = table.try_get("size_bytes").ok();
+            
+            table_names.push(table_name.clone());
+            
+            // Track largest tables
+            if idx < 10 {
+                if let Some(size) = size_bytes {
+                    largest_tables.push(json!({
+                        "name": table_name,
+                        "size_bytes": size,
+                        "size_human": format_bytes(size as u64),
+                    }));
+                }
+            }
+            
+            // Count relationships for this table
+            let connections = relationships.iter()
+                .filter_map(|r| {
+                    if let (Ok(t), Ok(ft)) = (r.try_get::<String, _>("table_name"), r.try_get::<String, _>("foreign_table_name")) {
+                        Some((t, ft))
+                    } else {
+                        None
+                    }
+                })
+                .filter(|(t, ft)| t == &table_name || ft == &table_name)
+                .count();
+            
+            // Add to key tables if it has many connections or is large
+            if connections > 2 || idx < 5 {
+                key_tables.push(json!({
+                    "name": table_name,
+                    "size_bytes": size_bytes.unwrap_or(0),
+                    "connections": connections,
+                }));
+            }
+        }
+        
+        // Sort key tables by importance (connections + size)
+        key_tables.sort_by_key(|t| {
+            let connections = t["connections"].as_u64().unwrap_or(0);
+            let size = t["size_bytes"].as_i64().unwrap_or(0);
+            -(connections as i64 * 1000 + size / 1000000)
+        });
+        
+        Ok(json!({
+            "statistics": {
+                "table_count": table_count,
+                "total_size": total_size.unwrap_or(0),
+                "total_size_human": format_bytes(total_size.unwrap_or(0) as u64),
+                "total_rows": 0, // Would need to query each table
+            },
+            "table_names": table_names,
+            "key_tables": key_tables.into_iter().take(10).collect::<Vec<_>>(),
+            "largest_tables": largest_tables,
+            "analyzed_at": chrono::Utc::now().to_rfc3339(),
+        }))
+    }
+    
+    async fn get_tables_schema(&self, tables: Vec<&str>) -> Result<Value, Box<dyn Error>> {
+        let pool = PgPool::connect(&self.connection_string).await?;
+        let mut result = json!({});
+        
+        for table_name in tables {
+            // Get columns
+            let columns = sqlx::query(
+                "SELECT 
+                    column_name,
+                    data_type,
+                    is_nullable,
+                    column_default,
+                    character_maximum_length
+                 FROM information_schema.columns
+                 WHERE table_schema = 'public' AND table_name = $1
+                 ORDER BY ordinal_position"
+            )
+            .bind(table_name)
+            .fetch_all(&pool)
+            .await?;
+            
+            if columns.is_empty() {
+                continue; // Table doesn't exist, skip it
+            }
+            
+            // Get primary keys
+            let primary_keys = sqlx::query(
+                "SELECT kcu.column_name
+                 FROM information_schema.table_constraints tc
+                 JOIN information_schema.key_column_usage kcu
+                     ON tc.constraint_name = kcu.constraint_name
+                 WHERE tc.table_schema = 'public' 
+                     AND tc.table_name = $1
+                     AND tc.constraint_type = 'PRIMARY KEY'"
+            )
+            .bind(table_name)
+            .fetch_all(&pool)
+            .await?;
+            
+            // Get foreign keys
+            let foreign_keys = sqlx::query(
+                "SELECT 
+                    kcu.column_name,
+                    ccu.table_name AS foreign_table_name,
+                    ccu.column_name AS foreign_column_name
+                 FROM information_schema.table_constraints AS tc
+                 JOIN information_schema.key_column_usage AS kcu
+                     ON tc.constraint_name = kcu.constraint_name
+                 JOIN information_schema.constraint_column_usage AS ccu
+                     ON ccu.constraint_name = tc.constraint_name
+                 WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_name = $1"
+            )
+            .bind(table_name)
+            .fetch_all(&pool)
+            .await?;
+            
+            // Get row count (safely with proper quoting)
+            let count_query = format!(
+                "SELECT COUNT(*) as count FROM {}",
+                quote_ident(table_name)
+            );
+            let row_count: i64 = sqlx::query(&count_query)
+                .fetch_one(&pool)
+                .await
+                .map(|r| r.try_get("count").unwrap_or(0))
+                .unwrap_or(0);
+            
+            // Get sample data (safely with proper quoting)
+            let sample_query = format!(
+                "SELECT * FROM {} LIMIT 5",
+                quote_ident(table_name)
+            );
+            let sample_rows = sqlx::query(&sample_query)
+                .fetch_all(&pool)
+                .await
+                .unwrap_or_default();
+            
+            let mut sample_data = Vec::new();
+            for row in sample_rows {
+                let mut row_data = json!({});
+                for col in columns.iter() {
+                    let col_name: String = col.try_get("column_name")
+                        .map_err(|e| format!("Failed to get column_name: {}", e))?;
+                    // Try to get value as string (simplified)
+                    if let Ok(val) = row.try_get::<Option<String>, _>(col_name.as_str()) {
+                        row_data[&col_name] = json!(val);
+                    } else if let Ok(val) = row.try_get::<Option<i32>, _>(col_name.as_str()) {
+                        row_data[&col_name] = json!(val);
+                    } else if let Ok(val) = row.try_get::<Option<i64>, _>(col_name.as_str()) {
+                        row_data[&col_name] = json!(val);
+                    } else if let Ok(val) = row.try_get::<Option<bool>, _>(col_name.as_str()) {
+                        row_data[&col_name] = json!(val);
+                    } else {
+                        row_data[&col_name] = json!(null);
+                    }
+                }
+                sample_data.push(row_data);
+            }
+            
+            result[table_name] = json!({
+                "columns": columns.iter().map(|c| json!({
+                    "name": c.get::<String, _>("column_name"),
+                    "type": c.get::<String, _>("data_type"),
+                    "nullable": c.get::<String, _>("is_nullable") == "YES",
+                    "default": c.get::<Option<String>, _>("column_default"),
+                    "max_length": c.get::<Option<i32>, _>("character_maximum_length"),
+                })).collect::<Vec<_>>(),
+                "primary_keys": primary_keys.iter().map(|pk| 
+                    pk.get::<String, _>("column_name")
+                ).collect::<Vec<_>>(),
+                "foreign_keys": foreign_keys.iter().map(|fk| json!({
+                    "column": fk.get::<String, _>("column_name"),
+                    "references_table": fk.get::<String, _>("foreign_table_name"),
+                    "references_column": fk.get::<String, _>("foreign_column_name"),
+                })).collect::<Vec<_>>(),
+                "row_count": row_count,
+                "sample_data": sample_data,
+            });
+        }
+        
+        Ok(result)
+    }
+    
+    async fn search_tables(&self, pattern: &str) -> Result<Value, Box<dyn Error>> {
+        let pool = PgPool::connect(&self.connection_string).await?;
+        
+        let tables = sqlx::query(
+            "SELECT 
+                table_name,
+                obj_description((quote_ident(table_schema)||'.'||quote_ident(table_name))::regclass) as description
+             FROM information_schema.tables
+             WHERE table_schema = 'public' 
+                 AND table_type = 'BASE TABLE'
+                 AND table_name LIKE $1
+             ORDER BY table_name"
+        )
+        .bind(pattern)
+        .fetch_all(&pool)
+        .await?;
+        
+        let mut results = Vec::new();
+        for table in tables {
+            let table_name: String = table.try_get("table_name")
+                .map_err(|e| format!("Failed to get table_name: {}", e))?;
+            let description: Option<String> = table.try_get("description").ok();
+            
+            // Get column count
+            let col_count: i64 = sqlx::query(
+                "SELECT COUNT(*) as count FROM information_schema.columns 
+                 WHERE table_schema = 'public' AND table_name = $1"
+            )
+            .bind(&table_name)
+            .fetch_one(&pool)
+            .await
+            .map(|r| r.try_get("count").unwrap_or(0))
+            .unwrap_or(0);
+            
+            results.push(json!({
+                "name": table_name,
+                "description": description,
+                "column_count": col_count,
+            }));
+        }
+        
+        Ok(json!({
+            "matches": results,
+            "total_matches": results.len(),
+        }))
+    }
+    
+    async fn get_related_tables(&self, table: &str) -> Result<Value, Box<dyn Error>> {
+        // Get the main table schema
+        let main_schema = self.get_tables_schema(vec![table]).await?;
+        
+        if main_schema.get(table).is_none() {
+            return Err("Table not found".into());
+        }
+        
+        let pool = PgPool::connect(&self.connection_string).await?;
+        
+        // Get tables that this table references (outgoing foreign keys)
+        let references = sqlx::query(
+            "SELECT DISTINCT ccu.table_name AS foreign_table_name
+             FROM information_schema.table_constraints AS tc
+             JOIN information_schema.key_column_usage AS kcu
+                 ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
+             JOIN information_schema.constraint_column_usage AS ccu
+                 ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
+             WHERE tc.constraint_type = 'FOREIGN KEY' 
+                 AND tc.table_name = $1
+                 AND tc.table_schema = 'public'"
+        )
+        .bind(table)
+        .fetch_all(&pool)
+        .await?;
+        
+        // Get tables that reference this table (incoming foreign keys)
+        let referenced_by = sqlx::query(
+            "SELECT DISTINCT tc.table_name
+             FROM information_schema.table_constraints AS tc
+             JOIN information_schema.key_column_usage AS kcu
+                 ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
+             JOIN information_schema.constraint_column_usage AS ccu
+                 ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
+             WHERE tc.constraint_type = 'FOREIGN KEY' 
+                 AND ccu.table_name = $1
+                 AND tc.table_schema = 'public'"
+        )
+        .bind(table)
+        .fetch_all(&pool)
+        .await?;
+        
+        // Collect all related table names
+        let mut related_tables = Vec::new();
+        for row in references {
+            related_tables.push(row.get::<String, _>("foreign_table_name"));
+        }
+        for row in referenced_by {
+            related_tables.push(row.get::<String, _>("table_name"));
+        }
+        
+        // Get schemas for related tables
+        let related_schemas = if !related_tables.is_empty() {
+            let refs: Vec<&str> = related_tables.iter().map(|s| s.as_str()).collect();
+            self.get_tables_schema(refs).await?
+        } else {
+            json!({})
+        };
+        
+        Ok(json!({
+            "main_table": main_schema[table],
+            "related_tables": related_schemas,
+            "relationship_count": related_tables.len(),
+        }))
+    }
+    
+    async fn get_database_stats(&self) -> Result<Value, Box<dyn Error>> {
+        let pool = PgPool::connect(&self.connection_string).await?;
+        
+        // Get overall statistics
+        let stats = sqlx::query(
+            "SELECT 
+                COUNT(DISTINCT table_name) as table_count,
+                COALESCE(SUM(pg_total_relation_size(quote_ident(table_schema)||'.'||quote_ident(table_name)::text))::bigint, 0) as total_size
+             FROM information_schema.tables
+             WHERE table_schema = 'public' AND table_type = 'BASE TABLE'"
+        )
+        .fetch_one(&pool)
+        .await?;
+        
+        // Get largest tables
+        let largest_tables = sqlx::query(
+            "SELECT 
+                table_name,
+                COALESCE(pg_total_relation_size(quote_ident(table_schema)||'.'||quote_ident(table_name)::text)::bigint, 0) as size_bytes,
+                pg_size_pretty(pg_total_relation_size(quote_ident(table_schema)||'.'||quote_ident(table_name)::text)) as size_human
+             FROM information_schema.tables
+             WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+             ORDER BY pg_total_relation_size(quote_ident(table_schema)||'.'||quote_ident(table_name)::text) DESC NULLS LAST
+             LIMIT 10"
+        )
+        .fetch_all(&pool)
+        .await?;
+        
+        // Get most connected tables
+        let connections = sqlx::query(
+            "WITH foreign_keys AS (
+                SELECT 
+                    tc.table_name,
+                    COUNT(*) as outgoing_fks
+                FROM information_schema.table_constraints AS tc
+                WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public'
+                GROUP BY tc.table_name
+            ),
+            referenced AS (
+                SELECT 
+                    ccu.table_name,
+                    COUNT(*) as incoming_fks
+                FROM information_schema.table_constraints AS tc
+                JOIN information_schema.constraint_column_usage AS ccu
+                    ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
+                WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public'
+                GROUP BY ccu.table_name
+            )
+            SELECT 
+                t.table_name,
+                COALESCE(f.outgoing_fks, 0) as references_count,
+                COALESCE(r.incoming_fks, 0) as referenced_by_count,
+                COALESCE(f.outgoing_fks, 0) + COALESCE(r.incoming_fks, 0) as total_connections
+            FROM information_schema.tables t
+            LEFT JOIN foreign_keys f ON t.table_name = f.table_name
+            LEFT JOIN referenced r ON t.table_name = r.table_name
+            WHERE t.table_schema = 'public' AND t.table_type = 'BASE TABLE'
+                AND (f.outgoing_fks > 0 OR r.incoming_fks > 0)
+            ORDER BY total_connections DESC
+            LIMIT 10"
+        )
+        .fetch_all(&pool)
+        .await?;
+        
+        Ok(json!({
+            "summary": {
+                "total_tables": stats.get::<i64, _>("table_count"),
+                "total_size_bytes": stats.get::<i64, _>("total_size"),
+                "total_size_human": format_bytes(stats.get::<i64, _>("total_size") as u64),
+            },
+            "largest_tables": largest_tables.iter().map(|t| json!({
+                "name": t.get::<String, _>("table_name"),
+                "size_bytes": t.get::<i64, _>("size_bytes"),
+                "size_human": t.get::<String, _>("size_human"),
+            })).collect::<Vec<_>>(),
+            "most_connected_tables": connections.iter().map(|c| json!({
+                "name": c.get::<String, _>("table_name"),
+                "references_count": c.get::<i64, _>("references_count"),
+                "referenced_by_count": c.get::<i64, _>("referenced_by_count"),
+                "total_connections": c.get::<i64, _>("total_connections"),
+            })).collect::<Vec<_>>(),
+        }))
+    }
+}
+
+// Helper function to quote identifiers safely
+fn quote_ident(name: &str) -> String {
+    format!("\"{}\"", name.replace('"', "\"\""))
+}

@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from "react";
 import {
-  FileText,
   X,
   Check,
   Search,
@@ -14,13 +13,9 @@ import {
 import {
   Dialog,
   DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { API_BASE_URL } from "@/lib/url";
 import { cn } from "@/lib/utils";
@@ -331,25 +326,25 @@ export function FileBrowser({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="min-w-[90vw] max-w-[90vw] w-[90vw] h-[90vh] max-h-[90vh] flex flex-col p-0 gap-0"
+        className="min-w-[95vw] sm:min-w-[90vw] max-w-[1400px] h-[85vh] sm:h-[90vh] flex flex-col p-0 gap-0"
         showCloseButton={false}
       >
         <div className="flex-1 flex overflow-hidden">
-          <div className="flex flex-col items-stretch">
+          <div className="flex flex-col items-stretch flex-1">
             <div className="flex flex-row p-2 border-b gap-2">
               {/* Search and Upload controls in header */}
-              <div className="flex gap-2 flex-1  relative">
+              <div className="flex gap-2 flex-1 relative min-w-0">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
                   placeholder="Search files..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10"
+                  className="pl-10 flex-1"
                 />
               </div>
 
               {isUploading && Object.keys(uploadProgress).length > 0 ? (
-                <div className="space-y-2 p-3 border rounded-lg bg-muted/50">
+                <div className="space-y-2 p-3 border rounded-lg bg-muted/50 w-full sm:w-auto">
                   <div className="text-xs font-medium">Uploading...</div>
                   {Object.entries(uploadProgress).map(
                     ([fileName, progress]) => (
@@ -402,19 +397,19 @@ export function FileBrowser({
                     : "No uploaded files in this project"}
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 p-4">
                   {filteredFiles.map((file) => (
                     <div
                       key={file.id}
                       className={cn(
-                        "flex flex-col p-4 rounded-lg border cursor-pointer transition-colors h-full",
+                        "flex flex-col p-3 rounded-lg border cursor-pointer transition-colors h-full",
                         selectedFiles.has(file.id)
                           ? "bg-accent border-primary"
                           : "hover:bg-accent/50"
                       )}
                       onClick={() => toggleFileSelection(file.id)}
                     >
-                      <div className="flex items-start gap-3">
+                      <div className="flex items-start gap-2">
                         <div className="mt-1 shrink-0">
                           {/* Show image preview for image files */}
                           {file.mime_type?.startsWith("image/") ||
@@ -424,7 +419,7 @@ export function FileBrowser({
                               .pop()
                               ?.toLowerCase() || ""
                           ) ? (
-                            <div className="relative w-16 h-16 border rounded overflow-hidden bg-secondary">
+                            <div className="relative w-12 h-12 sm:w-16 sm:h-16 border rounded overflow-hidden bg-secondary flex-shrink-0">
                               <img
                                 src={`${API_BASE_URL}/uploads/${localStorage.getItem(
                                   "activeClientId"
@@ -447,14 +442,14 @@ export function FileBrowser({
                               />
                             </div>
                           ) : (
-                            <div className="w-16 h-16 border rounded flex items-center justify-center bg-secondary">
+                            <div className="w-12 h-12 sm:w-16 sm:h-16 border rounded flex items-center justify-center bg-secondary flex-shrink-0">
                               {getFileIcon(file.mime_type, file.original_name)}
                             </div>
                           )}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium truncate">
+                          <div className="flex items-center gap-1">
+                            <span className="font-medium truncate text-sm">
                               {file.original_name}
                             </span>
                             {selectedFiles.has(file.id) && (
@@ -502,13 +497,16 @@ export function FileBrowser({
                               </Button>
                             </div>
                           ) : (
-                            <div className="mt-1 flex items-center gap-1 group">
-                              <div className="text-xs text-muted-foreground line-clamp-2 flex-1">
-                                <div>
+                            <div className="mt-1 flex items-start gap-1 group">
+                              <div className="text-xs text-muted-foreground line-clamp-3 flex-1">
+                                <div className="line-clamp-2">
                                   {file.description || file.auto_description || "No description"}
                                 </div>
-                                <div className="opacity-70 mt-1">
-                                  {formatFileSize(file.file_size)} • {new Date(file.created_at).toLocaleDateString()}
+                                <div className="opacity-70 mt-1 text-[10px] sm:text-xs">
+                                  {formatFileSize(file.file_size)}
+                                </div>
+                                <div className="opacity-70 text-[10px] sm:text-xs hidden sm:block">
+                                  {new Date(file.created_at).toLocaleDateString()}
                                 </div>
                               </div>
                               <Button
@@ -539,7 +537,7 @@ export function FileBrowser({
           </div>
 
           {/* Sidebar for selected file details */}
-          <div className="min-w-[23%] max-w-[23%] border-l pl-4 pt-4 flex flex-col gap-4 overflow-hidden">
+          <div className="hidden md:flex min-w-[280px] max-w-[280px] border-l pl-4 pt-4 flex-col gap-4 overflow-hidden">
             <div className="font-medium text-sm">
               {selectedFiles.size === 0
                 ? "Select files to see details"
@@ -736,17 +734,18 @@ export function FileBrowser({
           </div>
         </div>
 
-        <div className="flex items-center justify-between pt-4 border-t mt-auto p-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between pt-4 border-t mt-auto p-4 gap-3">
           <div className="text-sm text-muted-foreground">
             {selectedFiles.size > 0 && `${selectedFiles.size} file(s) selected`}
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={() => onOpenChange(false)}>
+            <Button variant="outline" onClick={() => onOpenChange(false)} className="flex-1 sm:flex-none">
               Cancel
             </Button>
             <Button
               onClick={handleSelectFiles}
               disabled={selectedFiles.size === 0}
+              className="flex-1 sm:flex-none"
             >
               Add Selected Files
             </Button>

@@ -21,26 +21,42 @@ RUN cargo build --release
 FROM debian:trixie-slim
 WORKDIR /app
 
-# Install minimal runtime dependencies
+# Install minimal runtime dependencies including tools needed for Claude CLI setup
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     ca-certificates \
     libssl3 \
-    libpq5 && \
+    libpq5 \
+    curl \
+    bash \
+    unzip && \
     rm -rf /var/lib/apt/lists/*
+
+# Create non-root user for security
+RUN groupadd -r clayuser && \
+    useradd -r -g clayuser -d /app -s /bin/bash clayuser
 
 # Copy the built artifacts from the builder stages
 COPY --from=backend-builder /app/target/release/clay-studio-backend /app/clay-studio-backend
 COPY --from=frontend-builder /app/dist /app/frontend/dist
 
-# Create .clients directory for client data
-RUN mkdir -p /app/.clients && chmod 755 /app/.clients
+# Create .clients directory for client data with proper permissions
+RUN mkdir -p /app/.clients /app/tmp && \
+    chown -R clayuser:clayuser /app/.clients /app/tmp && \
+    chmod 755 /app/.clients /app/tmp
+
+# Set ownership of the application directory
+RUN chown -R clayuser:clayuser /app
 
 # Set environment variables
 ENV RUST_LOG=info
 ENV PORT=7680
 ENV STATIC_FILES_PATH=/app/frontend/dist
 ENV CLIENTS_DIR=/app/.clients
+ENV HOME=/app
+
+# Switch to non-root user
+USER clayuser
 
 # Declare volume for persistent client data
 VOLUME ["/app/.clients"]

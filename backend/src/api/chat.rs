@@ -277,7 +277,44 @@ pub async fn handle_chat_stream(
     let project_manager = ProjectManager::new();
     project_manager.ensure_project_directory(client_id, &chat_request.project_id)?;
 
-    // Load existing messages from database to build full conversation context
+    // Check if there are forgotten messages and handle them
+    let forgotten_after_id = sqlx::query_scalar::<_, Option<String>>(
+        "SELECT forgotten_after_message_id FROM conversations WHERE id = $1"
+    )
+    .bind(&conversation_id)
+    .fetch_optional(&state.db_pool)
+    .await
+    .map_err(|e| AppError::InternalServerError(format!("Failed to check forgotten status: {}", e)))?
+    .flatten();
+
+    if let Some(forgotten_message_id) = forgotten_after_id {
+        // Delete forgotten messages permanently when sending a new message
+        sqlx::query(
+            "DELETE FROM messages 
+             WHERE conversation_id = $1 AND created_at > 
+             (SELECT created_at FROM messages WHERE id = $2 AND conversation_id = $1)"
+        )
+        .bind(&conversation_id)
+        .bind(&forgotten_message_id)
+        .execute(&state.db_pool)
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("Failed to delete forgotten messages: {}", e)))?;
+
+        // Clear the forgotten marker
+        sqlx::query(
+            "UPDATE conversations 
+             SET forgotten_after_message_id = NULL, forgotten_count = 0 
+             WHERE id = $1"
+        )
+        .bind(&conversation_id)
+        .execute(&state.db_pool)
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("Failed to clear forgotten marker: {}", e)))?;
+
+        tracing::info!("Deleted forgotten messages and cleared marker for conversation {}", conversation_id);
+    }
+
+    // Load existing (non-forgotten) messages from database to build full conversation context
     let existing_messages = sqlx::query(
         "SELECT content, role FROM messages 
          WHERE conversation_id = $1 
@@ -514,7 +551,7 @@ pub async fn handle_chat_stream(
                         file_attachments: None,
                     };
                     
-                    tracing::info!("Saving assistant message to database - ID: {}, Content length: {}", 
+                    tracing::debug!("Saving assistant message to database - ID: {}, Content length: {}", 
                         message_id, assistant_content.len());
                     
                     if let Err(e) = save_message(&db_pool, &conversation_id_clone, &assistant_message).await {

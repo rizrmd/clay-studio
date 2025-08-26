@@ -167,7 +167,7 @@ export function ClientSetup({ onClientAdded }: ClientSetupProps = {}) {
         }
       }
       
-      eventSource.onerror = (error) => {
+      eventSource.onerror = () => {
         setTokenSetupStep("error")
         setStreamOutput(prev => [...prev, "Connection error occurred"])
         eventSource.close()

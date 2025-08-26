@@ -44,3 +44,21 @@ if (backendBuild.exitCode !== 0) {
 }
 
 console.log("✅ Backend built successfully!");
+
+// Build MCP server release binary
+console.log("🔧 Building MCP server release binary...");
+const mcpBuild = spawn({
+  cmd: ["cargo", "build", "--release", "--bin", "mcp_server"],
+  cwd: backendDir,
+  stdout: "inherit",
+  stderr: "inherit",
+});
+
+await mcpBuild.exited;
+
+if (mcpBuild.exitCode !== 0) {
+  console.error("❌ MCP server build failed!");
+  process.exit(1);
+}
+
+console.log("✅ MCP server built successfully!");

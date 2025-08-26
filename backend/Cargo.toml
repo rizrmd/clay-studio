@@ -51,6 +51,8 @@ regex = "1.10"
 expectrl = "0.7"
 async-trait = "0.1"
 rand = "0.8"
+socket2 = "0.5"
+urlencoding = "2.1"
 
 [dev-dependencies]
 sea-orm-cli = { version = "1.1", default-features = false, features = ["runtime-tokio-rustls", "codegen"] }

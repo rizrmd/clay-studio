@@ -129,7 +129,7 @@ impl ClaudeSetup {
         Ok(())
     }
 
-    async fn install_claude_code(&self, progress_tx: Option<mpsc::Sender<String>>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn install_claude_code(&self, progress_tx: Option<mpsc::Sender<String>>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if let Some(ref tx) = progress_tx {
             let _ = tx.send("Installing @anthropic-ai/claude-code package...".to_string()).await;
         }

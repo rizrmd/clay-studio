@@ -6,12 +6,136 @@ mod models;
 use salvo::prelude::*;
 use salvo::serve_static::StaticDir;
 use salvo::session::SessionHandler;
+use salvo::conn::tcp::TcpAcceptor;
 use dotenv::dotenv;
+use std::time::Duration;
+use tokio::signal;
 
 use crate::utils::{Config, AppState};
 use crate::api::{auth, chat, clients, conversations, conversations_forget, projects, upload};
 use crate::utils::middleware::{inject_state, auth::auth_required};
 use crate::core::sessions::PostgresSessionStore;
+
+/// Bind to address with retry logic by adding delay before binding
+async fn bind_with_retry(address: &str, max_retries: u32) -> TcpAcceptor {
+    // Add a small initial delay to allow any previous process to fully release the port
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    
+    for attempt in 1..=max_retries {
+        let socket_addr: std::net::SocketAddr = match address.parse() {
+            Ok(addr) => addr,
+            Err(_) => {
+                eprintln!("❌ Invalid address format: {}", address);
+                std::process::exit(1);
+            }
+        };
+
+        // Test if the port is available using tokio TcpListener
+        match tokio::net::TcpListener::bind(socket_addr).await {
+            Ok(test_listener) => {
+                // Port is available, close the test listener
+                drop(test_listener);
+                
+                // Give a small grace period for the port to be fully released
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                
+                // Now use Salvo's TcpListener 
+                eprintln!("🔗 Attempting to bind to {} (attempt {})", address, attempt);
+                return TcpListener::new(address).bind().await;
+            }
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::AddrInUse {
+                    eprintln!("⚠️  Port {} is in use (attempt {}/{}), retrying in 1 second...", 
+                             socket_addr.port(), attempt, max_retries);
+                    
+                    if attempt < max_retries {
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                        continue;
+                    }
+                }
+                
+                eprintln!("❌ Failed to bind to {}: {}", address, e);
+                std::process::exit(1);
+            }
+        }
+    }
+    
+    eprintln!("❌ Failed to bind to {} after {} attempts", address, max_retries);
+    std::process::exit(1);
+}
+
+/// Wait for shutdown signal (SIGTERM, SIGINT, or Ctrl+C)
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        signal::ctrl_c()
+            .await
+            .expect("Failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("Failed to install signal handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {
+            tracing::info!("Received Ctrl+C signal");
+        }
+        _ = terminate => {
+            tracing::info!("Received terminate signal");
+        }
+    }
+}
+
+/// Ensure global Bun installation is available for all clients
+async fn ensure_global_bun_installation() -> Result<(), Box<dyn std::error::Error>> {
+    use std::process::Command;
+    use std::path::PathBuf;
+    
+    // Use CLIENTS_DIR env var, or default to ../.clients (project root)
+    let clients_base = std::env::var("CLIENTS_DIR")
+        .unwrap_or_else(|_| ".clients".to_string());
+    
+    let clients_base_path = PathBuf::from(&clients_base);
+    let bun_path = clients_base_path.join("bun");
+    let bun_executable = bun_path.join("bin/bun");
+    
+    if bun_executable.exists() {
+        tracing::info!("Global Bun installation found at {:?}", bun_executable);
+        return Ok(());
+    }
+    
+    tracing::info!("Global Bun installation not found, installing to {:?}", bun_path);
+    
+    // Create the Bun installation directory
+    std::fs::create_dir_all(&clients_base_path)?;
+    std::fs::create_dir_all(&bun_path)?;
+    
+    // Download and install Bun
+    let output = Command::new("bash")
+        .arg("-c")
+        .arg("curl -fsSL https://bun.sh/install | bash")
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin")
+        .env("HOME", clients_base_path.to_str().unwrap())
+        .env("BUN_INSTALL", bun_path.to_str().unwrap())
+        .output()?;
+    
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        return Err(format!("Failed to install Bun globally. stdout: {}, stderr: {}", stdout, stderr).into());
+    }
+    
+    tracing::info!("Global Bun installation completed successfully at {:?}", bun_executable);
+    Ok(())
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -31,6 +155,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let config = Config::from_env()?;
     let state = AppState::new(&config).await?;
+
+    // Ensure global Bun installation is available for all clients
+    ensure_global_bun_installation().await?;
 
     // Session configuration
     let default_secret = "clay-studio-secret-key-change-in-production-this-is-64-bytes-long";
@@ -145,11 +272,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .push(Router::with_path("/api").push(api_router))
         .push(Router::with_path("{*path}").get(static_service));
 
-    let acceptor = TcpListener::new(&config.server_address).bind().await;
+    // Bind with retry logic and socket reuse
+    let acceptor = bind_with_retry(&config.server_address, 5).await;
     
-    // Print startup message directly to stdout
+    // Print startup message
+    println!("🚀 Clay Studio backend listening on {} (with retry logic)", config.server_address);
+    
     let service = Service::new(router);
-    Server::new(acceptor).serve(service).await;
+    let server = Server::new(acceptor);
+    
+    // Run server with graceful shutdown handling
+    tokio::select! {
+        _ = server.serve(service) => {
+            println!("🛑 Server stopped");
+        }
+        _ = shutdown_signal() => {
+            println!("🛑 Clay Studio backend shutting down gracefully");
+        }
+    }
+    
     Ok(())
 }
 

@@ -3,7 +3,6 @@ import { useSnapshot } from 'valtio'
 import {
   authStore,
   isAuthenticated,
-  initializeApp,
   login as loginAction,
   register as registerAction,
   logout as logoutAction,
@@ -13,10 +12,7 @@ import {
 export function useValtioAuth() {
   const snapshot = useSnapshot(authStore)
 
-  // Initialize app on mount
-  useEffect(() => {
-    initializeApp()
-  }, [])
+  // No need to initialize here since ValtioProvider already does it
 
   // Update registration status when firstClient changes
   useEffect(() => {
