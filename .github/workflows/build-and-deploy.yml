@@ -128,7 +128,7 @@ jobs:
         
         RUN apt-get update && \
             apt-get install -y --no-install-recommends \
-            ca-certificates curl git unzip && \
+            ca-certificates curl wget git unzip && \
             rm -rf /var/lib/apt/lists/*
         
         # Install Bun
