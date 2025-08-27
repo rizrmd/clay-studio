@@ -1,22 +1,10 @@
 use salvo::prelude::*;
-use serde::{Deserialize, Serialize};
 use sqlx::Row;
 
 use crate::{
     models::tool_usage::ToolUsage,
     utils::{error::AppError, state::AppState},
 };
-
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-pub struct ToolUsageQuery {
-    pub message_id: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ToolUsageResponse {
-    pub tool_usages: Vec<ToolUsage>,
-}
 
 /// Get all tool usages for a message
 #[handler]
