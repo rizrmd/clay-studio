@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { logger } from "@/lib/logger";
 import {
   X,
   Check,
@@ -243,7 +244,7 @@ export function FileBrowser({
       }
     } catch (error) {
       // Failed to delete file
-      console.error("Failed to delete file:", error);
+      logger.error("FileBrowser: Failed to delete file:", error);
     }
   };
 

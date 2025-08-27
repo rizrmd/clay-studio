@@ -1,21 +1,28 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
+import { logger } from "@/lib/logger";
 import { Messages } from "../display";
 import { MultimodalInput } from "../input/multimodal-input";
 import { useValtioChat } from "@/hooks/use-valtio-chat";
 import { useInputState } from "@/hooks/use-input-state";
-import { updateConversationMessages } from "@/store";
-import { FileText } from "lucide-react";
+import { updateConversationMessages } from "@/store/chat-store";
+import { API_BASE_URL } from "@/lib/url";
+import { AlertTriangle, FileText, PanelLeftOpen, PanelLeftClose } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import type { Message } from "@/types/chat";
 
 interface ChatProps {
   projectId?: string;
   conversationId?: string;
+  onToggleSidebar?: () => void;
+  isSidebarCollapsed?: boolean;
 }
 
 export function Chat({
   projectId,
   conversationId: propConversationId,
+  onToggleSidebar,
+  isSidebarCollapsed,
 }: ChatProps) {
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [shouldFocusInput, setShouldFocusInput] = useState(false);
@@ -57,7 +64,24 @@ export function Chat({
   // Handle navigation when a new conversation is created
   // Navigate when we receive a real conversation ID from the backend
   useEffect(() => {
-    if (propConversationId === 'new' && hookConversationId && hookConversationId !== 'new') {
+    logger.debug('Chat: Navigation check:', {
+      propConversationId,
+      hookConversationId,
+      previousPropConversationId: previousPropConversationId.current,
+      shouldNavigate: propConversationId === "new" &&
+                     hookConversationId &&
+                     hookConversationId !== "new" &&
+                     previousPropConversationId.current !== "new" // Don't redirect if user just navigated to 'new'
+    });
+    
+    if (
+      propConversationId === "new" &&
+      hookConversationId &&
+      hookConversationId !== "new" &&
+      previousPropConversationId.current !== "new" && // Don't redirect if user just navigated to 'new'
+      previousPropConversationId.current !== hookConversationId // Don't redirect if user is navigating away from the hook conversation
+    ) {
+      logger.info('Chat: REDIRECTING to hookConversationId:', hookConversationId);
       // Navigate to the real conversation URL
       navigate(`/chat/${projectId}/${hookConversationId}`, { replace: true });
     }
@@ -124,6 +148,50 @@ export function Chat({
     await sendMessage(content.trim());
   };
 
+  const handleNewChatFromHere = async (messageId: string) => {
+    if (!projectId) return;
+
+    // Find the index of the message to clone up to (inclusive)
+    const messageIndex = messages.findIndex((m) => m.id === messageId);
+    if (messageIndex === -1) return;
+
+    // Get messages to clone (from start to the selected message, inclusive)
+    const messagesToClone = messages.slice(0, messageIndex + 1);
+
+    // Call API to create new chat with cloned messages
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/conversations/new-from-message`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            project_id: projectId,
+            source_conversation_id: hookConversationId || propConversationId,
+            message_id: messageId,
+            messages: messagesToClone,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to create new chat");
+      }
+
+      const data = await response.json();
+
+      // Navigate to the new conversation
+      if (data.conversation_id) {
+        navigate(`/chat/${projectId}/${data.conversation_id}`);
+      }
+    } catch (error) {
+      logger.error("Chat: Failed to create new chat from message:", error);
+    }
+  };
+
   // Container-level drag handlers for larger drop area
   const handleContainerDragEnter = (e: React.DragEvent) => {
     e.preventDefault();
@@ -171,6 +239,21 @@ export function Chat({
         onDragOver={handleContainerDragOver}
         onDrop={handleContainerDrop}
       >
+        {/* Floating sidebar toggle button - hidden on mobile since mobile has its own toggle */}
+        {onToggleSidebar && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onToggleSidebar}
+            className="fixed top-4 left-4 z-30 h-10 w-10 p-0 rounded-full shadow-lg bg-background border hidden md:flex"
+          >
+            {isSidebarCollapsed ? (
+              <PanelLeftOpen className="h-5 w-5" />
+            ) : (
+              <PanelLeftClose className="h-5 w-5" />
+            )}
+          </Button>
+        )}
         {hasForgottenMessages && (
           <div className="absolute left-0 right-0 bg-white pt-5 top-0 w-full z-10 px-4">
             <div className="flex max-w-[44rem] mx-auto mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 items-center justify-between">
@@ -206,9 +289,12 @@ export function Chat({
           <div className="h-full flex flex-col">
             {/* Error display */}
             {error && (
-              <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-4 text-red-800">
+              <div className="mb-4 bg-red-600 p-4 text-white">
                 <div className="flex items-center justify-between">
-                  <p className="text-sm">{error}</p>
+                  <div className="flex items-center gap-2 text-sm">
+                    <AlertTriangle />
+                    <div>{error}</div>
+                  </div>
                   {(error.includes("doesn't exist") ||
                     error.includes("deleted") ||
                     error.includes("permission")) &&
@@ -274,6 +360,7 @@ export function Chat({
                   onStop={stopMessage}
                   activeTools={[...activeTools]}
                   onResendMessage={handleResendMessage}
+                  onNewChatFromHere={handleNewChatFromHere}
                 />
               </div>
             )}

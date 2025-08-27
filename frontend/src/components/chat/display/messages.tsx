@@ -15,6 +15,7 @@ import {
   ArrowDown,
   Bot,
   Clock,
+  Copy,
   Download,
   FileText,
   MoreVertical,
@@ -71,6 +72,7 @@ interface MessagesProps {
   onStop?: () => void;
   activeTools?: string[]; // Active tools being used
   onResendMessage?: (message: Message) => void; // Add resend callback
+  onNewChatFromHere?: (messageId: string) => void; // Add new chat from here callback
 }
 
 // Helper function to format file size
@@ -124,6 +126,7 @@ const MessageItem = memo(
     setEditingContent,
     onResendMessage,
     isLastUserMessage,
+    onNewChatFromHere,
   }: {
     message: DisplayMessage;
     onForgetFrom?: (messageId: string) => void;
@@ -135,6 +138,7 @@ const MessageItem = memo(
     setEditingContent?: (content: string) => void;
     onResendMessage?: (message: Message) => void;
     isLastUserMessage?: boolean;
+    onNewChatFromHere?: (messageId: string) => void;
   }) => {
     const isQueued = message.isQueued;
     const isEditing = message.isEditing;
@@ -327,6 +331,7 @@ const MessageItem = memo(
                         tools={message.clay_tools_used}
                         variant="compact"
                         isCompleted={true}
+                        messageId={message.id}
                       />
                     </div>
                     <div className="text-xs">
@@ -386,6 +391,7 @@ const MessageItem = memo(
             )}
           </div>
           {(onForgetFrom ||
+            onNewChatFromHere ||
             (onResendMessage &&
               isLastUserMessage &&
               message.role === "user")) &&
@@ -422,6 +428,14 @@ const MessageItem = memo(
                         Forget after this
                       </DropdownMenuItem>
                     )}
+                    {onNewChatFromHere && (
+                      <DropdownMenuItem
+                        onClick={() => onNewChatFromHere(message.id)}
+                      >
+                        <Copy className="mr-2 h-4 w-4" />
+                        New Chat From Here
+                      </DropdownMenuItem>
+                    )}
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
@@ -446,6 +460,7 @@ export function Messages({
   onStop,
   activeTools = [],
   onResendMessage,
+  onNewChatFromHere,
 }: MessagesProps) {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -819,6 +834,7 @@ export function Messages({
                           setEditingContent={setEditingContent}
                           onResendMessage={onResendMessage}
                           isLastUserMessage={item.id === lastUserMessageId}
+                          onNewChatFromHere={onNewChatFromHere}
                         />
                         {bottomPadding}
                       </>

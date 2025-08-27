@@ -11,7 +11,7 @@ interface Project {
   updated_at: string;
   client_id: string;
   conversation_count?: number;
-  query_count?: number;
+  datasource_count?: number;
 }
 
 export function ProjectsPage() {
@@ -62,7 +62,8 @@ export function ProjectsPage() {
       });
       
       if (!response.ok) {
-        throw new Error("Failed to create project");
+        const errorData = await response.json().catch(() => ({ error: "Failed to create project" }));
+        throw new Error(errorData.error || errorData.message || "Failed to create project");
       }
       
       const newProject = await response.json();
@@ -186,7 +187,7 @@ export function ProjectsPage() {
                         </div>
                         <div className="flex items-center gap-1">
                           <Database className="h-4 w-4" />
-                          <span>{project.query_count || 0} queries</span>
+                          <span>{project.datasource_count || 0} datasources</span>
                         </div>
                       </div>
                     </div>

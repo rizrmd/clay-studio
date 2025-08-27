@@ -7,7 +7,7 @@ import {
   addInputAttachment,
   removeInputAttachment,
   setInputTyping
-} from '../store';
+} from '../store/chat-store';
 
 /**
  * Hook for managing input state for a specific conversation

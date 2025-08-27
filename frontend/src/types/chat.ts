@@ -11,6 +11,16 @@ export interface FileAttachment {
   auto_description?: string;
 }
 
+export interface ToolUsage {
+  id: string;
+  message_id: string;
+  tool_name: string;
+  parameters?: any;
+  output?: any;
+  execution_time_ms?: number;
+  createdAt?: string;
+}
+
 export interface Message {
   id: string;
   content: string;

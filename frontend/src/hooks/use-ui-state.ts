@@ -5,7 +5,7 @@ import {
   setSidebarOpen,
   setFileSidebarOpen,
   setActiveTab
-} from '../store';
+} from '../store/chat-store';
 
 /**
  * Hook for managing global UI state

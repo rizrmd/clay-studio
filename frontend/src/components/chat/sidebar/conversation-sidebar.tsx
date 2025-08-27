@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { useSnapshot } from "valtio";
 import {
   ChevronDown,
   Plus,
@@ -9,7 +10,8 @@ import {
   MoreHorizontal,
   Edit,
   Trash2,
-  FileText,
+  Loader2,
+  ChevronLeft,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,9 +31,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { API_BASE_URL } from "@/lib/url";
 import { cn } from "@/lib/utils";
+import { logger } from "@/lib/logger";
 import { useValtioAuth } from "@/hooks/use-valtio-auth";
 import { ClaudeMdModal } from "./claude-md-modal";
-import { store } from "@/store";
+import { store, cleanupDeletedConversation } from "@/store/chat-store";
 
 interface Conversation {
   id: string;
@@ -58,9 +61,10 @@ export function ConversationSidebar({
   onConversationSelect: _onConversationSelect,
 }: ConversationSidebarProps) {
   // Get the active conversation ID from store to handle /new -> real ID transition
-  const actualConversationId = currentConversationId === 'new' && store.activeConversationId
-    ? store.activeConversationId
-    : currentConversationId;
+  const actualConversationId =
+    currentConversationId === "new" && store.activeConversationId
+      ? store.activeConversationId
+      : currentConversationId;
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -70,8 +74,13 @@ export function ConversationSidebar({
   const [newTitle, setNewTitle] = useState("");
   const [claudeMdModalOpen, setClaudeMdModalOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [recentlyUpdatedConversations, setRecentlyUpdatedConversations] =
+    useState<Set<string>>(new Set());
   const { isAuthenticated, isSetupComplete, user, logout } = useValtioAuth();
   const navigate = useNavigate();
+
+  // Track loading state for conversations
+  const snapshot = useSnapshot(store.conversations);
 
   // Auto-close mobile menu on larger screens
   useEffect(() => {
@@ -111,6 +120,18 @@ export function ConversationSidebar({
 
         const data = await response.json();
         setConversations(data);
+
+        // Validate current conversation ID against fetched conversations
+        // Only redirect if we have an invalid conversation ID and there are existing conversations
+        // OR if there are no conversations at all (empty state should go to /new)
+        if (
+          currentConversationId &&
+          currentConversationId !== "new" &&
+          !data.find((conv: Conversation) => conv.id === currentConversationId)
+        ) {
+          // Current conversation ID doesn't exist in the list, redirect to new
+          navigate(`/chat/${projectId}/new`, { replace: true });
+        }
       } catch (err) {
         setError(
           err instanceof Error ? err.message : "Failed to load conversations"
@@ -121,21 +142,141 @@ export function ConversationSidebar({
     };
 
     fetchConversations();
-    
+  }, [projectId, currentConversationId, isAuthenticated, isSetupComplete]);
+
+  // Set up event listeners for real-time sidebar updates
+  useEffect(() => {
+    if (!projectId) return;
+
+    const fetchConversations = async () => {
+      if (!isAuthenticated || !isSetupComplete) return;
+
+      try {
+        const url = `${API_BASE_URL}/conversations?project_id=${encodeURIComponent(
+          projectId
+        )}`;
+
+        const response = await fetch(url, {
+          credentials: "include",
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to fetch conversations: ${response.status}`);
+        }
+
+        const data = await response.json();
+        setConversations(data);
+      } catch (err) {
+        logger.error(
+          "ConversationSidebar: Failed to refresh conversations:",
+          err
+        );
+      }
+    };
+
     // Listen for conversation creation events to refresh the list
     const handleConversationCreated = (event: CustomEvent) => {
       if (event.detail?.projectId === projectId) {
-        console.log('[ConversationSidebar] New conversation created, refreshing list');
+        logger.info(
+          "ConversationSidebar: New conversation created, refreshing list",
+          event.detail
+        );
+
+        // Just fetch the real data from server - don't add placeholder
+        // This ensures we get the correct count and avoid race conditions
         fetchConversations();
       }
     };
-    
-    window.addEventListener('conversation-created', handleConversationCreated as EventListener);
-    
-    return () => {
-      window.removeEventListener('conversation-created', handleConversationCreated as EventListener);
+
+    // Listen for message sent events to update message counts
+    const handleMessageSent = (event: CustomEvent) => {
+      if (
+        event.detail?.projectId === projectId &&
+        event.detail?.conversationId
+      ) {
+        logger.info(
+          "ConversationSidebar: Message sent, updating conversation list"
+        );
+
+        // Add to recently updated set (no auto-removal, will be removed on click)
+        setRecentlyUpdatedConversations(
+          (prev) => new Set([...prev, event.detail.conversationId])
+        );
+
+        // Update the message count for the specific conversation
+        setConversations((prevConversations) =>
+          prevConversations
+            .map((conv) => {
+              if (conv.id === event.detail.conversationId) {
+                return {
+                  ...conv,
+                  message_count: conv.message_count + 2, // +1 for user message, +1 for assistant response
+                  updated_at: new Date().toISOString(),
+                };
+              }
+              return conv;
+            })
+            .sort(
+              (a, b) =>
+                new Date(b.created_at).getTime() -
+                new Date(a.created_at).getTime()
+            )
+        );
+      }
     };
-  }, [projectId, currentConversationId, isAuthenticated, isSetupComplete]);
+
+    // Listen for streaming events (no need to update state, valtio handles it)
+    const handleStreamingStarted = (event: CustomEvent) => {
+      if (event.detail?.projectId === projectId) {
+        logger.debug(
+          "ConversationSidebar: Streaming started for",
+          event.detail.conversationId
+        );
+      }
+    };
+
+    const handleStreamingStopped = (event: CustomEvent) => {
+      if (event.detail?.projectId === projectId) {
+        logger.debug(
+          "ConversationSidebar: Streaming stopped for",
+          event.detail.conversationId
+        );
+      }
+    };
+
+    window.addEventListener(
+      "conversation-created",
+      handleConversationCreated as EventListener
+    );
+    window.addEventListener("message-sent", handleMessageSent as EventListener);
+    window.addEventListener(
+      "streaming-started",
+      handleStreamingStarted as EventListener
+    );
+    window.addEventListener(
+      "streaming-stopped",
+      handleStreamingStopped as EventListener
+    );
+
+    return () => {
+      window.removeEventListener(
+        "conversation-created",
+        handleConversationCreated as EventListener
+      );
+      window.removeEventListener(
+        "message-sent",
+        handleMessageSent as EventListener
+      );
+      window.removeEventListener(
+        "streaming-started",
+        handleStreamingStarted as EventListener
+      );
+      window.removeEventListener(
+        "streaming-stopped",
+        handleStreamingStopped as EventListener
+      );
+    };
+  }, [projectId, isAuthenticated, isSetupComplete]);
 
   // Handle conversation click
   const handleConversationClick = (
@@ -143,6 +284,13 @@ export function ConversationSidebar({
     e: React.MouseEvent
   ) => {
     e.preventDefault();
+
+    // Remove from recently updated set when clicked
+    setRecentlyUpdatedConversations((prev) => {
+      const newSet = new Set(prev);
+      newSet.delete(conversationId);
+      return newSet;
+    });
 
     // Don't navigate if already on this conversation
     if (actualConversationId === conversationId) {
@@ -253,8 +401,19 @@ export function ConversationSidebar({
         convs.filter((c) => c.id !== conversation.id)
       );
 
+      // Clean up the deleted conversation from store
+      cleanupDeletedConversation(conversation.id);
+
+      // Clear from localStorage if this was the last viewed conversation
+      const lastConversationKey = `last_conversation_${projectId}`;
+      const lastConversationId = localStorage.getItem(lastConversationKey);
+      if (lastConversationId === conversation.id) {
+        localStorage.removeItem(lastConversationKey);
+      }
+
       // If we're currently viewing this conversation, navigate away
       if (actualConversationId === conversation.id) {
+        // Navigate to new conversation
         navigate(`/chat/${projectId}/new`);
       }
     } catch (err) {
@@ -284,15 +443,15 @@ export function ConversationSidebar({
         className={cn(
           "border-r bg-background flex flex-col transition-all duration-300",
           // Desktop width
-          isCollapsed ? "md:w-12" : "md:w-64",
+          isCollapsed ? "md:w-12" : "md:max-w-64 md:min-w-64",
           // Mobile: full height overlay or hidden
           "fixed md:relative inset-y-0 left-0 z-50",
           isMobileMenuOpen ? "w-64" : "w-0 md:w-auto",
           !isMobileMenuOpen && "overflow-hidden md:overflow-visible"
         )}
       >
-        {/* Header with toggle and new chat */}
-        <div className="p-3 border-b">
+        {/* Header with back to projects and new chat */}
+        <div className="px-1 py-2 border-b">
           <div className="flex items-center justify-between">
             <Button
               variant="ghost"
@@ -302,35 +461,35 @@ export function ConversationSidebar({
                 if (window.innerWidth < 768) {
                   setIsMobileMenuOpen(false);
                 } else {
-                  // On desktop, toggle collapse
-                  onToggle();
+                  // Navigate back to projects
+                  navigate("/projects");
                 }
               }}
-              className="h-8 w-8 p-0"
+              className="pl-1 gap-1 h-[25px] border border-transparent hover:border-gray-200"
             >
-              {isCollapsed && window.innerWidth >= 768 ? (
-                <PanelLeftOpen className="h-4 w-4" />
-              ) : (
-                <PanelLeftClose className="h-4 w-4" />
-              )}
+              <ChevronLeft size={10} />
+              <span className="text-xs">Projects</span>
             </Button>
 
             {!isCollapsed && projectId && (
               <Button
                 variant="ghost"
                 size="sm"
+                className="pl-1 gap-1 h-[25px] border border-transparent hover:border-gray-200"
                 onClick={() => {
-                  // Clear any existing state for new conversations
-                  if (store.activeConversationId) {
-                    store.activeConversationId = null;
+                  // Clear any existing conversation state
+                  store.activeConversationId = null;
+
+                  // Clear any existing 'new' conversation state
+                  if (store.conversations.new) {
+                    delete store.conversations.new;
                   }
-                  
+
                   // Navigate to new chat
                   navigate(`/chat/${projectId}/new`);
                   // Close mobile menu after navigation
                   setIsMobileMenuOpen(false);
                 }}
-                className="h-8 px-3 gap-1"
                 type="button"
               >
                 <Plus className="h-4 w-4" />
@@ -357,23 +516,53 @@ export function ConversationSidebar({
               </div>
             ) : conversations.length === 0 ? (
               <div className="p-4">
-                <p className="text-sm text-muted-foreground">Ummm...</p>
+                <p className="text-xs text-muted-foreground">Ummm... </p>
+                <p className="text-xs text-muted-foreground">Let's talk ? </p>
               </div>
             ) : (
-              <div className="p-2">
+              <div className="p-2 min-w-[130px] ">
                 {conversations.map((conversation) => (
                   <div
                     key={conversation.id}
                     className={cn(
-                      "block w-full text-left p-2 rounded-md hover:bg-muted border border-transparent transition-colors mb-1 group cursor-pointer relative",
-                      actualConversationId === conversation.id && "bg-muted border-blue-900/20"
+                      "block w-full group text-left p-2 rounded-md hover:bg-muted border border-transparent transition-colors mb-1 group cursor-pointer relative",
+                      actualConversationId === conversation.id &&
+                        "bg-muted border-blue-700/30"
                     )}
                     onClick={(e) => handleConversationClick(conversation.id, e)}
                   >
-                    <div className="flex items-start gap-2 pr-8 w-[200px] overflow-hidden">
-                      <MessageSquare className="h-4 w-4 mt-0.5 text-muted-foreground " />
+                    <div
+                      className={cn(
+                        "flex items-start gap-2 overflow-hidden group-hover:pr-8"
+                      )}
+                    >
+                      <div className="relative flex flex-col items-center pt-1">
+                        {snapshot[conversation.id]?.isLoading ||
+                        snapshot[conversation.id]?.isStreaming ? (
+                          <Loader2 className="h-4 w-4 text-muted-foreground animate-spin" />
+                        ) : (
+                          <MessageSquare
+                            className={cn(
+                              "h-4 w-4",
+                              recentlyUpdatedConversations.has(conversation.id)
+                                ? "text-green-500"
+                                : " text-muted-foreground"
+                            )}
+                          />
+                        )}
+                        {/* Green notification dot below icon */}
+                        {recentlyUpdatedConversations.has(conversation.id) && (
+                          <div className="h-[6px] w-[6px] rounded-full bg-green-500 mt-1" />
+                        )}
+                      </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">
+                        <p
+                          className={cn(
+                            "text-sm font-medium truncate",
+                            recentlyUpdatedConversations.has(conversation.id) &&
+                              "text-green-500"
+                          )}
+                        >
                           {conversation.title || "New Conversation"}
                         </p>
                         <p className="text-xs text-muted-foreground">
@@ -434,23 +623,6 @@ export function ConversationSidebar({
                 ))}
               </div>
             )}
-          </div>
-        )}
-
-        {/* CLAUDE.md Button */}
-        {projectId && (
-          <div className="p-3 border-t">
-            <Button
-              onClick={() => setClaudeMdModalOpen(true)}
-              variant="ghost"
-              size="sm"
-              className={`w-full ${
-                isCollapsed ? "justify-center" : "justify-start"
-              } gap-2`}
-            >
-              <FileText className="h-4 w-4" />
-              {!isCollapsed && "Edit CLAUDE.md"}
-            </Button>
           </div>
         )}
 
