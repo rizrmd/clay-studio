@@ -85,10 +85,20 @@ jobs:
     
     - name: Prepare build context
       run: |
+        echo "=== Listing artifacts directory structure ==="
+        ls -la artifacts/
+        echo "=== Listing frontend-dist contents ==="
+        ls -la artifacts/frontend-dist/
+        echo "=== Moving backend binary ==="
         mv artifacts/backend-binary/clay-studio-backend backend/
         chmod +x backend/clay-studio-backend
+        echo "=== Creating frontend/dist directory ==="
         mkdir -p frontend/dist
-        mv artifacts/frontend-dist/* frontend/dist/
+        echo "=== Copying frontend dist files ==="
+        cp -r artifacts/frontend-dist/* frontend/dist/
+        echo "=== Verifying frontend/dist contents ==="
+        ls -la frontend/dist/
+        echo "=== Done with preparation ===="
     
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
