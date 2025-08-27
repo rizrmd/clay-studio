@@ -48,8 +48,8 @@ RUN mkdir -p /app/.clients /app/tmp && \
 # Pre-install Bun globally for the application to use
 ENV BUN_INSTALL=/app/.clients/bun
 RUN curl -fsSL https://bun.sh/install | bash && \
-    chown -R clayuser:clayuser /app/.clients/bun && \
-    chmod -R 755 /app/.clients/bun
+    chown -R clayuser:clayuser /app/.clients && \
+    chmod -R 755 /app/.clients
 
 # Set ownership of the application directory
 RUN chown -R clayuser:clayuser /app
