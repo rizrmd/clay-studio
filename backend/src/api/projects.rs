@@ -323,7 +323,7 @@ pub async fn list_projects(
         
         // Get conversation count for this project
         let conversation_count = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM conversations WHERE project_id = $1 AND is_forgotten = false"
+            "SELECT COUNT(*) FROM conversations WHERE project_id = $1"
         )
         .bind(&project_id)
         .fetch_one(&state.db_pool)
