@@ -12,7 +12,10 @@ use std::time::Duration;
 use tokio::signal;
 
 use crate::utils::{Config, AppState};
-use crate::api::{admin, auth, chat, clients, client_management, conversations, conversations_forget, projects, tool_usage, upload};
+use crate::api::{
+    admin, auth, chat, clients, client_management,
+    conversations, conversations_forget, projects, tool_usage, upload
+};
 use crate::utils::middleware::{inject_state, auth::{auth_required, admin_required, root_required}};
 use crate::core::sessions::PostgresSessionStore;
 
@@ -275,7 +278,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Root routes (accessible only to root role)
     let root_router = Router::new()
         .hoop(root_required)
-        .push(Router::with_path("/root").push(client_management::root_routes()));
+        .push(Router::with_path("/root/clients").push(client_management::root_routes()));
 
     // API routes with state injection and session handling
     let api_router = Router::new()

@@ -1,67 +1,84 @@
-import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { useSnapshot } from 'valtio'
-import { authStore } from '@/store/auth-store'
-import { rootService, ClientRootResponse } from '@/services/root-service'
-import { ClientManagement } from '@/components/root/client-management'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Shield, Users, Server, Activity, Settings, LogOut } from 'lucide-react'
-import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { useValtioAuth } from '@/hooks/use-valtio-auth'
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useSnapshot } from "valtio";
+import { authStore } from "@/store/auth-store";
+import { rootService, ClientRootResponse } from "@/services/root-service";
+import { ClientManagement } from "@/components/root/client-management";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Shield,
+  Users,
+  Server,
+  Activity,
+  Settings,
+  LogOut,
+  User,
+} from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { useValtioAuth } from "@/hooks/use-valtio-auth";
 
 export function RootDashboard() {
-  const auth = useSnapshot(authStore)
-  const navigate = useNavigate()
-  const { logout } = useValtioAuth()
-  const [clients, setClients] = useState<ClientRootResponse[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const auth = useSnapshot(authStore);
+  const navigate = useNavigate();
+  const { logout } = useValtioAuth();
+  const [clients, setClients] = useState<ClientRootResponse[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [stats, setStats] = useState({
     totalClients: 0,
     activeClients: 0,
     totalUsers: 0,
     totalConversations: 0,
-  })
+  });
 
   useEffect(() => {
     // Check if user has root role
-    if (auth.user?.role !== 'root') {
-      navigate('/')
-      return
+    if (auth.user?.role !== "root") {
+      navigate("/");
+      return;
     }
 
-    loadClients()
-  }, [auth.user, navigate])
+    loadClients();
+  }, [auth.user, navigate]);
 
   const loadClients = async () => {
     try {
-      setLoading(true)
-      setError(null)
-      const data = await rootService.getClientsRoot()
-      setClients(data)
-      
+      setLoading(true);
+      setError(null);
+      const data = await rootService.getClientsRoot();
+      setClients(data);
+
       // Calculate stats
-      const activeClients = data.filter(c => c.status === 'active').length
-      const totalUsers = data.reduce((sum, c) => sum + c.userCount, 0)
-      const totalConversations = data.reduce((sum, c) => sum + c.conversationCount, 0)
-      
+      const activeClients = data.filter((c) => c.status === "active").length;
+      const totalUsers = data.reduce((sum, c) => sum + c.userCount, 0);
+      const totalConversations = data.reduce(
+        (sum, c) => sum + c.conversationCount,
+        0
+      );
+
       setStats({
         totalClients: data.length,
         activeClients,
         totalUsers,
         totalConversations,
-      })
+      });
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to load clients')
+      setError(err.response?.data?.error || "Failed to load clients");
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
-  if (auth.user?.role !== 'root') {
+  if (auth.user?.role !== "root") {
     return (
       <div className="flex h-screen items-center justify-center">
         <Alert className="max-w-md">
@@ -71,7 +88,7 @@ export function RootDashboard() {
           </AlertDescription>
         </Alert>
       </div>
-    )
+    );
   }
 
   return (
@@ -95,6 +112,15 @@ export function RootDashboard() {
             <Button
               variant="ghost"
               size="sm"
+              onClick={() => navigate('/profile')}
+              className="gap-2"
+            >
+              <User className="h-4 w-4" />
+              Profile
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={logout}
               className="gap-2"
             >
@@ -110,7 +136,9 @@ export function RootDashboard() {
         <div className="grid grid-cols-4 gap-4">
           <Card>
             <CardHeader className="pb-2">
-              <CardDescription className="text-xs">Total Clients</CardDescription>
+              <CardDescription className="text-xs">
+                Total Clients
+              </CardDescription>
             </CardHeader>
             <CardContent>
               <div className="flex items-center gap-2">
@@ -122,12 +150,16 @@ export function RootDashboard() {
 
           <Card>
             <CardHeader className="pb-2">
-              <CardDescription className="text-xs">Active Clients</CardDescription>
+              <CardDescription className="text-xs">
+                Active Clients
+              </CardDescription>
             </CardHeader>
             <CardContent>
               <div className="flex items-center gap-2">
                 <Activity className="h-4 w-4 text-green-500" />
-                <span className="text-2xl font-bold">{stats.activeClients}</span>
+                <span className="text-2xl font-bold">
+                  {stats.activeClients}
+                </span>
               </div>
             </CardContent>
           </Card>
@@ -146,12 +178,16 @@ export function RootDashboard() {
 
           <Card>
             <CardHeader className="pb-2">
-              <CardDescription className="text-xs">Total Conversations</CardDescription>
+              <CardDescription className="text-xs">
+                Total Conversations
+              </CardDescription>
             </CardHeader>
             <CardContent>
               <div className="flex items-center gap-2">
                 <Activity className="h-4 w-4 text-muted-foreground" />
-                <span className="text-2xl font-bold">{stats.totalConversations}</span>
+                <span className="text-2xl font-bold">
+                  {stats.totalConversations}
+                </span>
               </div>
             </CardContent>
           </Card>
@@ -160,44 +196,13 @@ export function RootDashboard() {
 
       {/* Main Content */}
       <div className="flex-1 overflow-auto px-6 pb-6">
-        <Tabs defaultValue="clients" className="h-full">
-          <TabsList>
-            <TabsTrigger value="clients" className="gap-2">
-              <Server className="h-4 w-4" />
-              Clients
-            </TabsTrigger>
-            <TabsTrigger value="system" className="gap-2">
-              <Settings className="h-4 w-4" />
-              System Settings
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="clients" className="mt-4">
-            <ClientManagement 
-              clients={clients}
-              loading={loading}
-              error={error}
-              onRefresh={loadClients}
-            />
-          </TabsContent>
-
-          <TabsContent value="system" className="mt-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>System Settings</CardTitle>
-                <CardDescription>
-                  Global system configuration and maintenance
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm text-muted-foreground">
-                  System settings coming soon...
-                </p>
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
+        <ClientManagement
+          clients={clients}
+          loading={loading}
+          error={error}
+          onRefresh={loadClients}
+        />
       </div>
     </div>
-  )
+  );
 }

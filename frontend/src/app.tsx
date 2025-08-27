@@ -5,6 +5,7 @@ import { AuthPage } from "./pages/AuthPage";
 import { SetupPage } from "./pages/SetupPage";
 import { RootDashboard } from "./pages/RootDashboard";
 import { ConfigPage } from "./pages/ConfigPage";
+import { ProfilePage } from "./pages/ProfilePage";
 import { ValtioProvider } from "./providers/ValtioProvider";
 import { SetupRoute } from "./components/auth/setup-route";
 import { ProtectedRoute } from "./components/auth/protected-route";
@@ -48,6 +49,14 @@ function App() {
         />
         <Route path="/auth" element={<AuthPage />} />
         <Route path="/setup" element={<SetupPage />} />
+        <Route
+          path="/profile"
+          element={
+            <ProtectedRoute>
+              <ProfilePage />
+            </ProtectedRoute>
+          }
+        />
         <Route
           path="/root"
           element={

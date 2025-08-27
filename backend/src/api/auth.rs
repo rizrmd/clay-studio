@@ -36,6 +36,12 @@ pub struct RegisterRequest {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct ChangePasswordRequest {
+    pub current_password: String,
+    pub new_password: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct UserResponse {
     pub id: String,
     pub client_id: String,
@@ -487,12 +493,72 @@ pub async fn list_public_clients(depot: &mut Depot, res: &mut Response) -> Resul
     Ok(())
 }
 
+#[handler]
+pub async fn change_password(req: &mut Request, depot: &mut Depot, res: &mut Response) -> Result<(), AppError> {
+    let change_req: ChangePasswordRequest = req.parse_json().await
+        .map_err(|_| AppError::BadRequest("Invalid JSON".to_string()))?;
+
+    let user_id = if let Some(session) = depot.session_mut() {
+        let user_id: Option<String> = session.get("user_id");
+        user_id.ok_or_else(|| AppError::Unauthorized("Not authenticated".to_string()))?
+    } else {
+        return Err(AppError::Unauthorized("No session found".to_string()));
+    };
+
+    let state = depot.obtain::<AppState>()
+        .map_err(|_| AppError::InternalServerError("Failed to get app state".to_string()))?;
+
+    let user_uuid = Uuid::parse_str(&user_id)
+        .map_err(|_| AppError::InternalServerError("Invalid user ID in session".to_string()))?;
+
+    // Get current user to verify password
+    let row = sqlx::query("SELECT password FROM users WHERE id = $1")
+        .bind(user_uuid)
+        .fetch_optional(&state.db_pool)
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
+
+    let row = row.ok_or_else(|| AppError::BadRequest("User not found".to_string()))?;
+    let current_password_hash: String = row.get("password");
+
+    // Verify current password
+    let is_valid = verify(&change_req.current_password, &current_password_hash)
+        .map_err(|e| AppError::InternalServerError(format!("Failed to verify password: {}", e)))?;
+
+    if !is_valid {
+        return Err(AppError::BadRequest("Current password is incorrect".to_string()));
+    }
+
+    // Validate new password
+    if change_req.new_password.len() < 8 {
+        return Err(AppError::BadRequest("New password must be at least 8 characters long".to_string()));
+    }
+
+    // Hash new password
+    let new_password_hash = hash(&change_req.new_password, DEFAULT_COST)
+        .map_err(|e| AppError::InternalServerError(format!("Failed to hash password: {}", e)))?;
+
+    // Update password in database
+    sqlx::query("UPDATE users SET password = $1 WHERE id = $2")
+        .bind(&new_password_hash)
+        .bind(user_uuid)
+        .execute(&state.db_pool)
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("Failed to update password: {}", e)))?;
+
+    res.render(Json(serde_json::json!({
+        "message": "Password changed successfully"
+    })));
+    Ok(())
+}
+
 pub fn auth_routes() -> Router {
     Router::new()
         .push(Router::with_path("/register").post(register))
         .push(Router::with_path("/login").post(login))
         .push(Router::with_path("/logout").post(logout))
         .push(Router::with_path("/me").get(me))
+        .push(Router::with_path("/change-password").post(change_password))
         .push(Router::with_path("/registration-status").get(check_registration_status))
         .push(Router::with_path("/clients").get(list_public_clients))
         .push(Router::with_path("/clients/all").get(list_all_clients))

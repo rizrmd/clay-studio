@@ -33,6 +33,10 @@ export function UserMenu() {
     navigate('/root')
   }
 
+  const handleProfile = () => {
+    navigate('/profile')
+  }
+
   const initials = user.username.slice(0, 2).toUpperCase()
 
   return (
@@ -74,7 +78,7 @@ export function UserMenu() {
             <DropdownMenuSeparator />
           </>
         )}
-        <DropdownMenuItem disabled>
+        <DropdownMenuItem onClick={handleProfile}>
           <User className="mr-2 h-4 w-4" />
           <span>Profile</span>
         </DropdownMenuItem>

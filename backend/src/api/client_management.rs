@@ -525,19 +525,19 @@ pub async fn update_client_domains(req: &mut Request, depot: &mut Depot, res: &m
 // Route builders
 pub fn admin_routes() -> Router {
     Router::new()
-        .push(Router::with_path("/clients").get(list_clients_admin))
-        .push(Router::with_path("/clients/<id>").get(get_client_admin))
+        .push(Router::with_path("clients").get(list_clients_admin))
+        .push(Router::with_path("clients/{id}").get(get_client_admin))
 }
 
 pub fn root_routes() -> Router {
     Router::new()
-        .push(Router::with_path("/clients").get(list_clients_root))
-        .push(Router::with_path("/clients/<id>")
+        .get(list_clients_root)
+        .push(Router::with_path("{id}")
             .get(get_client_root)
             .put(update_client)
             .delete(delete_client))
-        .push(Router::with_path("/clients/<id>/enable").post(enable_client))
-        .push(Router::with_path("/clients/<id>/disable").post(disable_client))
-        .push(Router::with_path("/clients/<id>/config").put(update_client_config))
-        .push(Router::with_path("/clients/<id>/domains").put(update_client_domains))
+        .push(Router::with_path("{id}/enable").post(enable_client))
+        .push(Router::with_path("{id}/disable").post(disable_client))
+        .push(Router::with_path("{id}/config").put(update_client_config))
+        .push(Router::with_path("{id}/domains").put(update_client_domains))
 }
