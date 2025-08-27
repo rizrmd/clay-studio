@@ -22,7 +22,7 @@ CHAT_HOOK_REDESIGN.md
 frontend/node_modules/
 frontend/.next/
 frontend/out/
-frontend/dist/
+# frontend/dist/ - COMMENTED OUT: We need dist for Docker build in CI/CD
 frontend/.cache/
 frontend/coverage/
 frontend/*.log
