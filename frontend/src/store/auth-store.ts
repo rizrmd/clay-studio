@@ -1,6 +1,5 @@
 import { proxy } from "valtio";
 import axios from "@/lib/axios";
-import { logger } from "@/lib/logger";
 
 export interface User {
   id: string;

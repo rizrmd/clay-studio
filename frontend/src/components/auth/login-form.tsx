@@ -4,7 +4,7 @@ import { useValtioAuth } from '@/hooks/use-valtio-auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Loader2 } from 'lucide-react'
 
@@ -18,7 +18,7 @@ interface LoginFormProps {
 }
 
 export function LoginForm({ onSwitchToRegister }: LoginFormProps) {
-  const { login, firstClient } = useValtioAuth()
+  const { login } = useValtioAuth()
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
 
