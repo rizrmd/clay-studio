@@ -11,6 +11,7 @@ mod m20250826_000001_add_title_manual_flag;
 mod m20250826_000001_use_is_forgotten_flag;
 mod m20250826_000002_drop_tools_table;
 mod m20250826_create_tool_usages_table;
+mod m20250827_000001_add_role_to_users;
 
 pub struct Migrator;
 
@@ -29,6 +30,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20250826_000001_use_is_forgotten_flag::Migration),
             Box::new(m20250826_000002_drop_tools_table::Migration),
             Box::new(m20250826_create_tool_usages_table::Migration),
+            Box::new(m20250827_000001_add_role_to_users::Migration),
         ]
     }
 }

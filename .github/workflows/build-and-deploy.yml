@@ -12,25 +12,86 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  build:
+  build-rust:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+    
+    - name: Cache Rust dependencies
+      uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: "./backend -> target"
+        cache-all-crates: true
+    
+    - name: Build backend
+      working-directory: ./backend
+      run: |
+        cargo build --release
+        cp target/release/clay-studio-backend ../clay-studio-backend
+    
+    - name: Upload backend binary
+      uses: actions/upload-artifact@v4
+      with:
+        name: backend-binary
+        path: clay-studio-backend
+
+  build-frontend:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Bun
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: latest
+    
+    - name: Cache Bun dependencies
+      uses: actions/cache@v4
+      with:
+        path: ~/.bun
+        key: ${{ runner.os }}-bun-${{ hashFiles('frontend/bun.lockb') }}
+        restore-keys: |
+          ${{ runner.os }}-bun-
+    
+    - name: Build frontend
+      working-directory: ./frontend
+      run: |
+        bun install
+        bun run build
+    
+    - name: Upload frontend build
+      uses: actions/upload-artifact@v4
+      with:
+        name: frontend-dist
+        path: frontend/dist
+
+  build-docker:
+    needs: [build-rust, build-frontend]
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-
+    - uses: actions/checkout@v4
+    
+    - name: Download artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+    
+    - name: Prepare build context
+      run: |
+        mv artifacts/backend-binary/clay-studio-backend backend/
+        chmod +x backend/clay-studio-backend
+        mv artifacts/frontend-dist frontend/dist
+    
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
-      with:
-        # Enable docker buildkit cache
-        buildkitd-flags: --debug
-        driver-opts: |
-          image=moby/buildkit:v0.12.0
-          network=host
-
+    
     - name: Log in to Container Registry
       if: github.event_name != 'pull_request'
       uses: docker/login-action@v3
@@ -38,7 +99,7 @@ jobs:
         registry: ${{ env.REGISTRY }}
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
-
+    
     - name: Extract metadata
       id: meta
       uses: docker/metadata-action@v5
@@ -50,25 +111,38 @@ jobs:
           type=semver,pattern={{version}}
           type=semver,pattern={{major}}.{{minor}}
           type=sha
-
+    
+    - name: Create minimal Dockerfile
+      run: |
+        cat > Dockerfile.minimal << 'EOF'
+        FROM debian:trixie-slim
+        WORKDIR /app
+        
+        RUN apt-get update && \
+            apt-get install -y --no-install-recommends \
+            ca-certificates curl git unzip && \
+            rm -rf /var/lib/apt/lists/*
+        
+        # Install Bun
+        RUN curl -fsSL https://bun.sh/install | bash && \
+            mv /root/.bun/bin/bun /usr/local/bin/ && \
+            chmod +x /usr/local/bin/bun
+        
+        COPY backend/clay-studio-backend /app/backend/clay-studio-backend
+        COPY frontend/dist /app/frontend/dist
+        
+        EXPOSE 7680
+        WORKDIR /app/backend
+        ENV PRODUCTION=true
+        CMD ["./clay-studio-backend"]
+        EOF
+    
     - name: Build and push Docker image
       uses: docker/build-push-action@v5
       with:
         context: .
+        file: Dockerfile.minimal
         push: ${{ github.event_name != 'pull_request' }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
-        # Enhanced caching strategy
-        cache-from: |
-          type=gha
-          type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
-        cache-to: |
-          type=gha,mode=max
-          type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
-        # Use all available CPUs for parallel builds
-        build-args: |
-          BUILDKIT_INLINE_CACHE=1
-        # Target specific platforms
         platforms: linux/amd64
-        # Enable build provenance
-        provenance: false

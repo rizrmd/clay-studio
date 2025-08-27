@@ -16,6 +16,7 @@ pub struct User {
     pub username: String,
     #[serde(skip_serializing)]
     pub password: String, // This is actually the hash, but named password in DB
+    pub role: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -38,6 +39,7 @@ pub struct UserResponse {
     pub id: String,
     pub client_id: String,
     pub username: String,
+    pub role: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -52,6 +54,7 @@ impl From<User> for UserResponse {
             id: user.id,
             client_id: user.client_id,
             username: user.username,
+            role: user.role,
         }
     }
 }
@@ -143,23 +146,27 @@ pub async fn register(req: &mut Request, depot: &mut Depot, res: &mut Response) 
 
     // Create user
     let user_id = Uuid::new_v4();
+    
+    // First user becomes admin, others are regular users
+    let role = if is_first_user { "admin" } else { "user" };
 
     sqlx::query(
         r#"
-        INSERT INTO users (id, client_id, username, password)
-        VALUES ($1, $2, $3, $4)
+        INSERT INTO users (id, client_id, username, password, role)
+        VALUES ($1, $2, $3, $4, $5)
         "#,
     )
     .bind(user_id)
     .bind(client_id)
     .bind(&register_req.username)
     .bind(&password_hash)
+    .bind(role)
     .execute(&state.db_pool)
     .await
     .map_err(|e| AppError::InternalServerError(format!("Failed to create user: {}", e)))?;
 
     // Fetch the created user
-    let row = sqlx::query("SELECT id, client_id, username, password FROM users WHERE id = $1")
+    let row = sqlx::query("SELECT id, client_id, username, password, role FROM users WHERE id = $1")
         .bind(user_id)
         .fetch_one(&state.db_pool)
         .await
@@ -170,6 +177,7 @@ pub async fn register(req: &mut Request, depot: &mut Depot, res: &mut Response) 
         client_id: client_id.to_string(),
         username: row.get("username"),
         password: row.get("password"),
+        role: row.get("role"),
     };
 
     // Create session
@@ -177,6 +185,8 @@ pub async fn register(req: &mut Request, depot: &mut Depot, res: &mut Response) 
         session.insert("user_id", &user.id)
             .map_err(|e| AppError::InternalServerError(format!("Failed to create session: {}", e)))?;
         session.insert("username", &user.username)
+            .map_err(|e| AppError::InternalServerError(format!("Failed to create session: {}", e)))?;
+        session.insert("role", &user.role)
             .map_err(|e| AppError::InternalServerError(format!("Failed to create session: {}", e)))?;
     } else {
         return Err(AppError::InternalServerError("No session available".to_string()));
@@ -206,7 +216,7 @@ pub async fn login(req: &mut Request, depot: &mut Depot, res: &mut Response) -> 
     // Find user by username and client_id
     let row = sqlx::query(
         r#"
-        SELECT id, client_id, username, password 
+        SELECT id, client_id, username, password, role 
         FROM users 
         WHERE client_id = $1 AND username = $2
         "#,
@@ -230,6 +240,7 @@ pub async fn login(req: &mut Request, depot: &mut Depot, res: &mut Response) -> 
         },
         username: row.get("username"),
         password: row.get("password"),
+        role: row.get("role"),
     };
 
     // Verify password
@@ -245,6 +256,8 @@ pub async fn login(req: &mut Request, depot: &mut Depot, res: &mut Response) -> 
         session.insert("user_id", &user.id)
             .map_err(|e| AppError::InternalServerError(format!("Failed to create session: {}", e)))?;
         session.insert("username", &user.username)
+            .map_err(|e| AppError::InternalServerError(format!("Failed to create session: {}", e)))?;
+        session.insert("role", &user.role)
             .map_err(|e| AppError::InternalServerError(format!("Failed to create session: {}", e)))?;
     } else {
         return Err(AppError::InternalServerError("No session available".to_string()));
@@ -264,6 +277,7 @@ pub async fn logout(depot: &mut Depot, res: &mut Response) -> Result<(), AppErro
     if let Some(session) = depot.session_mut() {
         session.remove("user_id");
         session.remove("username");
+        session.remove("role");
     }
 
     res.render(Json(serde_json::json!({
@@ -292,7 +306,7 @@ pub async fn me(depot: &mut Depot, res: &mut Response) -> Result<(), AppError> {
             AppError::InternalServerError("Invalid user ID in session".to_string())
         })?;
 
-    let row = sqlx::query("SELECT id, client_id, username, password FROM users WHERE id = $1")
+    let row = sqlx::query("SELECT id, client_id, username, password, role FROM users WHERE id = $1")
         .bind(user_uuid)
         .fetch_optional(&state.db_pool)
         .await
@@ -306,6 +320,7 @@ pub async fn me(depot: &mut Depot, res: &mut Response) -> Result<(), AppError> {
             if let Some(session) = depot.session_mut() {
                 session.remove("user_id");
                 session.remove("username");
+                session.remove("role");
             }
             return Err(AppError::Unauthorized("Session expired - please log in again".to_string()));
         }
@@ -322,6 +337,7 @@ pub async fn me(depot: &mut Depot, res: &mut Response) -> Result<(), AppError> {
         },
         username: row.get("username"),
         password: row.get("password"),
+        role: row.get("role"),
     };
     
     tracing::info!("User found: {}, checking setup status", user.username);
