@@ -1,33 +1,87 @@
-node_modules
-*/node_modules
+# Git
 .git
 .gitignore
+.github
+
+# Documentation
+README.md
 *.md
+docs/
+LICENSE
+CHAT_HOOK_REDESIGN.md
+
+# Development
 .env
 .env.*
-dist
-*/dist
-.DS_Store
 *.log
-.vscode
-.idea
-coverage
-.nyc_output
-.cache
-.parcel-cache
-.next
-.nuxt
-.vuepress/dist
+*.pid
+*.seed
+*.pid.lock
+
+# Frontend - exclude build artifacts and dependencies
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/dist/
+frontend/.cache/
+frontend/coverage/
+frontend/*.log
+frontend/.DS_Store
+frontend/.parcel-cache
+
+# Backend - exclude build artifacts but keep Cargo.lock
+backend/target/
+backend/**/*.rs.bk
+backend/.cargo/
+# Keep Cargo.lock for reproducible builds
+!backend/Cargo.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+*.bak
+.DS_Store
+
+# Testing
+*.test
+*.spec
+coverage/
+.nyc_output/
+
+# Node/Bun
+node_modules/
+*/node_modules
+bun.lockb
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+*.tsbuildinfo
+
+# Docker
+docker-compose*.yml
+.dockerignore
+
+# CI/CD
+.travis.yml
+.gitlab-ci.yml
+azure-pipelines.yml
+
+# Runtime
+.clients/
+tmp/
+temp/
+
+# Misc
+*.tar.gz
+*.zip
 .serverless
 .fusebox
 .dynamodb
 .tern-port
 .vscode-test
 .yarn-integrity
-*.tsbuildinfo
-bun.lockb
-package-lock.json
-yarn.lock
-pnpm-lock.yaml
-.clients
-.clients/
+.nuxt
+.vuepress/dist

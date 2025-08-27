@@ -1,24 +1,47 @@
-# Multi-stage Dockerfile for Clay Studio
+# Multi-stage Dockerfile for Clay Studio with optimizations
 
-# Stage 1: Build frontend
+# Stage 1: Rust dependency caching with cargo-chef
+FROM rust:1.89 AS chef
+RUN cargo install cargo-chef
+WORKDIR /app
+
+# Stage 2: Plan Rust dependencies
+FROM chef AS planner
+COPY backend/Cargo.toml backend/Cargo.lock* ./
+COPY backend/migration ./migration
+COPY backend/src ./src
+RUN cargo chef prepare --recipe-path recipe.json
+
+# Stage 3: Build Rust dependencies (cached layer)
+FROM chef AS rust-cacher
+COPY --from=planner /app/recipe.json recipe.json
+RUN cargo chef cook --release --recipe-path recipe.json
+
+# Stage 4: Build backend
+FROM rust:1.89 AS backend-builder
+WORKDIR /app
+# Copy pre-built dependencies
+COPY --from=rust-cacher /app/target target
+COPY --from=rust-cacher /usr/local/cargo /usr/local/cargo
+# Copy source code
+COPY backend/Cargo.toml backend/Cargo.lock* ./
+COPY backend/migration ./migration
+COPY backend/src ./src
+# Build only the changed code
+RUN cargo build --release
+
+# Stage 5: Build frontend (runs parallel to backend)
 FROM oven/bun:1 AS frontend-builder
 WORKDIR /app
+# Cache dependencies
 COPY frontend/package.json frontend/bun.lockb* ./
 RUN bun install --frozen-lockfile || bun install
+# Build application
 COPY frontend/ ./
 RUN bun run build
 
-# Stage 2: Build backend
-FROM rust:1.89 AS backend-builder
-WORKDIR /app
-COPY backend/Cargo.toml ./
-COPY backend/Cargo.lock* ./
-COPY backend/migration ./migration
-COPY backend/src ./src
-RUN cargo build --release
-
-# Stage 3: Runtime
-FROM debian:trixie-slim
+# Stage 6: Runtime (optimized base image)
+FROM debian:trixie-slim AS runtime
 WORKDIR /app
 
 # Install minimal runtime dependencies including tools needed for Claude CLI setup
@@ -30,7 +53,8 @@ RUN apt-get update && \
     curl \
     bash \
     unzip && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* && \
+    apt-get clean
 
 # Create non-root user for security
 RUN groupadd -r clayuser && \
@@ -61,6 +85,20 @@ ENV STATIC_FILES_PATH=/app/frontend/dist
 ENV CLIENTS_DIR=/app/.clients
 ENV HOME=/app
 
+# Create entrypoint script to fix permissions on mounted volume
+RUN echo '#!/bin/bash\n\
+# Fix permissions on mounted volume if it exists\n\
+if [ -d "/app/.clients" ]; then\n\
+    sudo chown -R clayuser:clayuser /app/.clients 2>/dev/null || true\n\
+    sudo chmod -R 755 /app/.clients 2>/dev/null || true\n\
+fi\n\
+exec "$@"' > /entrypoint.sh && chmod +x /entrypoint.sh
+
+# Install sudo for the entrypoint script
+RUN apt-get update && apt-get install -y --no-install-recommends sudo && \
+    echo "clayuser ALL=(ALL) NOPASSWD: /bin/chown, /bin/chmod" >> /etc/sudoers && \
+    rm -rf /var/lib/apt/lists/*
+
 # Switch to non-root user
 USER clayuser
 
@@ -70,5 +108,6 @@ VOLUME ["/app/.clients"]
 # Expose the backend port
 EXPOSE 7680
 
-# Run the binary
+# Use entrypoint to fix permissions, then run the binary
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["/app/clay-studio-backend"]
