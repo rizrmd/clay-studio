@@ -9,6 +9,7 @@ import {
   Database,
   LogOut,
   Settings,
+  User,
 } from "lucide-react";
 import { API_BASE_URL } from "@/lib/url";
 import { useValtioAuth } from "@/hooks/use-valtio-auth";
@@ -122,12 +123,21 @@ export function ProjectsPage() {
                 </span>
               )}
               <Link
-                to="/config"
+                to="/profile"
                 className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                title="Settings"
+                title="Profile"
               >
-                <Settings className="h-5 w-5 text-gray-600 dark:text-gray-400" />
+                <User className="h-5 w-5 text-gray-600 dark:text-gray-400" />
               </Link>
+              {user?.role === 'admin' && (
+                <Link
+                  to="/config"
+                  className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                  title="Settings"
+                >
+                  <Settings className="h-5 w-5 text-gray-600 dark:text-gray-400" />
+                </Link>
+              )}
               <button
                 onClick={logout}
                 className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"

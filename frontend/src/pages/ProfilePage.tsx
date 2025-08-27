@@ -43,7 +43,7 @@ export function ProfilePage() {
     setIsChangingPassword(true)
 
     try {
-      await axios.post('/api/auth/change-password', {
+      await axios.post('/auth/change-password', {
         current_password: currentPassword,
         new_password: newPassword,
       })
