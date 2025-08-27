@@ -52,21 +52,3 @@ pub struct LoginResponse {
     pub token: String,
 }
 
-impl UserRole {
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s.to_lowercase().as_str() {
-            "user" => Some(UserRole::User),
-            "admin" => Some(UserRole::Admin),
-            "root" => Some(UserRole::Root),
-            _ => None,
-        }
-    }
-    
-    pub fn as_str(&self) -> &str {
-        match self {
-            UserRole::User => "user",
-            UserRole::Admin => "admin",
-            UserRole::Root => "root",
-        }
-    }
-}

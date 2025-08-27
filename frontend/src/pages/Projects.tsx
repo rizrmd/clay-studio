@@ -1,6 +1,15 @@
 import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { Plus, FolderOpen, Calendar, ChevronRight, MessageSquare, Database, LogOut, Settings } from "lucide-react";
+import {
+  Plus,
+  FolderOpen,
+  Calendar,
+  ChevronRight,
+  MessageSquare,
+  Database,
+  LogOut,
+  Settings,
+} from "lucide-react";
 import { API_BASE_URL } from "@/lib/url";
 import { useValtioAuth } from "@/hooks/use-valtio-auth";
 
@@ -48,7 +57,7 @@ export function ProjectsPage() {
 
   const createProject = async () => {
     if (!newProjectName.trim()) return;
-    
+
     setLoading(true);
     setError(null);
     try {
@@ -60,17 +69,21 @@ export function ProjectsPage() {
         },
         body: JSON.stringify({ name: newProjectName }),
       });
-      
+
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: "Failed to create project" }));
-        throw new Error(errorData.error || errorData.message || "Failed to create project");
+        const errorData = await response
+          .json()
+          .catch(() => ({ error: "Failed to create project" }));
+        throw new Error(
+          errorData.error || errorData.message || "Failed to create project"
+        );
       }
-      
+
       const newProject = await response.json();
       setProjects([...projects, newProject]);
       setNewProjectName("");
       setIsCreating(false);
-      
+
       // Navigate to chat with the new project
       navigate(`/chat/${newProject.id}`);
     } catch (err) {
@@ -82,12 +95,12 @@ export function ProjectsPage() {
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', { 
-      month: 'short', 
-      day: 'numeric', 
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
+    return date.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
     });
   };
 
@@ -98,7 +111,9 @@ export function ProjectsPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center">
-              <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Clay Studio</h2>
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
+                Clay Studio
+              </h2>
             </div>
             <div className="flex items-center gap-4">
               {user && (
@@ -106,13 +121,13 @@ export function ProjectsPage() {
                   {user.username}
                 </span>
               )}
-              <button
-                onClick={() => navigate('/auth')}
+              <Link
+                to="/config"
                 className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                 title="Settings"
               >
                 <Settings className="h-5 w-5 text-gray-600 dark:text-gray-400" />
-              </button>
+              </Link>
               <button
                 onClick={logout}
                 className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
@@ -132,7 +147,8 @@ export function ProjectsPage() {
             Your Projects
           </h1>
           <p className="mt-2 text-gray-600 dark:text-gray-400">
-            Select a project to start chatting with Claude or create a new one
+            Select a project to start chatting with Clay Studio or create a new
+            one
           </p>
         </div>
 
@@ -148,7 +164,9 @@ export function ProjectsPage() {
           <div className="flex items-center justify-center py-12">
             <div className="text-center">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-              <p className="mt-4 text-gray-600 dark:text-gray-400">Loading projects...</p>
+              <p className="mt-4 text-gray-600 dark:text-gray-400">
+                Loading projects...
+              </p>
             </div>
           </div>
         ) : (
@@ -169,16 +187,16 @@ export function ProjectsPage() {
                         </div>
                         <ChevronRight className="h-5 w-5 text-gray-400" />
                       </div>
-                      
+
                       <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
                         {project.name}
                       </h3>
-                      
+
                       <div className="flex items-center text-sm text-gray-500 dark:text-gray-400 mb-3">
                         <Calendar className="h-4 w-4 mr-1" />
                         <span>Created {formatDate(project.created_at)}</span>
                       </div>
-                      
+
                       {/* Project Stats */}
                       <div className="flex items-center gap-4 text-sm text-gray-600 dark:text-gray-300">
                         <div className="flex items-center gap-1">
@@ -187,13 +205,15 @@ export function ProjectsPage() {
                         </div>
                         <div className="flex items-center gap-1">
                           <Database className="h-4 w-4" />
-                          <span>{project.datasource_count || 0} datasources</span>
+                          <span>
+                            {project.datasource_count || 0} datasources
+                          </span>
                         </div>
                       </div>
                     </div>
                   </Link>
                 ))}
-                
+
                 {/* Create New Project Card */}
                 {!isCreating ? (
                   <div

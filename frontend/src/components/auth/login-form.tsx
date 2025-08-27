@@ -46,9 +46,6 @@ export function LoginForm({ onSwitchToRegister }: LoginFormProps) {
     <Card className="w-full max-w-md mx-auto">
       <CardHeader>
         <CardTitle>Sign In</CardTitle>
-        <CardDescription>
-          {firstClient ? `Sign in to ${firstClient.name}` : 'Enter your credentials to access your account'}
-        </CardDescription>
       </CardHeader>
       <CardContent>
         <Form {...form}>

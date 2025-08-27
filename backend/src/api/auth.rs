@@ -8,6 +8,7 @@ use sqlx::Row;
 
 use crate::utils::AppState;
 use crate::utils::AppError;
+use crate::utils::domain;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct User {
@@ -76,6 +77,9 @@ pub async fn register(req: &mut Request, depot: &mut Depot, res: &mut Response) 
     // Parse client_id as UUID
     let client_id = Uuid::parse_str(&register_req.client_id)
         .map_err(|_| AppError::BadRequest("Invalid client ID".to_string()))?;
+
+    // Validate that the client can be accessed from this domain
+    domain::validate_client_domain(&state.db_pool, client_id, req).await?;
 
     // Get client and check if registration is enabled
     let client_row = sqlx::query("SELECT id, config FROM clients WHERE id = $1")
@@ -188,6 +192,8 @@ pub async fn register(req: &mut Request, depot: &mut Depot, res: &mut Response) 
             .map_err(|e| AppError::InternalServerError(format!("Failed to create session: {}", e)))?;
         session.insert("role", &user.role)
             .map_err(|e| AppError::InternalServerError(format!("Failed to create session: {}", e)))?;
+        session.insert("client_id", &user.client_id)
+            .map_err(|e| AppError::InternalServerError(format!("Failed to create session: {}", e)))?;
     } else {
         return Err(AppError::InternalServerError("No session available".to_string()));
     }
@@ -212,6 +218,9 @@ pub async fn login(req: &mut Request, depot: &mut Depot, res: &mut Response) -> 
     // Parse client_id as UUID
     let client_id = Uuid::parse_str(&login_req.client_id)
         .map_err(|_| AppError::BadRequest("Invalid client ID".to_string()))?;
+
+    // Validate that the client can be accessed from this domain
+    domain::validate_client_domain(&state.db_pool, client_id, req).await?;
 
     // Find user by username and client_id
     let row = sqlx::query(
@@ -259,6 +268,8 @@ pub async fn login(req: &mut Request, depot: &mut Depot, res: &mut Response) -> 
             .map_err(|e| AppError::InternalServerError(format!("Failed to create session: {}", e)))?;
         session.insert("role", &user.role)
             .map_err(|e| AppError::InternalServerError(format!("Failed to create session: {}", e)))?;
+        session.insert("client_id", &user.client_id)
+            .map_err(|e| AppError::InternalServerError(format!("Failed to create session: {}", e)))?;
     } else {
         return Err(AppError::InternalServerError("No session available".to_string()));
     }
@@ -278,6 +289,7 @@ pub async fn logout(depot: &mut Depot, res: &mut Response) -> Result<(), AppErro
         session.remove("user_id");
         session.remove("username");
         session.remove("role");
+        session.remove("client_id");
     }
 
     res.render(Json(serde_json::json!({

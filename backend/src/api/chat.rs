@@ -498,6 +498,7 @@ pub async fn handle_chat_stream(
         let message_id = assistant_message_id;  // Use the pre-generated message_id
         let mut tools_used = Vec::new();
         let mut tool_usages: Vec<ToolUsage> = Vec::new();
+        let mut tool_start_times: std::collections::HashMap<String, std::time::Instant> = std::collections::HashMap::new();
         
         // Send start event
         if let Ok(event) = SseEvent::default()
@@ -567,6 +568,11 @@ pub async fn handle_chat_stream(
                         ClaudeMessage::ToolUse { tool, args, tool_use_id } => {
                             let tool_start = std::time::Instant::now();
                             tools_used.push(tool.clone());
+                            
+                            // Store the start time for this tool invocation if we have a tool_use_id
+                            if let Some(ref id) = tool_use_id {
+                                tool_start_times.insert(id.clone(), tool_start);
+                            }
                             
                             // Create tool usage record with parameters
                             // Start with executing status - results will be updated later
@@ -679,6 +685,18 @@ pub async fn handle_chat_stream(
                                         .and_then(|s| s.as_str()) == Some("executing")
                                 }) {
                                 
+                                // Calculate execution time if we have the start time
+                                let execution_time_ms = if let Some(output) = &tool_usage.output {
+                                    if let Some(tool_use_id) = output.get("tool_use_id").and_then(|id| id.as_str()) {
+                                        tool_start_times.remove(tool_use_id)
+                                            .map(|start| start.elapsed().as_millis() as i64)
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    None
+                                };
+                                
                                 // Update the tool usage with the actual result
                                 let actual_output = serde_json::json!({
                                     "status": "completed",
@@ -690,23 +708,26 @@ pub async fn handle_chat_stream(
                                 // Update in memory
                                 let tool_usage_id = tool_usage.id.clone();
                                 tool_usage.output = Some(actual_output.clone());
+                                tool_usage.execution_time_ms = execution_time_ms;
                                 
-                                // Also update in database immediately
+                                // Also update in database immediately with execution time
                                 let update_start = std::time::Instant::now();
                                 match sqlx::query(
                                     "UPDATE tool_usages 
-                                     SET output = $1
-                                     WHERE id = $2"
+                                     SET output = $1, execution_time_ms = $2
+                                     WHERE id = $3"
                                 )
                                 .bind(&actual_output)
+                                .bind(execution_time_ms)
                                 .bind(&tool_usage_id)
                                 .execute(&db_pool)
                                 .await {
                                     Ok(_) => {
                                         let update_time = update_start.elapsed();
                                         tracing::info!(
-                                            "[TIMING] Tool usage {} updated with actual result in {:?}ms", 
+                                            "[TIMING] Tool usage {} updated with actual result and execution time {:?}ms in {:?}ms", 
                                             tool_usage_id, 
+                                            execution_time_ms.unwrap_or(0),
                                             update_time.as_millis()
                                         );
                                     },
@@ -731,6 +752,10 @@ pub async fn handle_chat_stream(
                                 .await {
                                     let (found_tool_usage_id,) = row;
                                     
+                                    // Calculate execution time if we have the start time
+                                    let execution_time_ms = tool_start_times.remove(&tool)
+                                        .map(|start| start.elapsed().as_millis() as i64);
+                                    
                                     let actual_output = serde_json::json!({
                                         "status": "completed",
                                         "result": result_text,
@@ -740,14 +765,16 @@ pub async fn handle_chat_stream(
                                     
                                     if let Ok(_) = sqlx::query(
                                         "UPDATE tool_usages 
-                                         SET output = $1
-                                         WHERE id = $2"
+                                         SET output = $1, execution_time_ms = $2
+                                         WHERE id = $3"
                                     )
                                     .bind(&actual_output)
+                                    .bind(execution_time_ms)
                                     .bind(&found_tool_usage_id)
                                     .execute(&db_pool)
                                     .await {
-                                        tracing::info!("Tool usage {} updated with result from database lookup", found_tool_usage_id);
+                                        tracing::info!("Tool usage {} updated with result and execution time {:?}ms from database lookup", 
+                                            found_tool_usage_id, execution_time_ms.unwrap_or(0));
                                     }
                                 } else {
                                     tracing::warn!("Could not find executing tool usage for {} to update with result", tool);

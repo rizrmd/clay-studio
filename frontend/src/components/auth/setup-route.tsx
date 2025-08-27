@@ -10,7 +10,7 @@ interface SetupRouteProps {
 }
 
 export function SetupRoute({ children, fallback }: SetupRouteProps) {
-  const { isAuthenticated, isSetupComplete, needsInitialSetup, needsFirstUser, loading, firstClient } = useValtioAuth()
+  const { isAuthenticated, isSetupComplete, needsInitialSetup, needsFirstUser, loading, firstClient, user } = useValtioAuth()
   const location = useLocation()
 
   if (loading) {
@@ -20,6 +20,21 @@ export function SetupRoute({ children, fallback }: SetupRouteProps) {
   // Priority 1: Check if user is authenticated
   // For authenticated users, we handle differently based on setup status
   if (isAuthenticated) {
+    // Check if user is root - root users should not access projects
+    if (user?.role === 'root') {
+      // Redirect root users to root dashboard for projects route
+      if (location.pathname === '/projects' || location.pathname === '/') {
+        return <Navigate to="/root" replace />
+      }
+      // Allow chat routes for root users
+      const isChatRoute = location.pathname.startsWith('/chat/')
+      if (isChatRoute) {
+        return <>{children}</>
+      }
+      // Show the requested page for other routes
+      return <>{children}</>
+    }
+    
     // If setup is complete (has projects), allow access to all pages
     if (isSetupComplete) {
       // If user just logged in and is on the root path, redirect to projects

@@ -6,6 +6,7 @@ pub mod datasource;
 pub mod auth;
 pub mod middleware;
 pub mod claude_md_template;
+pub mod domain;
 
 pub use config::*;
 pub use error::*;

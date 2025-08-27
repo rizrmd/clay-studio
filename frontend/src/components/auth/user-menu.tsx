@@ -1,4 +1,5 @@
 import { useValtioAuth } from '@/hooks/use-valtio-auth'
+import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -9,10 +10,12 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { LogOut, Settings, User } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
+import { LogOut, Settings, User, Shield } from 'lucide-react'
 
 export function UserMenu() {
   const { user, logout, firstClient } = useValtioAuth()
+  const navigate = useNavigate()
 
   if (!user) {
     return null
@@ -24,6 +27,10 @@ export function UserMenu() {
     } catch (error) {
       // Logout failed
     }
+  }
+
+  const handleRootDashboard = () => {
+    navigate('/root')
   }
 
   const initials = user.username.slice(0, 2).toUpperCase()
@@ -40,9 +47,16 @@ export function UserMenu() {
       <DropdownMenuContent className="w-56" align="end" forceMount>
         <DropdownMenuLabel className="font-normal">
           <div className="flex flex-col space-y-1">
-            <p className="text-sm font-medium leading-none">
-              {user.username}
-            </p>
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-medium leading-none">
+                {user.username}
+              </p>
+              {user.role && user.role !== 'user' && (
+                <Badge variant="outline" className="text-xs px-1 py-0">
+                  {user.role.toUpperCase()}
+                </Badge>
+              )}
+            </div>
             {firstClient && (
               <p className="text-xs leading-none text-muted-foreground">
                 {firstClient.name}
@@ -51,6 +65,15 @@ export function UserMenu() {
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
+        {user.role === 'root' && (
+          <>
+            <DropdownMenuItem onClick={handleRootDashboard}>
+              <Shield className="mr-2 h-4 w-4" />
+              <span>Root Dashboard</span>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+          </>
+        )}
         <DropdownMenuItem disabled>
           <User className="mr-2 h-4 w-4" />
           <span>Profile</span>

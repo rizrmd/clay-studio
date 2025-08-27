@@ -12,8 +12,8 @@ use std::time::Duration;
 use tokio::signal;
 
 use crate::utils::{Config, AppState};
-use crate::api::{auth, chat, clients, conversations, conversations_forget, projects, tool_usage, upload};
-use crate::utils::middleware::{inject_state, auth::auth_required};
+use crate::api::{admin, auth, chat, clients, client_management, conversations, conversations_forget, projects, tool_usage, upload};
+use crate::utils::middleware::{inject_state, auth::{auth_required, admin_required, root_required}};
 use crate::core::sessions::PostgresSessionStore;
 
 /// Bind to address with retry logic by adding delay before binding
@@ -266,12 +266,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
 ;
 
+    // Admin routes (accessible to admin and root roles)
+    let admin_router = Router::new()
+        .hoop(admin_required)
+        .push(Router::with_path("/admin").push(client_management::admin_routes()))
+        .push(Router::with_path("/admin").push(admin::admin_router()));
+    
+    // Root routes (accessible only to root role)
+    let root_router = Router::new()
+        .hoop(root_required)
+        .push(Router::with_path("/root").push(client_management::root_routes()));
+
     // API routes with state injection and session handling
     let api_router = Router::new()
         .hoop(session_handler)
         .hoop(inject_state(state))
         .push(public_router)
-        .push(protected_router);
+        .push(protected_router)
+        .push(admin_router)
+        .push(root_router);
 
     // Static file serving for frontend
     let static_path = std::env::var("STATIC_FILES_PATH")
