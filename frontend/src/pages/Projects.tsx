@@ -29,7 +29,7 @@ export function ProjectsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
-  const { user } = useValtioAuth();
+  const {} = useValtioAuth();
 
   useEffect(() => {
     fetchProjects();

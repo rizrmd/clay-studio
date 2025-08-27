@@ -6,9 +6,10 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { ArrowLeft, Shield, User, AlertCircle, CheckCircle } from 'lucide-react'
+import { Shield, User, AlertCircle, CheckCircle } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import axios from '@/lib/axios'
+import { AppHeader } from '@/components/layout/app-header'
 
 export function ProfilePage() {
   const { user, firstClient } = useValtioAuth()
@@ -59,22 +60,14 @@ export function ProfilePage() {
     }
   }
 
-  const handleBack = () => {
-    navigate('/')
-  }
 
   return (
-    <div className="min-h-screen bg-background p-4">
-      <div className="max-w-4xl mx-auto space-y-6">
-        <div className="flex items-center justify-between">
-          <Button
-            variant="ghost"
-            onClick={handleBack}
-            className="gap-2"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Back to Chat
-          </Button>
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+      <AppHeader />
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold mb-2 text-gray-900 dark:text-gray-100">Profile</h1>
+          <p className="text-gray-600 dark:text-gray-400">Manage your account settings and preferences</p>
         </div>
 
         <div className="grid gap-6 md:grid-cols-2">
