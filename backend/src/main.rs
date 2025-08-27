@@ -277,12 +277,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let static_path = std::env::var("STATIC_FILES_PATH")
         .unwrap_or_else(|_| "./frontend/dist".to_string());
     
-    let static_service = StaticDir::new(&static_path).defaults("index.html");
+    // Configure static service with SPA fallback
+    let static_service = StaticDir::new(&static_path)
+        .defaults("index.html")
+        .fallback("index.html");
     
     // Main router - API routes first, then static files as fallback
     let router = Router::new()
         .push(Router::with_path("/api").push(api_router))
-        .push(Router::with_path("{*path}").get(static_service));
+        .push(Router::new().get(static_service));
 
     // Bind with retry logic and socket reuse
     let acceptor = bind_with_retry(&config.server_address, 5).await;
