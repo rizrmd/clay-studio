@@ -234,6 +234,7 @@ const MessageItem = memo(
                         css`
                           & {
                             margin-bottom: -5px;
+                            margin-top: -5px;
                           }
                           code {
                             font-size: 13px;
@@ -264,6 +265,7 @@ const MessageItem = memo(
                           }
 
                           p {
+                            margin-top: 5px;
                             margin-bottom: 5px;
                           }
                           ul,

@@ -32,7 +32,9 @@ pub enum ClaudeMessage {
     #[serde(rename = "progress")]
     Progress { content: String },
     #[serde(rename = "tool_use")]
-    ToolUse { tool: String, args: Value },
+    ToolUse { tool: String, args: Value, tool_use_id: Option<String> },
+    #[serde(rename = "tool_result")]
+    ToolResult { tool: String, result: Value },
     #[serde(rename = "result")]
     Result { result: String },
     #[serde(rename = "error")]

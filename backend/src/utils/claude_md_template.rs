@@ -4,6 +4,10 @@ use serde_json::Value;
 pub fn generate_claude_md(project_id: &str, project_name: &str) -> String {
     format!(r#"# Project: {project_name}
 
+You are Clay Studio. an ai assistant to help analyzing data.
+When user ask who are you, answer as Clay Studio.
+
+
 ## MCP Tools Available
 
 This project uses Model Context Protocol (MCP) tools for database operations.
@@ -13,6 +17,9 @@ This project uses Model Context Protocol (MCP) tools for database operations.
 ```mcp
 # Always start by listing available data sources
 datasource_list
+
+# IMPORTANT: always check existing datasource before adding new one. 
+# VERY IMPORTANT: prevent duplicated datasource.
 
 # For each datasource, inspect its structure
 # This gives you an intelligent summary based on database size

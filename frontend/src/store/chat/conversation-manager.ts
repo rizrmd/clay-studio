@@ -65,8 +65,17 @@ export class ConversationManager {
       // Set new active conversation
       conversationStore.activeConversationId = newConversationId;
       
-      // Initialize new conversation state if needed
-      getOrCreateConversationState(newConversationId);
+      // Initialize new conversation state if needed, but ensure it starts fresh
+      const state = getOrCreateConversationState(newConversationId);
+      
+      // IMPORTANT: Clear any stale messages if this is a new conversation
+      // This prevents message bleeding from other conversations
+      if (newConversationId === 'new' && state.messages.length > 0) {
+        logger.warn('ConversationManager: Clearing stale messages from "new" conversation');
+        state.messages = [];
+        state.status = 'idle';
+        state.error = null;
+      }
 
       // Emit event
       await chatEventBus.emit({
@@ -93,6 +102,29 @@ export class ConversationManager {
     state.status = 'idle';
     
     // Don't clear messages or queue - keep them for when user returns
+  }
+
+  // Clear conversation state completely (for new chat creation)
+  async clearConversation(conversationId: string): Promise<void> {
+    return this.atomicOperation(conversationId, () => {
+      const state = conversationStore.conversations[conversationId];
+      if (!state) return;
+
+      // Abort any ongoing requests
+      abortControllerManager.abort(conversationId);
+
+      // Clear all state
+      state.messages = [];
+      state.status = 'idle';
+      state.error = null;
+      state.uploadedFiles = [];
+      state.forgottenAfterMessageId = null;
+      state.forgottenCount = 0;
+      state.messageQueue = [];
+      state.activeTools = [];
+      state.lastUpdated = Date.now();
+      state.version++;
+    });
   }
 
   // Update conversation status atomically

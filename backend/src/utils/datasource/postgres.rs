@@ -6,10 +6,19 @@ use async_trait::async_trait;
 
 pub struct PostgreSQLConnector {
     connection_string: String,
+    schema: String,
 }
 
 impl PostgreSQLConnector {
     pub fn new(config: &Value) -> Result<Self, Box<dyn Error>> {
+        // Get the schema name from config, default to 'public' if not specified
+        let schema = config.get("schema")
+            .and_then(|v| v.as_str())
+            .unwrap_or("public")
+            .to_string();
+        
+        eprintln!("[DEBUG] PostgreSQL connector using schema: '{}'", schema);
+        
         // Prefer URL if provided, otherwise construct from individual components
         let connection_string = if let Some(url) = config.get("url").and_then(|v| v.as_str()) {
             url.to_string()
@@ -60,7 +69,7 @@ impl PostgreSQLConnector {
         eprintln!("[DEBUG] PostgreSQL connection string (masked): {}", masked_string);
         eprintln!("[DEBUG] Raw connection string length: {} chars", connection_string.len());
         
-        Ok(Self { connection_string })
+        Ok(Self { connection_string, schema })
     }
 }
 
@@ -134,10 +143,11 @@ impl DataSourceConnector for PostgreSQLConnector {
         let pool = PgPool::connect(&self.connection_string).await?;
         
         // Fetch table and column information
+        // Use json_agg instead of array_agg to return JSONB type
         let tables = sqlx::query(
             "SELECT 
                 t.table_name,
-                array_agg(
+                json_agg(
                     json_build_object(
                         'column_name', c.column_name,
                         'data_type', c.data_type,
@@ -145,16 +155,18 @@ impl DataSourceConnector for PostgreSQLConnector {
                     ) ORDER BY c.ordinal_position
                 ) as columns
              FROM information_schema.tables t
-             JOIN information_schema.columns c ON t.table_name = c.table_name
-             WHERE t.table_schema = 'public' 
+             JOIN information_schema.columns c ON t.table_name = c.table_name AND t.table_schema = c.table_schema
+             WHERE t.table_schema = $1 
              AND t.table_type = 'BASE TABLE'
              GROUP BY t.table_name
              ORDER BY t.table_name"
         )
+        .bind(&self.schema)
         .fetch_all(&pool)
         .await?;
         
         let mut schema = json!({
+            "database_schema": &self.schema,
             "tables": {},
             "refreshed_at": chrono::Utc::now().to_rfc3339()
         });
@@ -176,10 +188,11 @@ impl DataSourceConnector for PostgreSQLConnector {
         let tables = sqlx::query(
             "SELECT table_name 
              FROM information_schema.tables 
-             WHERE table_schema = 'public' 
+             WHERE table_schema = $1 
              AND table_type = 'BASE TABLE'
              ORDER BY table_name"
         )
+        .bind(&self.schema)
         .fetch_all(&pool)
         .await?;
         
@@ -201,8 +214,9 @@ impl DataSourceConnector for PostgreSQLConnector {
                 COUNT(DISTINCT table_name) as table_count,
                 SUM(pg_total_relation_size(quote_ident(table_schema)||'.'||quote_ident(table_name)::text)) as total_size
              FROM information_schema.tables
-             WHERE table_schema = 'public' AND table_type = 'BASE TABLE'"
+             WHERE table_schema = $1 AND table_type = 'BASE TABLE'"
         )
+        .bind(&self.schema)
         .fetch_one(&pool)
         .await?;
         
@@ -224,9 +238,10 @@ impl DataSourceConnector for PostgreSQLConnector {
                 pg_total_relation_size(quote_ident(t.table_schema)||'.'||quote_ident(t.table_name)::text) as size_bytes,
                 obj_description((quote_ident(t.table_schema)||'.'||quote_ident(t.table_name))::regclass) as description
              FROM information_schema.tables t
-             WHERE t.table_schema = 'public' AND t.table_type = 'BASE TABLE'
+             WHERE t.table_schema = $1 AND t.table_type = 'BASE TABLE'
              ORDER BY pg_total_relation_size(quote_ident(t.table_schema)||'.'||quote_ident(t.table_name)::text) DESC NULLS LAST"
         )
+        .bind(&self.schema)
         .fetch_all(&pool)
         .await?;
         
@@ -242,8 +257,9 @@ impl DataSourceConnector for PostgreSQLConnector {
                  ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
              JOIN information_schema.constraint_column_usage AS ccu
                  ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
-             WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public'"
+             WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = $1"
         )
+        .bind(&self.schema)
         .fetch_all(&pool)
         .await?;
         
@@ -300,6 +316,7 @@ impl DataSourceConnector for PostgreSQLConnector {
         });
         
         Ok(json!({
+            "database_schema": &self.schema,
             "statistics": {
                 "table_count": table_count,
                 "total_size": total_size.unwrap_or(0),
@@ -327,9 +344,10 @@ impl DataSourceConnector for PostgreSQLConnector {
                     column_default,
                     character_maximum_length
                  FROM information_schema.columns
-                 WHERE table_schema = 'public' AND table_name = $1
+                 WHERE table_schema = $1 AND table_name = $2
                  ORDER BY ordinal_position"
             )
+            .bind(&self.schema)
             .bind(table_name)
             .fetch_all(&pool)
             .await?;
@@ -343,11 +361,12 @@ impl DataSourceConnector for PostgreSQLConnector {
                 "SELECT kcu.column_name
                  FROM information_schema.table_constraints tc
                  JOIN information_schema.key_column_usage kcu
-                     ON tc.constraint_name = kcu.constraint_name
-                 WHERE tc.table_schema = 'public' 
-                     AND tc.table_name = $1
+                     ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
+                 WHERE tc.table_schema = $1 
+                     AND tc.table_name = $2
                      AND tc.constraint_type = 'PRIMARY KEY'"
             )
+            .bind(&self.schema)
             .bind(table_name)
             .fetch_all(&pool)
             .await?;
@@ -360,18 +379,20 @@ impl DataSourceConnector for PostgreSQLConnector {
                     ccu.column_name AS foreign_column_name
                  FROM information_schema.table_constraints AS tc
                  JOIN information_schema.key_column_usage AS kcu
-                     ON tc.constraint_name = kcu.constraint_name
+                     ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
                  JOIN information_schema.constraint_column_usage AS ccu
-                     ON ccu.constraint_name = tc.constraint_name
-                 WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_name = $1"
+                     ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
+                 WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = $1 AND tc.table_name = $2"
             )
+            .bind(&self.schema)
             .bind(table_name)
             .fetch_all(&pool)
             .await?;
             
             // Get row count (safely with proper quoting)
             let count_query = format!(
-                "SELECT COUNT(*) as count FROM {}",
+                "SELECT COUNT(*) as count FROM {}.{}",
+                quote_ident(&self.schema),
                 quote_ident(table_name)
             );
             let row_count: i64 = sqlx::query(&count_query)
@@ -382,7 +403,8 @@ impl DataSourceConnector for PostgreSQLConnector {
             
             // Get sample data (safely with proper quoting)
             let sample_query = format!(
-                "SELECT * FROM {} LIMIT 5",
+                "SELECT * FROM {}.{} LIMIT 5",
+                quote_ident(&self.schema),
                 quote_ident(table_name)
             );
             let sample_rows = sqlx::query(&sample_query)
@@ -444,11 +466,12 @@ impl DataSourceConnector for PostgreSQLConnector {
                 table_name,
                 obj_description((quote_ident(table_schema)||'.'||quote_ident(table_name))::regclass) as description
              FROM information_schema.tables
-             WHERE table_schema = 'public' 
+             WHERE table_schema = $1 
                  AND table_type = 'BASE TABLE'
-                 AND table_name LIKE $1
+                 AND table_name LIKE $2
              ORDER BY table_name"
         )
+        .bind(&self.schema)
         .bind(pattern)
         .fetch_all(&pool)
         .await?;
@@ -462,8 +485,9 @@ impl DataSourceConnector for PostgreSQLConnector {
             // Get column count
             let col_count: i64 = sqlx::query(
                 "SELECT COUNT(*) as count FROM information_schema.columns 
-                 WHERE table_schema = 'public' AND table_name = $1"
+                 WHERE table_schema = $1 AND table_name = $2"
             )
+            .bind(&self.schema)
             .bind(&table_name)
             .fetch_one(&pool)
             .await
@@ -502,9 +526,10 @@ impl DataSourceConnector for PostgreSQLConnector {
              JOIN information_schema.constraint_column_usage AS ccu
                  ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
              WHERE tc.constraint_type = 'FOREIGN KEY' 
-                 AND tc.table_name = $1
-                 AND tc.table_schema = 'public'"
+                 AND tc.table_name = $2
+                 AND tc.table_schema = $1"
         )
+        .bind(&self.schema)
         .bind(table)
         .fetch_all(&pool)
         .await?;
@@ -518,9 +543,10 @@ impl DataSourceConnector for PostgreSQLConnector {
              JOIN information_schema.constraint_column_usage AS ccu
                  ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
              WHERE tc.constraint_type = 'FOREIGN KEY' 
-                 AND ccu.table_name = $1
-                 AND tc.table_schema = 'public'"
+                 AND ccu.table_name = $2
+                 AND tc.table_schema = $1"
         )
+        .bind(&self.schema)
         .bind(table)
         .fetch_all(&pool)
         .await?;
@@ -558,8 +584,9 @@ impl DataSourceConnector for PostgreSQLConnector {
                 COUNT(DISTINCT table_name) as table_count,
                 COALESCE(SUM(pg_total_relation_size(quote_ident(table_schema)||'.'||quote_ident(table_name)::text))::bigint, 0) as total_size
              FROM information_schema.tables
-             WHERE table_schema = 'public' AND table_type = 'BASE TABLE'"
+             WHERE table_schema = $1 AND table_type = 'BASE TABLE'"
         )
+        .bind(&self.schema)
         .fetch_one(&pool)
         .await?;
         
@@ -570,10 +597,11 @@ impl DataSourceConnector for PostgreSQLConnector {
                 COALESCE(pg_total_relation_size(quote_ident(table_schema)||'.'||quote_ident(table_name)::text)::bigint, 0) as size_bytes,
                 pg_size_pretty(pg_total_relation_size(quote_ident(table_schema)||'.'||quote_ident(table_name)::text)) as size_human
              FROM information_schema.tables
-             WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+             WHERE table_schema = $1 AND table_type = 'BASE TABLE'
              ORDER BY pg_total_relation_size(quote_ident(table_schema)||'.'||quote_ident(table_name)::text) DESC NULLS LAST
              LIMIT 10"
         )
+        .bind(&self.schema)
         .fetch_all(&pool)
         .await?;
         
@@ -584,7 +612,7 @@ impl DataSourceConnector for PostgreSQLConnector {
                     tc.table_name,
                     COUNT(*) as outgoing_fks
                 FROM information_schema.table_constraints AS tc
-                WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public'
+                WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = $1
                 GROUP BY tc.table_name
             ),
             referenced AS (
@@ -594,7 +622,7 @@ impl DataSourceConnector for PostgreSQLConnector {
                 FROM information_schema.table_constraints AS tc
                 JOIN information_schema.constraint_column_usage AS ccu
                     ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
-                WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public'
+                WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = $1
                 GROUP BY ccu.table_name
             )
             SELECT 
@@ -605,11 +633,12 @@ impl DataSourceConnector for PostgreSQLConnector {
             FROM information_schema.tables t
             LEFT JOIN foreign_keys f ON t.table_name = f.table_name
             LEFT JOIN referenced r ON t.table_name = r.table_name
-            WHERE t.table_schema = 'public' AND t.table_type = 'BASE TABLE'
+            WHERE t.table_schema = $1 AND t.table_type = 'BASE TABLE'
                 AND (f.outgoing_fks > 0 OR r.incoming_fks > 0)
             ORDER BY total_connections DESC
             LIMIT 10"
         )
+        .bind(&self.schema)
         .fetch_all(&pool)
         .await?;
         

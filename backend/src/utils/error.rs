@@ -29,6 +29,9 @@ pub enum AppError {
     
     #[error("JSON error: {0}")]
     JsonError(#[from] serde_json::Error),
+    
+    #[error("SQL error: {0}")]
+    SqlxError(#[from] sqlx::Error),
 }
 
 impl AppError {

@@ -189,6 +189,31 @@ export async function forgetMessagesFrom(
   messages: Message[]
 ): Promise<void> {
   try {
+    // First update UI optimistically to prevent flickering
+    const messageIndex = messages.findIndex((m) => m.id === messageId);
+    if (messageIndex !== -1) {
+      // Filter messages locally immediately
+      const filteredMessages = messages
+        .slice(0, messageIndex + 1)
+        .map((msg) => ({
+          ...msg,
+          clay_tools_used: msg.clay_tools_used
+            ? [...msg.clay_tools_used]
+            : undefined,
+          file_attachments: msg.file_attachments
+            ? [...msg.file_attachments]
+            : undefined,
+        }));
+      
+      // Update UI immediately to prevent flicker
+      updateConversationMessages(conversationId, filteredMessages);
+      
+      // Set forgotten state optimistically
+      const forgottenCount = messages.length - messageIndex - 1;
+      setConversationForgotten(conversationId, messageId, forgottenCount);
+    }
+    
+    // Then make the API call
     const response = await fetch(
       `${API_BASE_URL}/conversations/${conversationId}/forget-after`,
       {
@@ -202,32 +227,19 @@ export async function forgetMessagesFrom(
     );
 
     if (!response.ok) {
+      // On error, reload to restore correct state
       throw new Error("Failed to forget messages");
     }
 
     const result = await response.json();
-
-    setConversationForgotten(
-      conversationId,
-      messageId,
-      result.forgotten_count || 0
-    );
-
-    // Filter messages locally to only show those up to and including the forgotten point
-    const messageIndex = messages.findIndex((m) => m.id === messageId);
-    if (messageIndex !== -1) {
-      const filteredMessages = messages
-        .slice(0, messageIndex + 1)
-        .map((msg) => ({
-          ...msg,
-          clay_tools_used: msg.clay_tools_used
-            ? [...msg.clay_tools_used]
-            : undefined,
-          file_attachments: msg.file_attachments
-            ? [...msg.file_attachments]
-            : undefined,
-        }));
-      updateConversationMessages(conversationId, filteredMessages);
+    
+    // Update with actual count from server if different
+    if (result.forgotten_count !== undefined) {
+      setConversationForgotten(
+        conversationId,
+        messageId,
+        result.forgotten_count
+      );
     }
   } catch (err) {
     setConversationError(

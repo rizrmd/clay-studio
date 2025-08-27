@@ -1,7 +1,8 @@
 use salvo::prelude::*;
 use salvo::sse::{self, SseEvent};
 use serde::{Deserialize, Serialize};
-use crate::models::{Message, MessageRole};
+use serde_json::json;
+use crate::models::{Message, MessageRole, ToolUsage};
 use crate::utils::AppState;
 use crate::utils::AppError;
 use crate::core::claude::{ClaudeManager, QueryOptions, ClaudeMessage};
@@ -151,9 +152,14 @@ async fn save_message(
     conversation_id: &str,
     message: &Message,
 ) -> Result<(), AppError> {
+    // Use INSERT ON CONFLICT to handle both new messages and updates to assistant message stubs
     sqlx::query(
         "INSERT INTO messages (id, conversation_id, content, role, clay_tools_used, processing_time_ms, created_at) 
-         VALUES ($1, $2, $3, $4, $5, $6, $7)"
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT (id) DO UPDATE SET
+            content = EXCLUDED.content,
+            clay_tools_used = EXCLUDED.clay_tools_used,
+            processing_time_ms = EXCLUDED.processing_time_ms"
     )
     .bind(&message.id)
     .bind(conversation_id)
@@ -165,6 +171,35 @@ async fn save_message(
     .execute(pool)
     .await
     .map_err(|e| AppError::InternalServerError(format!("Failed to save message: {}", e)))?;
+    
+    // Save tool usages if any
+    if let Some(tool_usages) = &message.tool_usages {
+        tracing::info!("Saving {} tool usages for message {}", tool_usages.len(), message.id);
+        for tool_usage in tool_usages {
+            tracing::info!("Saving tool usage: {} with params: {:?}", tool_usage.tool_name, tool_usage.parameters);
+            
+            // Use INSERT ON CONFLICT to update if already exists (was saved immediately)
+            sqlx::query(
+                "INSERT INTO tool_usages (id, message_id, tool_name, parameters, output, execution_time_ms, created_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)
+                 ON CONFLICT (id) DO UPDATE SET
+                    output = EXCLUDED.output,
+                    execution_time_ms = EXCLUDED.execution_time_ms"
+            )
+            .bind(&tool_usage.id)
+            .bind(&message.id)  // message_id is varchar, keep as string
+            .bind(&tool_usage.tool_name)
+            .bind(&tool_usage.parameters)
+            .bind(&tool_usage.output)
+            .bind(tool_usage.execution_time_ms)
+            .bind(Utc::now())
+            .execute(pool)
+            .await
+            .map_err(|e| AppError::InternalServerError(format!("Failed to save tool usage: {}", e)))?;
+        }
+    } else {
+        tracing::debug!("No tool usages to save for message {}", message.id);
+    }
 
     // Update conversation message count and updated_at
     sqlx::query(
@@ -191,6 +226,8 @@ pub enum StreamMessage {
     Progress { content: String },
     #[serde(rename = "tool_use")]
     ToolUse { tool: String },
+    #[serde(rename = "tool_result")]
+    ToolResult { tool: String, result: serde_json::Value, tool_usage_id: String },
     #[serde(rename = "content")]
     Content { content: String },
     #[serde(rename = "complete")]
@@ -278,40 +315,26 @@ pub async fn handle_chat_stream(
     project_manager.ensure_project_directory(client_id, &chat_request.project_id)?;
 
     // Check if there are forgotten messages and handle them
-    let forgotten_after_id = sqlx::query_scalar::<_, Option<String>>(
-        "SELECT forgotten_after_message_id FROM conversations WHERE id = $1"
+    let forgotten_count = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM messages WHERE conversation_id = $1 AND is_forgotten = true"
     )
     .bind(&conversation_id)
-    .fetch_optional(&state.db_pool)
+    .fetch_one(&state.db_pool)
     .await
-    .map_err(|e| AppError::InternalServerError(format!("Failed to check forgotten status: {}", e)))?
-    .flatten();
+    .unwrap_or(0);
 
-    if let Some(forgotten_message_id) = forgotten_after_id {
+    if forgotten_count > 0 {
         // Delete forgotten messages permanently when sending a new message
         sqlx::query(
             "DELETE FROM messages 
-             WHERE conversation_id = $1 AND created_at > 
-             (SELECT created_at FROM messages WHERE id = $2 AND conversation_id = $1)"
+             WHERE conversation_id = $1 AND is_forgotten = true"
         )
         .bind(&conversation_id)
-        .bind(&forgotten_message_id)
         .execute(&state.db_pool)
         .await
         .map_err(|e| AppError::InternalServerError(format!("Failed to delete forgotten messages: {}", e)))?;
 
-        // Clear the forgotten marker
-        sqlx::query(
-            "UPDATE conversations 
-             SET forgotten_after_message_id = NULL, forgotten_count = 0 
-             WHERE id = $1"
-        )
-        .bind(&conversation_id)
-        .execute(&state.db_pool)
-        .await
-        .map_err(|e| AppError::InternalServerError(format!("Failed to clear forgotten marker: {}", e)))?;
-
-        tracing::info!("Deleted forgotten messages and cleared marker for conversation {}", conversation_id);
+        tracing::info!("Deleted {} forgotten messages for conversation {}", forgotten_count, conversation_id);
     }
 
     // Load existing (non-forgotten) messages from database to build full conversation context
@@ -351,13 +374,24 @@ pub async fn handle_chat_stream(
                 clay_tools_used: None,
                 processing_time_ms: None,
                 file_attachments: None,
+                tool_usages: None,
             };
             save_message(&state.db_pool, &conversation_id, &user_msg_with_id).await?;
             
             // Check conversation state for title updates (only if not a new conversation)
             if !is_new_conversation {
                 let conv_info = sqlx::query_as::<_, (Option<String>, Option<bool>, i32)>(
-                    "SELECT title, is_title_manually_set, message_count FROM conversations WHERE id = $1"
+                    "SELECT 
+                        c.title, 
+                        c.is_title_manually_set, 
+                        (
+                            SELECT COUNT(*)::INTEGER 
+                            FROM messages m 
+                            WHERE m.conversation_id = c.id
+                            AND (m.is_forgotten = false OR m.is_forgotten IS NULL)
+                        ) AS message_count
+                     FROM conversations c 
+                     WHERE c.id = $1"
                 )
                 .bind(&conversation_id)
                 .fetch_one(&state.db_pool)
@@ -410,9 +444,21 @@ pub async fn handle_chat_stream(
         }
     }
     
-    // Configure query options
+    // Configure query options with context-aware system prompt
+    // Generate a message_id early so we can include it in the prompt
+    let assistant_message_id = Uuid::new_v4().to_string();
+    
+    let system_prompt = format!(
+        "You are a helpful AI assistant integrated into Clay Studio.\n\n\
+        IMPORTANT: When using any MCP tools (especially data_query), you MUST include these additional parameters:\n\
+        - _conversation_id: {}\n\
+        - _message_id: {}\n\n\
+        These parameters are critical for tracking and must be included in EVERY tool call.",
+        conversation_id, assistant_message_id
+    );
+    
     let options = QueryOptions {
-        system_prompt: Some("You are a helpful AI assistant integrated into Clay Studio.".to_string()),
+        system_prompt: Some(system_prompt),
         max_turns: Some(1),
         allowed_tools: None,
         permission_mode: None,
@@ -423,6 +469,24 @@ pub async fn handle_chat_stream(
     // Create a channel for SSE events
     let (tx, mut rx) = tokio::sync::mpsc::channel::<Result<SseEvent, std::io::Error>>(100);
     
+    // Save assistant message stub BEFORE spawning task so tool_usages can reference it
+    if let Err(e) = sqlx::query(
+        "INSERT INTO messages (id, conversation_id, content, role, created_at) 
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (id) DO NOTHING"
+    )
+    .bind(&assistant_message_id)
+    .bind(&conversation_id)
+    .bind("")  // Empty content for now, will update later
+    .bind("assistant")
+    .bind(Utc::now())
+    .execute(&state.db_pool)
+    .await {
+        tracing::error!("Failed to create assistant message stub: {}", e);
+    } else {
+        tracing::info!("Created assistant message stub with id: {}", assistant_message_id);
+    }
+    
     // Clone necessary data for the spawned task
     let project_id = chat_request.project_id.clone();
     let conversation_id_clone = conversation_id.clone();
@@ -431,8 +495,9 @@ pub async fn handle_chat_stream(
     // Spawn task to process Claude messages
     tokio::spawn(async move {
         let start_time = std::time::Instant::now();
-        let message_id = Uuid::new_v4().to_string();
+        let message_id = assistant_message_id;  // Use the pre-generated message_id
         let mut tools_used = Vec::new();
+        let mut tool_usages: Vec<ToolUsage> = Vec::new();
         
         // Send start event
         if let Ok(event) = SseEvent::default()
@@ -499,12 +564,194 @@ pub async fn handle_chat_stream(
                                 let _ = tx.send(Ok(event)).await;
                             }
                         }
-                        ClaudeMessage::ToolUse { tool, .. } => {
+                        ClaudeMessage::ToolUse { tool, args, tool_use_id } => {
+                            let tool_start = std::time::Instant::now();
                             tools_used.push(tool.clone());
+                            
+                            // Create tool usage record with parameters
+                            // Start with executing status - results will be updated later
+                            let executing_output = serde_json::json!({
+                                "status": "executing",
+                                "timestamp": chrono::Utc::now().to_rfc3339(),
+                                "tool_use_id": tool_use_id.clone()
+                            });
+                            
+                            let tool_usage = ToolUsage::new(
+                                message_id.clone(),
+                                tool.clone(),
+                                Some(args.clone())
+                            )
+                            .with_output(executing_output.clone());
+                            
+                            tracing::info!("[TIMING] Tool usage detected at {:?}: {} with params: {:?}", 
+                                chrono::Utc::now(), tool, args);
+                            
+                            // Save tool usage immediately to database so MCP server can update it
+                            let tool_usage_id = tool_usage.id.clone();
+                            let save_start = std::time::Instant::now();
+                            
+                            if let Err(e) = sqlx::query(
+                                "INSERT INTO tool_usages (id, message_id, tool_name, parameters, output, execution_time_ms, created_at)
+                                 VALUES ($1, $2, $3, $4, $5, $6, $7)"
+                            )
+                            .bind(&tool_usage.id)
+                            .bind(&message_id)
+                            .bind(&tool_usage.tool_name)  // Use tool_usage.tool_name to preserve exact name
+                            .bind(&args)
+                            .bind(&executing_output)
+                            .bind(tool_usage.execution_time_ms)
+                            .bind(Utc::now())
+                            .execute(&db_pool)
+                            .await {
+                                tracing::error!("Failed to save tool usage immediately: {}", e);
+                            } else {
+                                let save_time = save_start.elapsed();
+                                tracing::info!("[TIMING] Tool usage {} saved to DB in {:?}ms at {:?}", 
+                                    tool_usage_id, save_time.as_millis(), chrono::Utc::now());
+                            }
+                            
+                            tool_usages.push(tool_usage);
+                            
+                            tracing::info!("[TIMING] Total ToolUse processing took {:?}ms", 
+                                tool_start.elapsed().as_millis());
+                            
                             if let Ok(event) = SseEvent::default()
                                 .name("message")
                                 .json(StreamMessage::ToolUse { tool }) {
                                 let _ = tx.send(Ok(event)).await;
+                            }
+                        }
+                        ClaudeMessage::ToolResult { tool, result } => {
+                            // Update the corresponding tool usage with the actual result
+                            tracing::info!("Received ToolResult for {} with result: {:?}", tool, result);
+                            
+                            // Extract text content from the result if it's in the expected format
+                            let result_text = if result.is_array() {
+                                result.as_array()
+                                    .and_then(|arr| arr.first())
+                                    .and_then(|item| item.get("text"))
+                                    .and_then(|text| text.as_str())
+                                    .unwrap_or("")
+                                    .to_string()
+                            } else if result.is_object() {
+                                if let Some(text) = result.get("text").and_then(|t| t.as_str()) {
+                                    text.to_string()
+                                } else {
+                                    serde_json::to_string_pretty(&result).unwrap_or_default()
+                                }
+                            } else if result.is_string() {
+                                result.as_str().unwrap_or("").to_string()
+                            } else {
+                                result.to_string()
+                            };
+                            
+                            // Send tool result to frontend via SSE immediately
+                            if !result_text.is_empty() {
+                                if let Ok(event) = SseEvent::default()
+                                    .name("message")
+                                    .json(StreamMessage::ToolResult { 
+                                        tool: tool.clone(),
+                                        result: json!({
+                                            "text": result_text.clone(),
+                                            "raw": result.clone()
+                                        }),
+                                        tool_usage_id: tool_usages.iter()
+                                            .find(|tu| tu.tool_name == tool)
+                                            .map(|tu| tu.id.to_string())
+                                            .unwrap_or_else(|| Uuid::new_v4().to_string()),
+                                    }) {
+                                    let _ = tx.send(Ok(event)).await;
+                                }
+                            }
+                            
+                            // Find the tool usage to update by matching tool_use_id from the output
+                            if let Some(tool_usage) = tool_usages.iter_mut()
+                                .find(|tu| {
+                                    // Try to match by tool_use_id stored in the output
+                                    if let Some(output) = &tu.output {
+                                        if let Some(stored_tool_use_id) = output.get("tool_use_id").and_then(|id| id.as_str()) {
+                                            return stored_tool_use_id == tool;
+                                        }
+                                    }
+                                    // Fallback to matching by tool name and executing status
+                                    tu.tool_name == tool && tu.output.as_ref()
+                                        .and_then(|o| o.get("status"))
+                                        .and_then(|s| s.as_str()) == Some("executing")
+                                }) {
+                                
+                                // Update the tool usage with the actual result
+                                let actual_output = serde_json::json!({
+                                    "status": "completed",
+                                    "result": result_text,
+                                    "raw_result": result,
+                                    "timestamp": chrono::Utc::now().to_rfc3339()
+                                });
+                                
+                                // Update in memory
+                                let tool_usage_id = tool_usage.id.clone();
+                                tool_usage.output = Some(actual_output.clone());
+                                
+                                // Also update in database immediately
+                                let update_start = std::time::Instant::now();
+                                match sqlx::query(
+                                    "UPDATE tool_usages 
+                                     SET output = $1
+                                     WHERE id = $2"
+                                )
+                                .bind(&actual_output)
+                                .bind(&tool_usage_id)
+                                .execute(&db_pool)
+                                .await {
+                                    Ok(_) => {
+                                        let update_time = update_start.elapsed();
+                                        tracing::info!(
+                                            "[TIMING] Tool usage {} updated with actual result in {:?}ms", 
+                                            tool_usage_id, 
+                                            update_time.as_millis()
+                                        );
+                                    },
+                                    Err(e) => {
+                                        tracing::error!("Failed to update tool usage {} with result: {}", tool_usage_id, e);
+                                    }
+                                }
+                            } else {
+                                // Try to find in database by tool_use_id
+                                tracing::info!("Trying to find tool usage in database by tool_use_id: {}", tool);
+                                if let Ok(Some(row)) = sqlx::query_as::<_, (String,)>(
+                                    "SELECT id FROM tool_usages 
+                                     WHERE message_id = $1 
+                                     AND output->>'tool_use_id' = $2
+                                     AND output->>'status' = 'executing'
+                                     ORDER BY created_at DESC
+                                     LIMIT 1"
+                                )
+                                .bind(&message_id)
+                                .bind(&tool)
+                                .fetch_optional(&db_pool)
+                                .await {
+                                    let (found_tool_usage_id,) = row;
+                                    
+                                    let actual_output = serde_json::json!({
+                                        "status": "completed",
+                                        "result": result_text,
+                                        "raw_result": result,
+                                        "timestamp": chrono::Utc::now().to_rfc3339()
+                                    });
+                                    
+                                    if let Ok(_) = sqlx::query(
+                                        "UPDATE tool_usages 
+                                         SET output = $1
+                                         WHERE id = $2"
+                                    )
+                                    .bind(&actual_output)
+                                    .bind(&found_tool_usage_id)
+                                    .execute(&db_pool)
+                                    .await {
+                                        tracing::info!("Tool usage {} updated with result from database lookup", found_tool_usage_id);
+                                    }
+                                } else {
+                                    tracing::warn!("Could not find executing tool usage for {} to update with result", tool);
+                                }
                             }
                         }
                         ClaudeMessage::Result { result } => {
@@ -537,6 +784,16 @@ pub async fn handle_chat_stream(
                     assistant_content = accumulated_text;
                 }
                 
+                // Keep tool usages in their current state - MCP server will update them directly
+                // This preserves the actual results instead of overwriting with generic message
+                for tool_usage in &tool_usages {
+                    if let Some(output) = &tool_usage.output {
+                        if output.get("status").and_then(|s| s.as_str()) == Some("executing") {
+                            tracing::info!("Tool usage {} still executing - MCP server will update with results", tool_usage.tool_name);
+                        }
+                    }
+                }
+                
                 // Save assistant message to database if we have content
                 let processing_time_ms = start_time.elapsed().as_millis() as i64;
                 
@@ -549,8 +806,10 @@ pub async fn handle_chat_stream(
                         clay_tools_used: if tools_used.is_empty() { None } else { Some(tools_used.clone()) },
                         processing_time_ms: Some(processing_time_ms),
                         file_attachments: None,
+                        tool_usages: if tool_usages.is_empty() { None } else { Some(tool_usages.clone()) },
                     };
                     
+                    tracing::info!("Assistant message created with {} tool usages", tool_usages.len());
                     tracing::debug!("Saving assistant message to database - ID: {}, Content length: {}", 
                         message_id, assistant_content.len());
                     

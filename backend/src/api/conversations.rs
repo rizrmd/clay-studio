@@ -7,6 +7,7 @@ use crate::core::tools::ToolApplicabilityChecker;
 use chrono::Utc;
 use uuid::Uuid;
 use sqlx::Row;
+use serde_json;
 
 
 #[handler]
@@ -19,9 +20,21 @@ pub async fn get_conversation_context(
     let conversation_id = req.param::<String>("conversation_id")
         .ok_or(AppError::BadRequest("Missing conversation_id".to_string()))?;
 
-    // Fetch conversation from database
+    // Fetch conversation from database - calculate actual message count excluding forgotten messages
     let conversation = sqlx::query_as::<_, (String, String, Option<String>, i32, Option<bool>)>(
-        "SELECT id, project_id, title, message_count, is_title_manually_set FROM conversations WHERE id = $1"
+        "SELECT 
+            c.id, 
+            c.project_id, 
+            c.title, 
+            (
+                SELECT COUNT(*)::INTEGER 
+                FROM messages m 
+                WHERE m.conversation_id = c.id
+                AND (m.is_forgotten = false OR m.is_forgotten IS NULL)
+            ) AS message_count,
+            c.is_title_manually_set 
+         FROM conversations c
+         WHERE c.id = $1"
     )
     .bind(&conversation_id)
     .fetch_optional(&state.db_pool)
@@ -31,10 +44,11 @@ pub async fn get_conversation_context(
 
     let project_id = conversation.1;
 
-    // Fetch messages from database
+    // Fetch messages from database (excluding forgotten ones)
     let messages = sqlx::query(
         "SELECT id, content, role FROM messages 
          WHERE conversation_id = $1 
+         AND (is_forgotten = false OR is_forgotten IS NULL)
          ORDER BY created_at ASC 
          LIMIT 50"
     )
@@ -148,13 +162,25 @@ pub async fn list_conversations(
     // Optional project_id filter from query params
     let project_id = req.query::<String>("project_id");
     
-    // Build query based on filters
+    // Build query based on filters - calculate actual message count excluding forgotten messages
     let conversations = if let Some(pid) = project_id {
         sqlx::query(
-            "SELECT id, project_id, title, message_count, created_at, updated_at, is_title_manually_set 
-             FROM conversations 
-             WHERE project_id = $1 
-             ORDER BY updated_at DESC 
+            "SELECT 
+                c.id, 
+                c.project_id, 
+                c.title, 
+                (
+                    SELECT COUNT(*)::INTEGER 
+                    FROM messages m 
+                    WHERE m.conversation_id = c.id
+                    AND (m.is_forgotten = false OR m.is_forgotten IS NULL)
+                ) AS message_count,
+                c.created_at, 
+                c.updated_at, 
+                c.is_title_manually_set 
+             FROM conversations c
+             WHERE c.project_id = $1 
+             ORDER BY c.created_at DESC 
              LIMIT 100"
         )
         .bind(pid)
@@ -162,9 +188,21 @@ pub async fn list_conversations(
         .await
     } else {
         sqlx::query(
-            "SELECT id, project_id, title, message_count, created_at, updated_at, is_title_manually_set 
-             FROM conversations 
-             ORDER BY updated_at DESC 
+            "SELECT 
+                c.id, 
+                c.project_id, 
+                c.title, 
+                (
+                    SELECT COUNT(*)::INTEGER 
+                    FROM messages m 
+                    WHERE m.conversation_id = c.id
+                    AND (m.is_forgotten = false OR m.is_forgotten IS NULL)
+                ) AS message_count,
+                c.created_at, 
+                c.updated_at, 
+                c.is_title_manually_set 
+             FROM conversations c
+             ORDER BY c.created_at DESC 
              LIMIT 100"
         )
         .fetch_all(&state.db_pool)
@@ -174,9 +212,16 @@ pub async fn list_conversations(
     
     let mut conversation_list = Vec::new();
     for row in conversations {
+        let id: String = row.try_get("id")
+            .map_err(|e| AppError::InternalServerError(format!("Failed to get id: {}", e)))?;
+        let message_count: i32 = row.try_get("message_count")
+            .map_err(|e| AppError::InternalServerError(format!("Failed to get message_count: {}", e)))?;
+        
+        // Debug logging
+        tracing::debug!("Conversation {} has message_count: {}", id, message_count);
+        
         conversation_list.push(Conversation {
-            id: row.try_get("id")
-                .map_err(|e| AppError::InternalServerError(format!("Failed to get id: {}", e)))?,
+            id,
             project_id: row.try_get("project_id")
                 .map_err(|e| AppError::InternalServerError(format!("Failed to get project_id: {}", e)))?,
             title: row.try_get("title").ok(),
@@ -184,8 +229,7 @@ pub async fn list_conversations(
                 .map_err(|e| AppError::InternalServerError(format!("Failed to get created_at: {}", e)))?,
             updated_at: row.try_get("updated_at")
                 .map_err(|e| AppError::InternalServerError(format!("Failed to get updated_at: {}", e)))?,
-            message_count: row.try_get("message_count")
-                .map_err(|e| AppError::InternalServerError(format!("Failed to get message_count: {}", e)))?,
+            message_count,
             is_title_manually_set: row.try_get("is_title_manually_set").ok(),
         });
     }
@@ -205,9 +249,21 @@ pub async fn get_conversation(
         .ok_or(AppError::BadRequest("Missing conversation_id".to_string()))?;
     
     let conversation_row = sqlx::query(
-        "SELECT id, project_id, title, message_count, created_at, updated_at, is_title_manually_set 
-         FROM conversations 
-         WHERE id = $1"
+        "SELECT 
+            c.id, 
+            c.project_id, 
+            c.title, 
+            (
+                SELECT COUNT(*)::INTEGER 
+                FROM messages m 
+                WHERE m.conversation_id = c.id
+                AND (m.is_forgotten = false OR m.is_forgotten IS NULL)
+            ) AS message_count,
+            c.created_at, 
+            c.updated_at, 
+            c.is_title_manually_set 
+         FROM conversations c
+         WHERE c.id = $1"
     )
     .bind(&conversation_id)
     .fetch_optional(&state.db_pool)
@@ -238,6 +294,22 @@ pub async fn get_conversation(
 pub struct CreateConversationRequest {
     pub project_id: String,
     pub title: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct CreateFromMessageRequest {
+    pub project_id: String,
+    pub source_conversation_id: Option<String>,
+    pub message_id: String,
+    pub messages: Vec<MessageForClone>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct MessageForClone {
+    pub id: String,
+    pub content: String,
+    pub role: String,
+    pub file_attachments: Option<Vec<serde_json::Value>>,
 }
 
 #[handler]
@@ -291,6 +363,131 @@ pub async fn create_conversation(
     Ok(())
 }
 
+#[handler]
+pub async fn create_conversation_from_message(
+    req: &mut Request,
+    depot: &mut Depot,
+    res: &mut Response,
+) -> Result<(), AppError> {
+    let state = depot.obtain::<AppState>().unwrap();
+    let create_req: CreateFromMessageRequest = req.parse_json().await
+        .map_err(|_| AppError::BadRequest("Invalid request body".to_string()))?;
+    
+    // Generate a title from the first user message or use a default
+    let mut generated_title = "New Conversation".to_string();
+    for msg in &create_req.messages {
+        if msg.role == "user" {
+            // Take first 50 chars of first user message as title
+            let content = msg.content.trim();
+            if !content.is_empty() {
+                generated_title = if content.len() > 50 {
+                    format!("{}...", &content[..47])
+                } else {
+                    content.to_string()
+                };
+                break;
+            }
+        }
+    }
+    
+    let conversation_id = Uuid::new_v4().to_string();
+    let now = Utc::now();
+    
+    // Start a transaction
+    let mut tx = state.db_pool.begin().await
+        .map_err(|e| AppError::InternalServerError(format!("Failed to start transaction: {}", e)))?;
+    
+    // Create the new conversation
+    sqlx::query(
+        "INSERT INTO conversations (id, project_id, title, message_count, created_at, updated_at, is_title_manually_set) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7)"
+    )
+    .bind(&conversation_id)
+    .bind(&create_req.project_id)
+    .bind(&generated_title)
+    .bind(create_req.messages.len() as i32)
+    .bind(now)
+    .bind(now)
+    .bind(false) // Auto-generated title
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| AppError::InternalServerError(format!("Failed to create conversation: {}", e)))?;
+    
+    // Insert all the messages
+    for (index, msg) in create_req.messages.iter().enumerate() {
+        let message_id = Uuid::new_v4().to_string();
+        let created_at = now + chrono::Duration::milliseconds(index as i64);
+        
+        // Insert the message
+        sqlx::query(
+            "INSERT INTO messages (id, conversation_id, content, role, created_at, is_forgotten) 
+             VALUES ($1, $2, $3, $4, $5, $6)"
+        )
+        .bind(&message_id)
+        .bind(&conversation_id)
+        .bind(&msg.content)
+        .bind(&msg.role)
+        .bind(created_at)
+        .bind(false)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("Failed to insert message: {}", e)))?;
+        
+        // If there are file attachments, clone them
+        if let Some(attachments) = &msg.file_attachments {
+            for attachment in attachments {
+                if let Some(obj) = attachment.as_object() {
+                    // Extract file attachment details
+                    if let (Some(original_name), Some(file_size)) = 
+                        (obj.get("original_name").and_then(|v| v.as_str()),
+                         obj.get("file_size").and_then(|v| v.as_i64())) {
+                        
+                        let attachment_id = Uuid::new_v4().to_string();
+                        let mime_type = obj.get("mime_type").and_then(|v| v.as_str());
+                        let description = obj.get("description").and_then(|v| v.as_str());
+                        let auto_description = obj.get("auto_description").and_then(|v| v.as_str());
+                        let file_path = obj.get("file_path").and_then(|v| v.as_str());
+                        
+                        // Insert file attachment record
+                        sqlx::query(
+                            "INSERT INTO file_attachments (id, message_id, file_name, original_name, file_path, file_size, mime_type, description, auto_description, created_at) 
+                             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"
+                        )
+                        .bind(&attachment_id)
+                        .bind(&message_id)
+                        .bind(original_name) // Using original_name as file_name for cloned messages
+                        .bind(original_name)
+                        .bind(file_path)
+                        .bind(file_size as i32)
+                        .bind(mime_type)
+                        .bind(description)
+                        .bind(auto_description)
+                        .bind(now)
+                        .execute(&mut *tx)
+                        .await
+                        .map_err(|e| AppError::InternalServerError(format!("Failed to clone file attachment: {}", e)))?;
+                    }
+                }
+            }
+        }
+    }
+    
+    // Commit the transaction
+    tx.commit().await
+        .map_err(|e| AppError::InternalServerError(format!("Failed to commit transaction: {}", e)))?;
+    
+    // Return the new conversation details
+    let response = serde_json::json!({
+        "conversation_id": conversation_id,
+        "project_id": create_req.project_id,
+        "title": generated_title,
+        "message_count": create_req.messages.len()
+    });
+    
+    res.render(Json(response));
+    Ok(())
+}
+
 #[derive(Debug, Deserialize)]
 pub struct UpdateConversationRequest {
     pub title: Option<String>,
@@ -334,10 +531,23 @@ pub async fn update_conversation(
     .await
     .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
     
-    // Fetch updated conversation
+    // Fetch updated conversation - calculate actual message count excluding forgotten messages
     let updated = sqlx::query(
-        "SELECT id, project_id, title, message_count, created_at, updated_at, is_title_manually_set 
-         FROM conversations WHERE id = $1"
+        "SELECT 
+            c.id, 
+            c.project_id, 
+            c.title, 
+            (
+                SELECT COUNT(*)::INTEGER 
+                FROM messages m 
+                WHERE m.conversation_id = c.id
+                AND (m.is_forgotten = false OR m.is_forgotten IS NULL)
+            ) AS message_count,
+            c.created_at, 
+            c.updated_at, 
+            c.is_title_manually_set 
+         FROM conversations c
+         WHERE c.id = $1"
     )
     .bind(&conversation_id)
     .fetch_one(&state.db_pool)
@@ -408,41 +618,18 @@ pub async fn get_conversation_messages(
     let conversation_id = req.param::<String>("conversation_id")
         .ok_or(AppError::BadRequest("Missing conversation_id".to_string()))?;
     
-    // First, check if there's a forgotten_after_message_id
-    let forgotten_after = sqlx::query_scalar::<_, Option<String>>(
-        "SELECT forgotten_after_message_id FROM conversations WHERE id = $1"
+    // Fetch messages from database, filtering out forgotten ones
+    let messages = sqlx::query(
+        "SELECT id, content, role, clay_tools_used, processing_time_ms, created_at 
+         FROM messages 
+         WHERE conversation_id = $1 
+         AND (is_forgotten = false OR is_forgotten IS NULL)
+         ORDER BY created_at ASC"
     )
     .bind(&conversation_id)
-    .fetch_one(&state.db_pool)
+    .fetch_all(&state.db_pool)
     .await
     .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
-    
-    // Fetch messages from database, filtering if there's a forgotten_after point
-    let messages = if let Some(forgotten_after_id) = forgotten_after {
-        sqlx::query(
-            "SELECT m.id, m.content, m.role, m.clay_tools_used, m.processing_time_ms, m.created_at 
-             FROM messages m
-             WHERE m.conversation_id = $1 
-             AND m.created_at <= (SELECT created_at FROM messages WHERE id = $2)
-             ORDER BY m.created_at ASC"
-        )
-        .bind(&conversation_id)
-        .bind(&forgotten_after_id)
-        .fetch_all(&state.db_pool)
-        .await
-        .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?
-    } else {
-        sqlx::query(
-            "SELECT id, content, role, clay_tools_used, processing_time_ms, created_at 
-             FROM messages 
-             WHERE conversation_id = $1 
-             ORDER BY created_at ASC"
-        )
-        .bind(&conversation_id)
-        .fetch_all(&state.db_pool)
-        .await
-        .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?
-    };
     
     let mut message_responses = Vec::new();
     for row in messages {
@@ -496,34 +683,36 @@ pub async fn forget_messages_after(
     let forget_request: ForgetMessagesRequest = req.parse_json().await
         .map_err(|_| AppError::BadRequest("Invalid request body".to_string()))?;
     
-    // Update the conversation to set forgotten_after_message_id
-    sqlx::query(
-        "UPDATE conversations 
-         SET forgotten_after_message_id = $1, updated_at = NOW() 
-         WHERE id = $2"
+    // Get the timestamp of the specified message
+    let message_timestamp = sqlx::query_scalar::<_, chrono::DateTime<Utc>>(
+        "SELECT created_at FROM messages WHERE id = $1 AND conversation_id = $2"
     )
     .bind(&forget_request.message_id)
     .bind(&conversation_id)
+    .fetch_optional(&state.db_pool)
+    .await
+    .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?
+    .ok_or(AppError::NotFound("Message not found".to_string()))?;
+    
+    // Mark all messages after this one as forgotten
+    let update_result = sqlx::query(
+        "UPDATE messages 
+         SET is_forgotten = true 
+         WHERE conversation_id = $1 
+         AND created_at > $2"
+    )
+    .bind(&conversation_id)
+    .bind(&message_timestamp)
     .execute(&state.db_pool)
     .await
     .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
     
-    // Get count of forgotten messages
-    let count_result = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM messages 
-         WHERE conversation_id = $1 
-         AND created_at > (SELECT created_at FROM messages WHERE id = $2)"
-    )
-    .bind(&conversation_id)
-    .bind(&forget_request.message_id)
-    .fetch_one(&state.db_pool)
-    .await
-    .unwrap_or(0);
+    let forgotten_count = update_result.rows_affected();
     
     res.render(Json(serde_json::json!({
         "success": true,
-        "forgotten_count": count_result,
-        "forgotten_after_message_id": forget_request.message_id
+        "forgotten_count": forgotten_count,
+        "message_id": forget_request.message_id
     })));
     Ok(())
 }
@@ -538,20 +727,24 @@ pub async fn restore_forgotten_messages(
     let conversation_id = req.param::<String>("conversation_id")
         .ok_or(AppError::BadRequest("Missing conversation_id".to_string()))?;
     
-    // Clear the forgotten_after_message_id
-    sqlx::query(
-        "UPDATE conversations 
-         SET forgotten_after_message_id = NULL, updated_at = NOW() 
-         WHERE id = $1"
+    // Mark all messages as not forgotten
+    let update_result = sqlx::query(
+        "UPDATE messages 
+         SET is_forgotten = false 
+         WHERE conversation_id = $1 
+         AND is_forgotten = true"
     )
     .bind(&conversation_id)
     .execute(&state.db_pool)
     .await
     .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
     
+    let restored_count = update_result.rows_affected();
+    
     res.render(Json(serde_json::json!({
         "success": true,
-        "message": "All messages restored"
+        "message": "All messages restored",
+        "restored_count": restored_count
     })));
     Ok(())
 }
@@ -566,36 +759,111 @@ pub async fn get_forgotten_status(
     let conversation_id = req.param::<String>("conversation_id")
         .ok_or(AppError::BadRequest("Missing conversation_id".to_string()))?;
     
-    // Get the forgotten_after_message_id from the conversation
-    let forgotten_after = sqlx::query_scalar::<_, Option<String>>(
-        "SELECT forgotten_after_message_id FROM conversations WHERE id = $1"
+    // Get count of forgotten messages
+    let forgotten_count = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM messages 
+         WHERE conversation_id = $1 
+         AND is_forgotten = true"
     )
     .bind(&conversation_id)
     .fetch_one(&state.db_pool)
     .await
-    .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
+    .unwrap_or(0);
     
-    let mut response = serde_json::json!({
-        "has_forgotten": forgotten_after.is_some(),
-        "forgotten_after_message_id": forgotten_after
+    let response = serde_json::json!({
+        "has_forgotten": forgotten_count > 0,
+        "forgotten_count": forgotten_count
     });
     
-    if let Some(message_id) = forgotten_after {
-        // Get count of forgotten messages
-        let count = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM messages 
-             WHERE conversation_id = $1 
-             AND created_at > (SELECT created_at FROM messages WHERE id = $2)"
-        )
-        .bind(&conversation_id)
-        .bind(&message_id)
-        .fetch_one(&state.db_pool)
-        .await
-        .unwrap_or(0);
-        
-        response["forgotten_count"] = serde_json::json!(count);
+    res.render(Json(response));
+    Ok(())
+}
+
+#[handler]
+pub async fn get_tool_usage(
+    req: &mut Request,
+    depot: &mut Depot,
+    res: &mut Response,
+) -> Result<(), AppError> {
+    let state = depot.obtain::<AppState>().unwrap();
+    let message_id = req.param::<String>("message_id")
+        .ok_or(AppError::BadRequest("Missing message_id".to_string()))?;
+    let tool_name = req.param::<String>("tool_name")
+        .ok_or(AppError::BadRequest("Missing tool_name".to_string()))?;
+    
+    // Fetch tool usage for specific message and tool
+    let tool_usage = sqlx::query(
+        "SELECT id, tool_name, parameters, output, execution_time_ms, created_at
+         FROM tool_usages
+         WHERE message_id = $1 AND tool_name = $2
+         ORDER BY created_at ASC
+         LIMIT 1"
+    )
+    .bind(&message_id)
+    .bind(&tool_name)
+    .fetch_optional(&state.db_pool)
+    .await
+    .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
+    
+    if let Some(row) = tool_usage {
+        let response = ToolUsage {
+            id: row.try_get("id").unwrap_or_default(),
+            message_id: message_id.clone(),
+            tool_name: row.try_get("tool_name").unwrap_or_default(),
+            parameters: row.try_get("parameters").ok(),
+            output: row.try_get("output").ok(),
+            execution_time_ms: row.try_get("execution_time_ms").ok(),
+            created_at: row.try_get::<Option<chrono::DateTime<Utc>>, _>("created_at")
+                .ok()
+                .flatten()
+                .map(|dt| dt.to_rfc3339()),
+        };
+        res.render(Json(response));
+    } else {
+        return Err(AppError::NotFound(format!("Tool usage not found for message {} and tool {}", message_id, tool_name)));
     }
     
-    res.render(Json(response));
+    Ok(())
+}
+
+#[handler]
+pub async fn get_message_tool_usages(
+    req: &mut Request,
+    depot: &mut Depot,
+    res: &mut Response,
+) -> Result<(), AppError> {
+    let state = depot.obtain::<AppState>().unwrap();
+    let message_id = req.param::<String>("message_id")
+        .ok_or(AppError::BadRequest("Missing message_id".to_string()))?;
+    
+    // Fetch all tool usages for a message
+    let tool_usages = sqlx::query(
+        "SELECT id, tool_name, parameters, output, execution_time_ms, created_at
+         FROM tool_usages
+         WHERE message_id = $1
+         ORDER BY created_at ASC"
+    )
+    .bind(&message_id)
+    .fetch_all(&state.db_pool)
+    .await
+    .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
+    
+    let mut tool_usage_list = Vec::new();
+    for row in tool_usages {
+        tool_usage_list.push(ToolUsage {
+            id: row.try_get("id").unwrap_or_default(),
+            message_id: message_id.clone(),
+            tool_name: row.try_get("tool_name").unwrap_or_default(),
+            parameters: row.try_get("parameters").ok(),
+            output: row.try_get("output").ok(),
+            execution_time_ms: row.try_get("execution_time_ms").ok(),
+            created_at: row.try_get::<Option<chrono::DateTime<Utc>>, _>("created_at")
+                .ok()
+                .flatten()
+                .map(|dt| dt.to_rfc3339()),
+        });
+    }
+    
+    res.render(Json(tool_usage_list));
     Ok(())
 }

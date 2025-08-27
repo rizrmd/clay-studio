@@ -35,6 +35,8 @@ import { logger } from "@/lib/logger";
 import { useValtioAuth } from "@/hooks/use-valtio-auth";
 import { ClaudeMdModal } from "./claude-md-modal";
 import { store, cleanupDeletedConversation } from "@/store/chat-store";
+import { ConversationManager } from "@/store/chat/conversation-manager";
+import { conversationStore } from "@/store/chat/conversation-store";
 
 interface Conversation {
   id: string;
@@ -55,7 +57,7 @@ interface ConversationSidebarProps {
 
 export function ConversationSidebar({
   isCollapsed,
-  onToggle,
+  onToggle: _onToggle,
   projectId,
   currentConversationId,
   onConversationSelect: _onConversationSelect,
@@ -476,13 +478,40 @@ export function ConversationSidebar({
                 variant="ghost"
                 size="sm"
                 className="pl-1 gap-1 h-[25px] border border-transparent hover:border-gray-200"
-                onClick={() => {
-                  // Clear any existing conversation state
+                onClick={async () => {
+                  const conversationManager = ConversationManager.getInstance();
+                  
+                  // Get the current active conversation ID from both stores
+                  const previousActiveId = store.activeConversationId || conversationStore.activeConversationId;
+                  
+                  // Clear active conversation IDs in both stores
                   store.activeConversationId = null;
+                  conversationStore.activeConversationId = null;
 
-                  // Clear any existing 'new' conversation state
+                  // Clear any existing 'new' conversation state in both stores
                   if (store.conversations.new) {
                     delete store.conversations.new;
+                    delete store.inputs.new;
+                  }
+                  if (conversationStore.conversations.new) {
+                    await conversationManager.clearConversation('new');
+                  }
+
+                  // If we were on a newly created conversation (that now has a real ID), 
+                  // clear its state too to prevent message bleeding
+                  if (previousActiveId && previousActiveId !== 'new') {
+                    // Clear the conversation state in old store
+                    if (store.conversations[previousActiveId]) {
+                      store.conversations[previousActiveId].messages = [];
+                      store.conversations[previousActiveId].isStreaming = false;
+                      store.conversations[previousActiveId].isLoading = false;
+                      store.conversations[previousActiveId].error = null;
+                    }
+                    
+                    // Clear the conversation state in new store
+                    if (conversationStore.conversations[previousActiveId]) {
+                      await conversationManager.clearConversation(previousActiveId);
+                    }
                   }
 
                   // Navigate to new chat

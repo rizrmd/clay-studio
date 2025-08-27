@@ -209,28 +209,6 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // Create tools table
-        manager
-            .create_table(
-                Table::create()
-                    .table(Tools::Table)
-                    .if_not_exists()
-                    .col(
-                        ColumnDef::new(Tools::Id)
-                            .string()
-                            .not_null()
-                            .primary_key(),
-                    )
-                    .col(ColumnDef::new(Tools::Name).string().not_null())
-                    .col(ColumnDef::new(Tools::Category).string().not_null())
-                    .col(ColumnDef::new(Tools::Description).text())
-                    .col(ColumnDef::new(Tools::Parameters).json())
-                    .col(ColumnDef::new(Tools::UsageExamples).json())
-                    .col(ColumnDef::new(Tools::IsActive).boolean().not_null().default(true))
-                    .to_owned(),
-            )
-            .await?;
-
         // Create indexes
         manager
             .create_index(
@@ -271,9 +249,6 @@ impl MigrationTrait for Migration {
             .await?;
         manager
             .drop_table(Table::drop().table(DataSources::Table).to_owned())
-            .await?;
-        manager
-            .drop_table(Table::drop().table(Tools::Table).to_owned())
             .await?;
         manager
             .drop_table(Table::drop().table(Conversations::Table).to_owned())
@@ -365,15 +340,4 @@ enum DataSources {
     CreatedAt,
 }
 
-#[derive(Iden)]
-enum Tools {
-    Table,
-    Id,
-    Name,
-    Category,
-    Description,
-    Parameters,
-    UsageExamples,
-    IsActive,
-}
 

@@ -251,7 +251,11 @@ impl McpHandlers {
                                 "port": {"type": "integer"},
                                 "database": {"type": "string"},
                                 "username": {"type": "string"},
-                                "password": {"type": "string"}
+                                "password": {"type": "string"},
+                                "schema": {
+                                    "type": "string",
+                                    "description": "Database schema to use (PostgreSQL only, defaults to 'public')"
+                                }
                             }
                         }
                     },
@@ -303,6 +307,11 @@ impl McpHandlers {
                         "datasource_id": {
                             "type": "string",
                             "description": "ID of the data source to inspect"
+                        },
+                        "force_refresh": {
+                            "type": "boolean",
+                            "description": "Force refresh of cached schema (default: false)",
+                            "default": false
                         }
                     },
                     "required": ["datasource_id"]
@@ -777,24 +786,40 @@ impl McpHandlers {
                             data: None,
                         })?;
                         
-                        // Try to fetch and update schema information
+                        // Try to fetch schema and analysis information
                         let mut schema_info = String::new();
+                        let mut combined_result = json!({});
+                        
+                        // Fetch the actual database schema
                         if let Ok(schema) = connector.fetch_schema().await {
-                            // Update schema information in the database
+                            // Count tables for the success message
+                            if let Some(tables) = schema.get("tables").and_then(|t| t.as_object()) {
+                                schema_info = format!(" Found {} tables.", tables.len());
+                            }
+                            combined_result["schema"] = schema;
+                        }
+                        
+                        // Fetch database analysis
+                        if let Ok(analysis) = connector.analyze_database().await {
+                            // Merge analysis into combined result
+                            if let Some(analysis_obj) = analysis.as_object() {
+                                for (key, value) in analysis_obj {
+                                    combined_result[key] = value.clone();
+                                }
+                            }
+                        }
+                        
+                        // Update schema information in the database with combined result
+                        if !combined_result.as_object().unwrap().is_empty() {
                             sqlx::query(
                                 "UPDATE data_sources 
                                  SET schema_info = $1 
                                  WHERE id = $2"
                             )
-                            .bind(&schema)
+                            .bind(&combined_result)
                             .bind(datasource_id)
                             .execute(&self.db_pool)
                             .await.ok();
-                            
-                            // Count tables for the success message
-                            if let Some(tables) = schema.get("tables").and_then(|t| t.as_object()) {
-                                schema_info = format!(" Found {} tables.", tables.len());
-                            }
                         }
                         
                         // Try to fetch and update table list
@@ -892,6 +917,29 @@ impl McpHandlers {
             Utc::now().format("%Y-%m-%d %H:%M:%S UTC"), 
             self.project_id
         );
+        
+        // Log all received parameters for debugging
+        eprintln!(
+            "[{}] [DEBUG] Received parameters: {}", 
+            Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+            serde_json::to_string_pretty(args).unwrap_or_else(|_| "<error>".to_string())
+        );
+        
+        // Extract context parameters if provided
+        let conversation_id = args.get("_conversation_id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let message_id = args.get("_message_id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        
+        eprintln!(
+            "[{}] [DEBUG] Tool context - conversation_id: {:?}, message_id: {:?}", 
+            Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+            conversation_id,
+            message_id
+        );
+        
         let datasource_id = args.get("datasource_id")
             .and_then(|v| v.as_str())
             .ok_or_else(|| JsonRpcError {
@@ -998,6 +1046,177 @@ impl McpHandlers {
             query_duration.as_millis()
         );
         
+        // Update tool_usages table based on context or parameter matching
+        eprintln!(
+            "[{}] [TIMING] MCP attempting to update tool_usage at {:?}", 
+            Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+            chrono::Utc::now()
+        );
+        
+        // Try to update tool_usage with retries (in case it's still being saved)
+        let mut update_result = None;
+        let max_retries = 3;
+        let retry_delay = std::time::Duration::from_millis(500);
+        
+        for attempt in 0..max_retries {
+            if attempt > 0 {
+                eprintln!(
+                    "[{}] [DEBUG] Retry attempt {} after {}ms delay", 
+                    Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+                    attempt,
+                    retry_delay.as_millis()
+                );
+                tokio::time::sleep(retry_delay).await;
+            }
+            
+            if let Some(ref msg_id) = message_id {
+                // We have exact message_id - use it for precise matching
+                eprintln!(
+                    "[{}] [TIMING] Using message_id {} for precise tool_usage matching (attempt {})", 
+                    Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+                    msg_id,
+                    attempt + 1
+                );
+                
+                update_result = sqlx::query(
+                    "UPDATE tool_usages 
+                     SET output = $1,
+                         execution_time_ms = $2
+                     WHERE message_id = $3
+                       AND (tool_name LIKE '%data_query%')
+                       AND (output->>'status' = 'executing' OR output IS NULL)
+                     ORDER BY created_at DESC
+                     LIMIT 1
+                     RETURNING id"
+                )
+                .bind(json!({
+                    "status": "success",
+                    "result": result,
+                    "datasource": name,
+                    "query": query,
+                    "row_count": result.get("rows").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0),
+                    "timestamp": chrono::Utc::now().to_rfc3339()
+                }))
+                .bind(query_duration.as_millis() as i32)
+                .bind(msg_id)
+                .fetch_optional(&self.db_pool)
+                .await.ok();
+                
+                if update_result.is_some() && update_result.as_ref().unwrap().is_some() {
+                    break; // Successfully found and updated
+                }
+            } else {
+                // No message_id, try parameter matching
+                break; // Don't retry for parameter matching
+            }
+        }
+        
+        if let Some(msg_id) = message_id {
+            let update_result = update_result.unwrap_or(None);
+            
+            match update_result {
+                Some(row) => {
+                    let id: uuid::Uuid = row.get("id");
+                    eprintln!(
+                        "[{}] [INFO] Successfully updated tool_usage {} with query results (rows: {})", 
+                        Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+                        id,
+                        result.get("rows").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0)
+                    );
+                },
+                None => {
+                    eprintln!(
+                        "[{}] [WARNING] No matching tool_usage found for message_id: {} after {} retries", 
+                        Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+                        msg_id,
+                        max_retries
+                    );
+                }
+            }
+        } else {
+            // Fallback to parameter matching if no message_id provided
+            eprintln!(
+                "[{}] [WARNING] No message_id provided, falling back to parameter matching with retries", 
+                Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
+            );
+            
+            // Build the parameters JSON to match against (excluding context params)
+            let expected_params = json!({
+                "datasource_id": datasource_id,
+                "query": query,
+                "limit": limit
+            });
+            
+            // Try with retries for parameter matching too
+            let mut update_result = None;
+            for attempt in 0..max_retries {
+                if attempt > 0 {
+                    eprintln!(
+                        "[{}] [DEBUG] Parameter matching retry attempt {} after {}ms delay", 
+                        Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+                        attempt,
+                        retry_delay.as_millis()
+                    );
+                    tokio::time::sleep(retry_delay).await;
+                }
+                
+                // Find and update based on parameter matching (less precise)
+                update_result = sqlx::query(
+                    "UPDATE tool_usages 
+                     SET output = $1,
+                         execution_time_ms = $2
+                     WHERE id = (
+                         SELECT id FROM tool_usages 
+                         WHERE (tool_name LIKE '%data_query%')
+                           AND (parameters @> $3)
+                           AND (output->>'status' = 'executing' OR output IS NULL)
+                           AND created_at > NOW() - INTERVAL '10 seconds'
+                         ORDER BY created_at DESC
+                         LIMIT 1
+                     )
+                     RETURNING id, message_id"
+                )
+                .bind(json!({
+                    "status": "success",
+                    "result": result,
+                    "datasource": name,
+                    "query": query,
+                    "row_count": result.get("rows").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0),
+                    "timestamp": chrono::Utc::now().to_rfc3339()
+                }))
+                .bind(query_duration.as_millis() as i32)
+                .bind(&expected_params)
+                .fetch_optional(&self.db_pool)
+                .await.ok();
+                
+                if update_result.is_some() && update_result.as_ref().unwrap().is_some() {
+                    break; // Successfully found and updated
+                }
+            }
+            
+            let update_result = update_result.unwrap_or(None);
+            
+            match update_result {
+                Some(row) => {
+                    let id: uuid::Uuid = row.get("id");
+                    let msg_id: String = row.get("message_id");
+                    eprintln!(
+                        "[{}] [INFO] Successfully updated tool_usage {} via parameter matching for message {}", 
+                        Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+                        id,
+                        msg_id
+                    );
+                },
+                None => {
+                    eprintln!(
+                        "[{}] [WARNING] No matching tool_usage found via parameter matching after {} retries", 
+                        Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+                        max_retries
+                    );
+                }
+            }
+        }
+        
         Ok(format!(
             "Query executed on '{}' (limited to {} rows):\n{}",
             name, limit, serde_json::to_string_pretty(&result).unwrap()
@@ -1044,9 +1263,18 @@ impl McpHandlers {
         let connection_config: Value = source.get("connection_config");
         let existing_schema: Option<Value> = source.get("schema_info");
         
-        // If we already have schema info, return intelligent summary
+        // Check if we have valid schema info with actual schema data
         if let Some(schema_info) = existing_schema {
-            return Ok(self.format_inspection_result(&name, &schema_info));
+            // Check if the schema_info contains the actual "schema" field with table definitions
+            if schema_info.get("schema").is_some() && schema_info.get("schema").unwrap().get("tables").is_some() {
+                return Ok(self.format_inspection_result(&name, &schema_info));
+            }
+            // If we have old format data without schema, continue to fetch fresh data
+            eprintln!(
+                "[{}] [INFO] Existing schema_info lacks 'schema' field, fetching fresh data for datasource '{}'", 
+                Utc::now().format("%Y-%m-%d %H:%M:%S UTC"), 
+                name
+            );
         }
         
         // No cached analysis - perform fresh inspection
@@ -1056,31 +1284,91 @@ impl McpHandlers {
                 format!("Failed to create connector: {}", e).into() 
             })?;
         
-        // Analyze the database
+        // Fetch the actual database schema
+        eprintln!(
+            "[{}] [INFO] Fetching schema for datasource '{}'", 
+            Utc::now().format("%Y-%m-%d %H:%M:%S UTC"), 
+            name
+        );
+        let schema = connector.fetch_schema()
+            .await
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { 
+                eprintln!(
+                    "[{}] [ERROR] Failed to fetch schema for '{}': {}", 
+                    Utc::now().format("%Y-%m-%d %H:%M:%S UTC"), 
+                    name,
+                    e
+                );
+                format!("Failed to fetch schema: {}", e).into() 
+            })?;
+        
+        eprintln!(
+            "[{}] [DEBUG] Schema fetched, tables count: {}", 
+            Utc::now().format("%Y-%m-%d %H:%M:%S UTC"), 
+            schema.get("tables").and_then(|t| t.as_object()).map(|t| t.len()).unwrap_or(0)
+        );
+        
+        // Analyze the database for statistics
+        eprintln!(
+            "[{}] [INFO] Analyzing database for datasource '{}'", 
+            Utc::now().format("%Y-%m-%d %H:%M:%S UTC"), 
+            name
+        );
         let analysis = connector.analyze_database()
             .await
             .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { 
+                eprintln!(
+                    "[{}] [ERROR] Failed to analyze database for '{}': {}", 
+                    Utc::now().format("%Y-%m-%d %H:%M:%S UTC"), 
+                    name,
+                    e
+                );
                 format!("Failed to analyze database: {}", e).into() 
             })?;
         
-        // Store analysis in schema_info column
-        sqlx::query(
+        // Combine schema and analysis into a comprehensive result
+        let mut combined_result = analysis.clone();
+        if let Some(obj) = combined_result.as_object_mut() {
+            obj.insert("schema".to_string(), schema);
+        }
+        
+        eprintln!(
+            "[{}] [INFO] Storing combined schema and analysis for datasource '{}'", 
+            Utc::now().format("%Y-%m-%d %H:%M:%S UTC"), 
+            name
+        );
+        
+        // Store combined result in schema_info column
+        let update_result = sqlx::query(
             "UPDATE data_sources 
              SET schema_info = $1, 
                  table_list = $2,
                  last_tested_at = NOW()
              WHERE id = $3"
         )
-        .bind(&analysis)
-        .bind(analysis.get("table_names").cloned())
+        .bind(&combined_result)
+        .bind(combined_result.get("table_names").cloned())
         .bind(datasource_id)
         .execute(&self.db_pool)
         .await
         .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { 
+            eprintln!(
+                "[{}] [ERROR] Failed to store schema for '{}': {}", 
+                Utc::now().format("%Y-%m-%d %H:%M:%S UTC"), 
+                name,
+                e
+            );
             format!("Failed to store analysis: {}", e).into() 
         })?;
         
-        Ok(self.format_inspection_result(&name, &analysis))
+        eprintln!(
+            "[{}] [SUCCESS] Schema and analysis stored for datasource '{}', {} rows affected", 
+            Utc::now().format("%Y-%m-%d %H:%M:%S UTC"), 
+            name,
+            update_result.rows_affected()
+        );
+        
+        Ok(self.format_inspection_result(&name, &combined_result))
     }
     
     async fn get_schema(&self, args: &serde_json::Map<String, Value>) -> Result<String, JsonRpcError> {
@@ -1304,6 +1592,9 @@ impl McpHandlers {
             .as_u64()
             .unwrap_or(0);
         
+        // Check if we have the actual schema
+        let has_schema = analysis.get("schema").is_some();
+        
         // Determine strategy based on table count
         let strategy = if table_count <= 20 {
             "full"
@@ -1316,14 +1607,24 @@ impl McpHandlers {
         // Build response based on strategy
         match strategy {
             "full" => {
-                // For small databases, include full schema
-                format!(
-                    "Database '{}' inspection (Full Schema - {} tables, {}):\n\n{}",
-                    name,
-                    table_count,
-                    total_size,
-                    serde_json::to_string_pretty(&analysis).unwrap()
-                )
+                // For small databases, include full schema if available
+                if has_schema {
+                    format!(
+                        "Database '{}' inspection (Full Schema - {} tables, {}):\n\n{}",
+                        name,
+                        table_count,
+                        total_size,
+                        serde_json::to_string_pretty(&analysis).unwrap()
+                    )
+                } else {
+                    format!(
+                        "Database '{}' inspection (Analysis - {} tables, {}):\n\n{}",
+                        name,
+                        table_count,
+                        total_size,
+                        serde_json::to_string_pretty(&analysis).unwrap()
+                    )
+                }
             },
             "summary" => {
                 // For medium databases, show key tables

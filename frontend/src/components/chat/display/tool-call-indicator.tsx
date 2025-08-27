@@ -48,11 +48,12 @@ export function ToolCallIndicator({
             {tools.length === 1 ? (
               <>
                 {firstTool && messageId ? (
-                  <ToolUsagePopover
-                    messageId={messageId}
-                    toolName={tools[0]}
-                  >
-                    <div className={cn("flex gap-1 items-center cursor-pointer hover:opacity-80 transition-opacity")}>
+                  <ToolUsagePopover messageId={messageId} toolName={tools[0]}>
+                    <div
+                      className={cn(
+                        "flex gap-1 items-center cursor-pointer hover:opacity-80 transition-opacity"
+                      )}
+                    >
                       <Icon />
                       {firstTool?.done || firstTool.friendlyName}
                     </div>

@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use chrono::Utc;
 use uuid::Uuid;
 use crate::models::file_upload::FileUploadResponse;
+use crate::models::tool_usage::ToolUsage;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
@@ -13,6 +14,7 @@ pub struct Message {
     pub clay_tools_used: Option<Vec<String>>,
     pub processing_time_ms: Option<i64>,
     pub file_attachments: Option<Vec<FileUploadResponse>>,
+    pub tool_usages: Option<Vec<ToolUsage>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -33,6 +35,7 @@ impl Message {
             clay_tools_used: None,
             processing_time_ms: None,
             file_attachments: None,
+            tool_usages: None,
         }
     }
 
@@ -45,6 +48,7 @@ impl Message {
             clay_tools_used: None,
             processing_time_ms: None,
             file_attachments: None,
+            tool_usages: None,
         }
     }
 

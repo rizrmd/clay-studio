@@ -64,6 +64,7 @@ export function useChat(projectId: string, conversationId?: string) {
     conversationStore.currentProjectId = projectId;
   }, [projectId]);
 
+
   // Handle conversation switching
   useEffect(() => {
     logger.debug("useChat: Conversation switch check:", {
@@ -77,6 +78,11 @@ export function useChat(projectId: string, conversationId?: string) {
         "useChat: SWITCHING conversation to:",
         currentConversationId
       );
+      
+      // First, ensure the active conversation is properly set
+      // This is critical for preventing message bleeding
+      conversationStore.activeConversationId = currentConversationId;
+      
       // Switch conversation atomically
       conversationManager.switchConversation(currentConversationId);
 
@@ -112,6 +118,13 @@ export function useChat(projectId: string, conversationId?: string) {
             "useChat: Skipping loadMessages for streaming conversation transition from new to:",
             currentConversationId
           );
+        }
+      } else {
+        // For new conversations, ensure we start with a clean state
+        const state = conversationStore.conversations[currentConversationId];
+        if (state && state.messages.length > 0) {
+          logger.warn("useChat: Clearing stale messages from new conversation");
+          conversationManager.clearConversation(currentConversationId);
         }
       }
 

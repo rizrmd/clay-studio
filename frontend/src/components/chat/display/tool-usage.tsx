@@ -5,12 +5,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
-import {
-  Loader2,
-  Clock,
-  AlertCircle,
-  CheckCircle,
-} from "lucide-react";
+import { Loader2, Clock, AlertCircle, CheckCircle } from "lucide-react";
 import { useToolUsage } from "@/hooks/use-tool-usage";
 import { ToolUsage } from "@/types/chat";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -45,61 +40,76 @@ export function ToolUsagePopover({
     if (value === null || value === undefined) {
       return <span className="text-muted-foreground italic">null</span>;
     }
-    
+
     if (typeof value === "boolean") {
-      return <span className={value ? "text-green-600" : "text-red-600"}>{String(value)}</span>;
+      return (
+        <span className={value ? "text-green-600" : "text-red-600"}>
+          {String(value)}
+        </span>
+      );
     }
-    
+
     if (typeof value === "number") {
       return <span className="text-blue-600">{String(value)}</span>;
     }
-    
+
     if (typeof value === "string") {
       return <span>{value}</span>;
     }
-    
+
     if (Array.isArray(value)) {
       // For small arrays, show inline
-      if (value.length <= 3 && value.every(v => typeof v !== 'object' || v === null)) {
-        return <span>[{value.map(v => String(v)).join(', ')}]</span>;
+      if (
+        value.length <= 3 &&
+        value.every((v) => typeof v !== "object" || v === null)
+      ) {
+        return <span>[{value.map((v) => String(v)).join(", ")}]</span>;
       }
-      
+
       // For larger arrays or arrays with objects, render as nested table
-      if (value.length > 0 && typeof value[0] === 'object' && value[0] !== null) {
+      if (
+        value.length > 0 &&
+        typeof value[0] === "object" &&
+        value[0] !== null
+      ) {
         return (
           <div className="mt-2">
-            <div className="text-xs text-muted-foreground mb-1">Array ({value.length} items):</div>
+            <div className="text-xs text-muted-foreground mb-1">
+              Array ({value.length} items):
+            </div>
             {renderJsonAsTable(value)}
           </div>
         );
       }
-      
+
       return (
         <div className="max-h-20 overflow-y-auto">
           <pre className="text-xs">{JSON.stringify(value, null, 2)}</pre>
         </div>
       );
     }
-    
+
     if (typeof value === "object") {
       // For small objects, show key count
       const keyCount = Object.keys(value).length;
       if (keyCount <= 5) {
         return (
           <div className="mt-2">
-            <div className="text-xs text-muted-foreground mb-1">Object ({keyCount} keys):</div>
+            <div className="text-xs text-muted-foreground mb-1">
+              Object ({keyCount} keys):
+            </div>
             {renderJsonAsTable(value)}
           </div>
         );
       }
-      
+
       return (
         <div className="max-h-20 overflow-y-auto">
           <pre className="text-xs">{JSON.stringify(value, null, 2)}</pre>
         </div>
       );
     }
-    
+
     return <span>{String(value)}</span>;
   };
 
@@ -118,13 +128,13 @@ export function ToolUsagePopover({
       ) {
         // Get all unique keys from all objects
         const allKeys = new Set<string>();
-        data.forEach(item => {
-          if (typeof item === 'object' && item !== null) {
-            Object.keys(item).forEach(key => allKeys.add(key));
+        data.forEach((item) => {
+          if (typeof item === "object" && item !== null) {
+            Object.keys(item).forEach((key) => allKeys.add(key));
           }
         });
         const keys = Array.from(allKeys);
-        
+
         return (
           <div className="overflow-x-auto">
             <table className="min-w-full text-xs border border-border rounded bg-white">
@@ -196,9 +206,40 @@ export function ToolUsagePopover({
   };
 
   const renderOutput = (output: any) => {
-    if (!output) return <span className="text-muted-foreground">No output</span>;
+    if (!output)
+      return <span className="text-muted-foreground">No output</span>;
 
     try {
+      // Handle new status-wrapped format
+      if (typeof output === "object" && output.status) {
+        const status = output.status;
+        const result = output.result;
+
+        if (status === "executing") {
+          return (
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>Executing...</span>
+            </div>
+          );
+        }
+
+        if (status === "success" && result) {
+          return renderJsonAsTable(result);
+        }
+
+        if (status === "completed") {
+          return (
+            <div className="text-muted-foreground text-[10px] font-mono overflow-auto">
+              {typeof result === "string" ? result : "Tool execution completed"}
+            </div>
+          );
+        }
+
+        // Fallback to showing the whole object if status format is unexpected
+        return renderJsonAsTable(output);
+      }
+
       if (typeof output === "string") {
         // Try to parse as JSON first
         try {
@@ -214,7 +255,7 @@ export function ToolUsagePopover({
         }
       }
 
-      // Handle objects
+      // Handle objects (legacy format)
       if (typeof output === "object") {
         return renderJsonAsTable(output);
       }
@@ -245,7 +286,10 @@ export function ToolUsagePopover({
   return (
     <Popover open={isOpen} onOpenChange={setIsOpen}>
       <PopoverTrigger asChild>{children}</PopoverTrigger>
-      <PopoverContent className="w-[500px] max-h-[600px] p-0" align="start">
+      <PopoverContent
+        className="w-[500px] max-h-[600px] p-0"
+        align="start"
+      >
         <div className="flex items-center justify-between border-b px-4 py-3">
           <div className="flex items-center gap-2">
             <Icon className="h-4 w-4 text-muted-foreground" />
@@ -299,11 +343,14 @@ export function ToolUsagePopover({
 
                 {/* Output Section */}
                 <div className="space-y-2">
-                  <h4 className="text-sm font-medium text-muted-foreground">
-                    Output
+                  <h4 className="text-sm font-medium text-muted-foreground items-center flex gap-2">
+                    Output{" "}
+                    {toolUsage.output?.status === "completed" && (
+                      <CheckCircle className="h-4 w-4 inline mr-2 text-green-600" />
+                    )}
                   </h4>
-                  <div className="bg-muted/50 rounded-lg p-3 max-h-60 overflow-y-auto">
-{renderOutput(toolUsage.output)}
+                  <div className="bg-muted/50 rounded-lg p-3 max-h-60 overflow-auto">
+                    {renderOutput(toolUsage.output)}
                   </div>
                 </div>
 
@@ -313,15 +360,18 @@ export function ToolUsagePopover({
                   <div className="flex items-center justify-between text-xs text-muted-foreground pt-2 border-t">
                     {toolUsage.createdAt && (
                       <span>
-                        {new Date(toolUsage.createdAt).toLocaleString(undefined, { 
-                          hour12: false,
-                          year: 'numeric',
-                          month: '2-digit',
-                          day: '2-digit',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                          second: '2-digit'
-                        })}
+                        {new Date(toolUsage.createdAt).toLocaleString(
+                          undefined,
+                          {
+                            hour12: false,
+                            year: "numeric",
+                            month: "2-digit",
+                            day: "2-digit",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                            second: "2-digit",
+                          }
+                        )}
                       </span>
                     )}
                     {toolUsage.execution_time_ms !== undefined && (

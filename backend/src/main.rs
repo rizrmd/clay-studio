@@ -12,7 +12,7 @@ use std::time::Duration;
 use tokio::signal;
 
 use crate::utils::{Config, AppState};
-use crate::api::{auth, chat, clients, conversations, conversations_forget, projects, upload};
+use crate::api::{auth, chat, clients, conversations, conversations_forget, projects, tool_usage, upload};
 use crate::utils::middleware::{inject_state, auth::auth_required};
 use crate::core::sessions::PostgresSessionStore;
 
@@ -224,6 +224,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .get(conversations_forget::get_forgotten_status)
         )
         .push(
+            Router::with_path("/messages/{message_id}/tool-usages")
+                .get(tool_usage::get_message_tool_usages)
+        )
+        .push(
+            Router::with_path("/messages/{message_id}/tool-usage/{tool_name}")
+                .get(tool_usage::get_tool_usage_by_name)
+        )
+        .push(
             Router::with_path("/conversations/{conversation_id}/context")
                 .get(conversations::get_conversation_context)
         )
@@ -232,6 +240,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .get(conversations::get_conversation)
                 .put(conversations::update_conversation)
                 .delete(conversations::delete_conversation)
+        )
+        .push(
+            Router::with_path("/conversations/new-from-message")
+                .post(conversations::create_conversation_from_message)
         )
         .push(
             Router::with_path("/conversations")

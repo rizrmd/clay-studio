@@ -3,7 +3,7 @@ use crate::models::*;
 use crate::utils::AppState;
 use crate::utils::AppError;
 use crate::utils::claude_md_template;
-use crate::core::projects::{ProjectManager, ProjectInfo};
+use crate::core::projects::{ProjectManager, ProjectInfo, ProjectInfoWithStats};
 use crate::core::tools::ToolApplicabilityChecker;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -247,10 +247,11 @@ pub async fn create_project(
     // Insert project into database - PostgreSQL will generate the UUID as string
     let project_id = Uuid::new_v4().to_string();
     let project_row = sqlx::query(
-        "INSERT INTO projects (id, name) VALUES ($1, $2) RETURNING id, name, created_at, updated_at"
+        "INSERT INTO projects (id, name, client_id) VALUES ($1, $2, $3) RETURNING id, name, created_at, updated_at"
     )
     .bind(&project_id)
     .bind(&create_req.name)
+    .bind(&client_id)
     .fetch_one(&state.db_pool)
     .await
     .map_err(|e| AppError::InternalServerError(format!("Failed to create project: {}", e)))?;
@@ -309,7 +310,7 @@ pub async fn list_projects(
         id
     } else {
         // Return empty array if no client
-        res.render(Json(Vec::<ProjectInfo>::new()));
+        res.render(Json(Vec::<ProjectInfoWithStats>::new()));
         return Ok(());
     };
     
@@ -320,12 +321,32 @@ pub async fn list_projects(
         let created_at: chrono::DateTime<chrono::Utc> = row.get("created_at");
         let updated_at: chrono::DateTime<chrono::Utc> = row.get("updated_at");
         
-        projects.push(ProjectInfo {
+        // Get conversation count for this project
+        let conversation_count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM conversations WHERE project_id = $1 AND is_forgotten = false"
+        )
+        .bind(&project_id)
+        .fetch_one(&state.db_pool)
+        .await
+        .unwrap_or(0);
+        
+        // Get datasource count for this project
+        let datasource_count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM data_sources WHERE project_id = $1 AND is_active = true"
+        )
+        .bind(&project_id)
+        .fetch_one(&state.db_pool)
+        .await
+        .unwrap_or(0);
+        
+        projects.push(ProjectInfoWithStats {
             id: project_id,
             name: project_name,
             created_at: created_at.to_rfc3339(),
             updated_at: updated_at.to_rfc3339(),
             client_id,
+            conversation_count: Some(conversation_count as i32),
+            datasource_count: Some(datasource_count as i32),
         });
     }
     

@@ -184,6 +184,21 @@ impl ClaudeSDK {
                 .spawn()
                 .expect("Failed to spawn Claude CLI process");
             
+            // Also capture stderr for debugging
+            if let Some(stderr) = cmd.stderr.take() {
+                let _tx_stderr = tx.clone();
+                tokio::spawn(async move {
+                    use tokio::io::{BufReader, AsyncBufReadExt};
+                    let reader = BufReader::new(stderr);
+                    let mut lines = reader.lines();
+                    
+                    while let Ok(Some(line)) = lines.next_line().await {
+                        // Log stderr for debugging
+                        tracing::debug!("[CLAUDE_STDERR] {}", line);
+                    }
+                });
+            }
+            
             if let Some(stdout) = cmd.stdout.take() {
                 let tx_clone = tx.clone();
                 tokio::spawn(async move {
@@ -191,15 +206,35 @@ impl ClaudeSDK {
                     let reader = BufReader::new(stdout);
                     let mut lines = reader.lines();
                     
+                    let mut line_count = 0;
                     while let Ok(Some(line)) = lines.next_line().await {
+                        line_count += 1;
+                        tracing::info!("[CLAUDE_STDOUT] Line {}: {}", line_count, line);
+                        
                         if !line.trim().is_empty() {
+                            // Always send raw line as Progress for debugging
+                            let _ = tx_clone.send(ClaudeMessage::Progress {
+                                content: line.clone()
+                            }).await;
                             
                             // Try to parse the line as JSON to determine message type
                             if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
-                                // Check if this is the final assistant message
+                                // Log ALL message types to understand what Claude sends
                                 if let Some(msg_type) = json.get("type").and_then(|v| v.as_str()) {
-                                    tracing::debug!("Received JSON message type: {}", msg_type);
-                                    if msg_type == "assistant" {
+                                    tracing::info!("[CLAUDE_MSG] Received message type '{}'", msg_type);
+                                    
+                                    // Handle tool_result messages
+                                    if msg_type == "tool_result" {
+                                        if let (Some(tool_name), Some(result)) = 
+                                            (json.get("tool_name").and_then(|v| v.as_str()),
+                                             json.get("result")) {
+                                            tracing::info!("Detected tool result for {}: {:?}", tool_name, result);
+                                            let _ = tx_clone.send(ClaudeMessage::ToolResult {
+                                                tool: tool_name.to_string(),
+                                                result: result.clone(),
+                                            }).await;
+                                        }
+                                    } else if msg_type == "assistant" {
                                         // This is the assistant message with content
                                         if let Some(message) = json.get("message") {
                                             if let Some(content) = message.get("content") {
@@ -210,14 +245,16 @@ impl ClaudeSDK {
                                                             // Check for tool_use blocks
                                                             if let Some(block_type) = block.get("type").and_then(|t| t.as_str()) {
                                                                 if block_type == "tool_use" {
-                                                                    // Extract tool name and send ToolUse event
+                                                                    // Extract tool name, tool_use_id and send ToolUse event
                                                                     if let Some(name) = block.get("name").and_then(|n| n.as_str()) {
-                                                                        tracing::info!("Detected tool usage: {}", name);
+                                                                        let tool_use_id = block.get("id").and_then(|id| id.as_str()).map(|s| s.to_string());
+                                                                        tracing::info!("Detected tool usage: {} with id: {:?}", name, tool_use_id);
                                                                         let args = block.get("input").cloned().unwrap_or(json!({}));
                                                                         tracing::info!("Sending ToolUse event: {}", name);
                                                                         let _ = tx_clone.send(ClaudeMessage::ToolUse {
                                                                             tool: name.to_string(),
                                                                             args,
+                                                                            tool_use_id,
                                                                         }).await;
                                                                     }
                                                                 }
@@ -252,6 +289,68 @@ impl ClaudeSDK {
                                                 }
                                             }
                                         }
+                                    } else if msg_type == "user" {
+                                        // Handle user messages that contain tool_result content
+                                        if let Some(message) = json.get("message") {
+                                            if let Some(content) = message.get("content") {
+                                                if content.is_array() {
+                                                    if let Some(blocks) = content.as_array() {
+                                                        for block in blocks {
+                                                            if let Some(block_type) = block.get("type").and_then(|t| t.as_str()) {
+                                                                if block_type == "tool_result" {
+                                                                    // Extract tool_use_id and content
+                                                                    if let Some(tool_use_id) = block.get("tool_use_id").and_then(|id| id.as_str()) {
+                                                                        // Try to extract the tool name from the ID or content
+                                                                        let tool_name = if let Some(content_array) = block.get("content").and_then(|c| c.as_array()) {
+                                                                            // Extract tool name from the content if possible
+                                                                            if let Some(first_content) = content_array.first() {
+                                                                                if let Some(text) = first_content.get("text").and_then(|t| t.as_str()) {
+                                                                                    // Try to infer tool name from the content
+                                                                                    if text.contains("Query executed on") {
+                                                                                        "mcp__data-analysis__data_query"
+                                                                                    } else if text.contains("Data sources") {
+                                                                                        "mcp__data-analysis__datasource_list"
+                                                                                    } else if text.contains("Database statistics") {
+                                                                                        "mcp__data-analysis__schema_stats"
+                                                                                    } else if text.contains("Database compatibility") || text.contains("MCP Server Error") {
+                                                                                        "mcp__data-analysis__datasource_inspect"
+                                                                                    } else if text.contains("Connection successful") {
+                                                                                        "mcp__data-analysis__datasource_test"
+                                                                                    } else if text.contains("Data source") && text.contains("added successfully") {
+                                                                                        "mcp__data-analysis__datasource_add"
+                                                                                    } else if text.contains("Tables matching") || text.contains("Schema for table") {
+                                                                                        "mcp__data-analysis__schema_search"
+                                                                                    } else if text.contains("columns matching") {
+                                                                                        "mcp__data-analysis__schema_get"
+                                                                                    } else {
+                                                                                        // Use tool_use_id as fallback
+                                                                                        tool_use_id
+                                                                                    }
+                                                                                } else {
+                                                                                    tool_use_id
+                                                                                }
+                                                                            } else {
+                                                                                tool_use_id
+                                                                            }
+                                                                        } else {
+                                                                            tool_use_id
+                                                                        };
+                                                                        
+                                                                        tracing::info!("Detected tool result in user message with tool_use_id: {} -> mapped to tool: {}", tool_use_id, tool_name);
+                                                                        
+                                                                        // Send both the tool_use_id and the inferred tool name
+                                                                        let _ = tx_clone.send(ClaudeMessage::ToolResult {
+                                                                            tool: tool_use_id.to_string(), // Use the tool_use_id as the tool identifier
+                                                                            result: block.get("content").cloned().unwrap_or(json!([])),
+                                                                        }).await;
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
                                     } else if msg_type == "result" {
                                         // Also handle the explicit result message
                                         if let Some(result) = json.get("result").and_then(|v| v.as_str()) {
@@ -264,13 +363,52 @@ impl ClaudeSDK {
                                     } else if msg_type == "tool_call" || msg_type == "tool_execution" {
                                         // Handle standalone tool execution messages
                                         if let Some(tool_name) = json.get("tool").and_then(|t| t.as_str()) {
-                                            tracing::info!("Detected standalone tool call: {}", tool_name);
+                                            let tool_use_id = json.get("id").and_then(|id| id.as_str()).map(|s| s.to_string());
+                                            tracing::info!("Detected standalone tool call: {} with id: {:?}", tool_name, tool_use_id);
                                             let args = json.get("arguments").cloned().unwrap_or(json!({}));
                                             tracing::info!("Sending standalone ToolUse event: {}", tool_name);
                                             let _ = tx_clone.send(ClaudeMessage::ToolUse {
                                                 tool: tool_name.to_string(),
                                                 args,
+                                                tool_use_id,
                                             }).await;
+                                        }
+                                    }
+                                }
+                                
+                                // Check for JSON-RPC result patterns (MCP server responses)
+                                if let Some(jsonrpc) = json.get("jsonrpc") {
+                                    if jsonrpc.as_str() == Some("2.0") {
+                                        if let Some(result) = json.get("result") {
+                                            if let Some(content) = result.get("content") {
+                                                if content.is_array() {
+                                                    // This is definitely an MCP tool result
+                                                    // Infer tool name from content pattern
+                                                    let tool_name = if let Some(first_content) = content.as_array()
+                                                        .and_then(|arr| arr.first()) 
+                                                        .and_then(|item| item.get("text"))
+                                                        .and_then(|text| text.as_str()) {
+                                                        
+                                                        if first_content.contains("Data sources") {
+                                                            "mcp__data-analysis__datasource_list"
+                                                        } else if first_content.contains("Database statistics") {
+                                                            "mcp__data-analysis__schema_stats"
+                                                        } else if first_content.contains("Database compatibility") || first_content.contains("MCP Server Error") {
+                                                            "mcp__data-analysis__datasource_inspect"
+                                                        } else {
+                                                            "mcp_tool"
+                                                        }
+                                                    } else {
+                                                        "mcp_tool"
+                                                    };
+                                                    
+                                                    tracing::info!("Detected MCP JSON-RPC tool result for: {}", tool_name);
+                                                    let _ = tx_clone.send(ClaudeMessage::ToolResult {
+                                                        tool: tool_name.to_string(),
+                                                        result: result.clone(),
+                                                    }).await;
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -282,6 +420,8 @@ impl ClaudeSDK {
                             }).await;
                         }
                     }
+                    
+                    tracing::info!("[CLAUDE_STDOUT] Stream ended after {} lines", line_count);
                 });
             }
             

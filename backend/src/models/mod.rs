@@ -8,6 +8,7 @@ pub mod client;
 pub mod client_config;
 pub mod session;
 pub mod file_upload;
+pub mod tool_usage;
 
 pub use message::*;
 pub use conversation::*;
@@ -24,3 +25,5 @@ pub use client_config::*;
 pub use session::*;
 #[allow(unused_imports)]
 pub use file_upload::*;
+#[allow(unused_imports)]
+pub use tool_usage::*;

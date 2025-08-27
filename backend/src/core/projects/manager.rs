@@ -15,6 +15,17 @@ pub struct ProjectInfo {
     pub client_id: Uuid,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectInfoWithStats {
+    pub id: String,
+    pub name: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub client_id: Uuid,
+    pub conversation_count: Option<i32>,
+    pub datasource_count: Option<i32>,
+}
+
 pub struct ProjectManager {
     clients_base_dir: PathBuf,
 }
