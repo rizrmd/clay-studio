@@ -20,6 +20,8 @@ datasource_list
 
 # IMPORTANT: always check existing datasource before adding new one. 
 # VERY IMPORTANT: prevent duplicated datasource.
+# VERY IMPORTANT: prevent re-inspecting recently inspected datasource. 
+
 
 # For each datasource, inspect its structure
 # This gives you an intelligent summary based on database size

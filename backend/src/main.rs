@@ -275,17 +275,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Static file serving for frontend
     let static_path = std::env::var("STATIC_FILES_PATH")
-        .unwrap_or_else(|_| "./frontend/dist".to_string());
+        .unwrap_or_else(|_| "/Users/riz/Developer/clay-studio/frontend/dist".to_string());
     
-    // Configure static service with SPA fallback
-    let static_service = StaticDir::new(&static_path)
-        .defaults("index.html")
+    tracing::info!("Static files path: {}", static_path);
+    tracing::info!("STATIC_FILES_PATH env var: {:?}", std::env::var("STATIC_FILES_PATH"));
+    
+    // List files in static directory for debugging
+    if let Ok(entries) = std::fs::read_dir(&static_path) {
+        tracing::info!("Files in static directory:");
+        for entry in entries {
+            if let Ok(entry) = entry {
+                tracing::info!("  - {:?}", entry.path());
+            }
+        }
+    }
+    
+    // Configure static service for assets (no fallback)
+    let assets_service = StaticDir::new(&static_path)
+        .include_dot_files(false)
         .fallback("index.html");
     
-    // Main router - API routes first, then static files as fallback
+    
+    // Main router - Assets first (most specific), then API, then SPA fallback
     let router = Router::new()
         .push(Router::with_path("/api").push(api_router))
-        .push(Router::new().get(static_service));
+        .push(Router::with_path("{**path}").get(assets_service));
 
     // Bind with retry logic and socket reuse
     let acceptor = bind_with_retry(&config.server_address, 5).await;

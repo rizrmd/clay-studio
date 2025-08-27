@@ -62,6 +62,7 @@ RUN groupadd -r clayuser && \
 
 # Copy the built artifacts from the builder stages
 COPY --from=backend-builder /app/target/release/clay-studio-backend /app/clay-studio-backend
+COPY --from=backend-builder /app/target/release/mcp_server /app/mcp_server
 COPY --from=frontend-builder /app/dist /app/frontend/dist
 
 # Create .clients directory for client data with proper permissions

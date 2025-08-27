@@ -53,21 +53,42 @@ impl ClaudeSDK {
                 let _ = std::fs::create_dir_all(&claude_dir);
             }
             
-            // Prepare MCP server path
+            // Check if we're in Docker/production environment
+            let is_production = std::env::var("STATIC_FILES_PATH").unwrap_or_default().contains("/app/frontend")
+                || std::env::var("HOME").unwrap_or_default() == "/app"
+                || PathBuf::from("/app/clay-studio-backend").exists();
+            
+            // Prepare MCP server path based on environment
             let mcp_server_path = {
-                let release_path = std::env::current_dir()
-                    .map(|p| p.join("target/release/mcp_server"))
-                    .unwrap_or_else(|_| PathBuf::from("target/release/mcp_server"));
-                let debug_path = std::env::current_dir()
-                    .map(|p| p.join("target/debug/mcp_server"))
-                    .unwrap_or_else(|_| PathBuf::from("target/debug/mcp_server"));
                 
-                if debug_path.exists() {
-                    debug_path.canonicalize().unwrap_or(debug_path)
-                } else if release_path.exists() {
-                    release_path.canonicalize().unwrap_or(release_path)
+                if is_production {
+                    // Production/Docker environment - use fixed path
+                    PathBuf::from("/app/mcp_server")
                 } else {
-                    PathBuf::from("/usr/local/bin/mcp_server")
+                    // Development environment - search for executable
+                    let current_dir = std::env::current_dir()
+                        .unwrap_or_else(|_| PathBuf::from("."));
+                    
+                    // Try backend directory first (if we're in project root)
+                    let backend_release = current_dir.join("backend/target/release/mcp_server");
+                    let backend_debug = current_dir.join("backend/target/debug/mcp_server");
+                    
+                    // Try from backend directory (if we're inside backend)
+                    let release_path = current_dir.join("target/release/mcp_server");
+                    let debug_path = current_dir.join("target/debug/mcp_server");
+                    
+                    if backend_debug.exists() {
+                        backend_debug.canonicalize().unwrap_or(backend_debug)
+                    } else if backend_release.exists() {
+                        backend_release.canonicalize().unwrap_or(backend_release)
+                    } else if debug_path.exists() {
+                        debug_path.canonicalize().unwrap_or(debug_path)
+                    } else if release_path.exists() {
+                        release_path.canonicalize().unwrap_or(release_path)
+                    } else {
+                        // Fallback to relative path from project root
+                        PathBuf::from("backend/target/debug/mcp_server")
+                    }
                 }
             };
             
@@ -92,6 +113,8 @@ impl ClaudeSDK {
             // Write the MCP servers configuration
             let _ = std::fs::write(&mcp_servers_file, serde_json::to_string_pretty(&mcp_servers).unwrap_or_default());
             info!("Created MCP servers configuration for project {} at {:?}", project_id, mcp_servers_file);
+            info!("MCP server executable path: {:?}", mcp_server_path);
+            info!("Environment detection - Production: {}", is_production);
         }
     }
     
