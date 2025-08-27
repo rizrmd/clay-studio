@@ -148,11 +148,24 @@ jobs:
         CMD ["./clay-studio-backend"]
         EOF
     
+    - name: Verify build context
+      run: |
+        echo "=== Current directory ==="
+        pwd
+        echo "=== Directory structure ==="
+        ls -la
+        echo "=== Frontend directory ==="
+        ls -la frontend/
+        echo "=== Backend directory ==="
+        ls -la backend/
+        echo "=== Dockerfile.minimal content ==="
+        cat Dockerfile.minimal
+    
     - name: Build and push Docker image
       uses: docker/build-push-action@v5
       with:
-        context: .
-        file: Dockerfile.minimal
+        context: ${{ github.workspace }}
+        file: ${{ github.workspace }}/Dockerfile.minimal
         push: ${{ github.event_name != 'pull_request' }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
