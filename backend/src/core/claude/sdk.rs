@@ -183,38 +183,85 @@ impl ClaudeSDK {
         let claude_cli_path_clone2 = claude_cli_path.clone();
         
         tokio::spawn(async move {
-            let mut cmd_builder = TokioCommand::new(&bun_executable);
-            cmd_builder
-                .arg(&claude_cli_path_clone);
+            // Check if we're running as root AND in production
+            let is_root = unsafe { libc::getuid() } == 0;
+            let is_production = std::env::var("RUST_ENV").unwrap_or_default() == "production";
+            let use_su_workaround = is_root && is_production;
             
-            // Add MCP config if we have a project directory - must come before --print
-            if let Some(ref project_dir) = _project_dir {
-                let mcp_config_path = project_dir.join(".claude/mcp_servers.json");
-                if mcp_config_path.exists() {
-                    cmd_builder
-                        .arg("--mcp-config")
-                        .arg(".claude/mcp_servers.json");
+            let mut cmd_builder = if use_su_workaround {
+                tracing::warn!("Production environment detected running as root, using su workaround for Claude CLI");
+                
+                // First ensure /app/.clients is accessible to nobody user
+                let _ = std::process::Command::new("chown")
+                    .args(["-R", "nobody:nogroup", "/app/.clients"])
+                    .output();
+                
+                // Build the full command as a string for su
+                let mcp_arg = if let Some(ref project_dir) = _project_dir {
+                    let mcp_config_path = project_dir.join(".claude/mcp_servers.json");
+                    if mcp_config_path.exists() {
+                        format!(" --mcp-config .claude/mcp_servers.json")
+                    } else {
+                        String::new()
+                    }
+                } else {
+                    String::new()
+                };
+                
+                let full_command = format!(
+                    "cd '{}' && HOME='{}' CLAUDE_CODE_OAUTH_TOKEN='{}' {} {}{} -p --verbose --dangerously-skip-permissions --output-format stream-json '{}'",
+                    working_dir_clone.display(),
+                    working_dir_clone.display(),
+                    oauth_token,
+                    bun_executable.display(),
+                    claude_cli_path_clone.display(),
+                    mcp_arg,
+                    prompt.replace("'", "'\\''")
+                );
+                
+                // Use su to run as nobody user
+                let mut su_cmd = TokioCommand::new("su");
+                su_cmd
+                    .arg("-s")
+                    .arg("/bin/sh")
+                    .arg("nobody")
+                    .arg("-c")
+                    .arg(&full_command);
+                su_cmd
+            } else {
+                // Normal execution path for non-root or development
+                let mut cmd = TokioCommand::new(&bun_executable);
+                cmd.arg(&claude_cli_path_clone);
+                
+                // Add MCP config if we have a project directory - must come before --print
+                if let Some(ref project_dir) = _project_dir {
+                    let mcp_config_path = project_dir.join(".claude/mcp_servers.json");
+                    if mcp_config_path.exists() {
+                        cmd.arg("--mcp-config")
+                           .arg(".claude/mcp_servers.json");
+                    }
                 }
-            }
+                
+                cmd.arg("-p")
+                   .arg("--verbose")
+                   .arg("--dangerously-skip-permissions")
+                   .arg("--output-format")
+                   .arg("stream-json")
+                   .arg(&prompt)
+                   .current_dir(&working_dir_clone)
+                   .env("HOME", &working_dir_clone)
+                   .env("CLAUDE_CODE_OAUTH_TOKEN", oauth_token);
+                cmd
+            };
             
+            // Set stdio for both paths
             cmd_builder
-                .arg("-p")
-                .arg("--verbose")
-                .arg("--dangerously-skip-permissions")
-                .arg("--output-format")
-                .arg("stream-json");
-            
-            let cmd = cmd_builder
-                .arg(&prompt)
-                .current_dir(&working_dir_clone)
-                .env("HOME", &working_dir_clone)
-                .env("CLAUDE_CODE_OAUTH_TOKEN", oauth_token)
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped());
             
-            tracing::debug!("Executing Claude CLI command: {:?}", cmd);
+            tracing::debug!("Executing Claude CLI command: {:?}", cmd_builder);
             
-            let mut cmd = match cmd.spawn() {
+            let mut cmd = match cmd_builder.spawn() {
                 Ok(child) => child,
                 Err(e) => {
                     tracing::error!("Failed to spawn Claude CLI process: {}", e);
