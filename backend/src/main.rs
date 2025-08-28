@@ -165,8 +165,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("🔐 Server running as user: {}", current_user);
     
     if current_user == "root" {
-        tracing::warn!("⚠️  WARNING: Server is running as root! This will prevent Claude CLI from working.");
-        tracing::warn!("⚠️  Claude CLI requires --dangerously-skip-permissions flag which cannot be used with root.");
+        let is_production = std::env::var("RUST_ENV").unwrap_or_default() == "production";
+        if is_production {
+            tracing::info!("⚙️  Running as root in production - Claude CLI will use 'su nobody' workaround");
+        } else {
+            tracing::warn!("⚠️  WARNING: Running as root in development! Claude CLI may not work properly.");
+            tracing::warn!("⚠️  Consider running as a non-root user for development.");
+        }
     }
 
     let config = Config::from_env()?;
