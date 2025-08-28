@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useSnapshot } from "valtio";
 import {
@@ -80,9 +80,20 @@ export function ConversationSidebar({
     useState<Set<string>>(new Set());
   const { isAuthenticated, isSetupComplete, user, logout } = useValtioAuth();
   const navigate = useNavigate();
+  const fetchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastFetchTimeRef = useRef<number>(0);
 
   // Track loading state for conversations
   const snapshot = useSnapshot(store.conversations);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (fetchTimeoutRef.current) {
+        clearTimeout(fetchTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Auto-close mobile menu on larger screens
   useEffect(() => {
@@ -95,86 +106,96 @@ export function ConversationSidebar({
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  // Fetch conversations when projectId changes, user is authenticated, or when we navigate to a new conversation
-  useEffect(() => {
+  // Shared function to fetch conversations with debouncing
+  const fetchConversations = useCallback(async (showLoadingState = true, forceImmediate = false) => {
     if (!projectId || !isAuthenticated || !isSetupComplete) return;
 
-    const fetchConversations = async () => {
-      // Only show loading state if we don't have conversations yet
-      if (conversations.length === 0) {
-        setLoading(true);
+    // Implement debouncing for background refreshes (not for initial load)
+    if (!forceImmediate && !showLoadingState) {
+      const now = Date.now();
+      const timeSinceLastFetch = now - lastFetchTimeRef.current;
+      
+      // If we fetched less than 1 second ago, debounce
+      if (timeSinceLastFetch < 1000) {
+        // Clear any existing timeout
+        if (fetchTimeoutRef.current) {
+          clearTimeout(fetchTimeoutRef.current);
+        }
+        
+        // Set a new timeout to fetch after the debounce period
+        fetchTimeoutRef.current = setTimeout(() => {
+          fetchConversations(false, true); // Force immediate after debounce
+        }, 1000 - timeSinceLastFetch);
+        
+        return;
       }
-      setError(null);
-      try {
-        const url = `${API_BASE_URL}/conversations?project_id=${encodeURIComponent(
-          projectId
-        )}`;
+    }
 
-        const response = await fetch(url, {
-          credentials: "include",
-        });
+    // Record the fetch time
+    lastFetchTimeRef.current = Date.now();
 
-        if (!response.ok) {
-          throw new Error(
-            `Failed to fetch conversations: ${response.status} - ${response.statusText}`
-          );
-        }
+    // Only show loading state if requested and we don't have conversations yet
+    if (showLoadingState && conversations.length === 0) {
+      setLoading(true);
+    }
+    setError(null);
+    try {
+      const url = `${API_BASE_URL}/conversations?project_id=${encodeURIComponent(
+        projectId
+      )}`;
 
-        const data = await response.json();
-        setConversations(data);
+      const response = await fetch(url, {
+        credentials: "include",
+      });
 
-        // Validate current conversation ID against fetched conversations
-        // Only redirect if we have an invalid conversation ID and there are existing conversations
-        // OR if there are no conversations at all (empty state should go to /new)
-        if (
-          currentConversationId &&
-          currentConversationId !== "new" &&
-          !data.find((conv: Conversation) => conv.id === currentConversationId)
-        ) {
-          // Current conversation ID doesn't exist in the list, redirect to new
-          navigate(`/chat/${projectId}/new`, { replace: true });
-        }
-      } catch (err) {
+      if (!response.ok) {
+        throw new Error(
+          `Failed to fetch conversations: ${response.status} - ${response.statusText}`
+        );
+      }
+
+      const data = await response.json();
+      setConversations(data);
+
+      // Validate current conversation ID against fetched conversations
+      // Only redirect if we have an invalid conversation ID and there are existing conversations
+      // OR if there are no conversations at all (empty state should go to /new)
+      if (
+        currentConversationId &&
+        currentConversationId !== "new" &&
+        !data.find((conv: Conversation) => conv.id === currentConversationId)
+      ) {
+        // Current conversation ID doesn't exist in the list, redirect to new
+        navigate(`/chat/${projectId}/new`, { replace: true });
+      }
+    } catch (err) {
+      if (showLoadingState) {
         setError(
           err instanceof Error ? err.message : "Failed to load conversations"
         );
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchConversations();
-  }, [projectId, currentConversationId, isAuthenticated, isSetupComplete]);
-
-  // Set up event listeners for real-time sidebar updates
-  useEffect(() => {
-    if (!projectId) return;
-
-    const fetchConversations = async () => {
-      if (!isAuthenticated || !isSetupComplete) return;
-
-      try {
-        const url = `${API_BASE_URL}/conversations?project_id=${encodeURIComponent(
-          projectId
-        )}`;
-
-        const response = await fetch(url, {
-          credentials: "include",
-        });
-
-        if (!response.ok) {
-          throw new Error(`Failed to fetch conversations: ${response.status}`);
-        }
-
-        const data = await response.json();
-        setConversations(data);
-      } catch (err) {
+      } else {
         logger.error(
           "ConversationSidebar: Failed to refresh conversations:",
           err
         );
       }
-    };
+    } finally {
+      if (showLoadingState) {
+        setLoading(false);
+      }
+    }
+  }, [projectId, isAuthenticated, isSetupComplete, currentConversationId, navigate, conversations.length]);
+
+  // Initial fetch when component mounts or auth changes
+  useEffect(() => {
+    if (!projectId || !isAuthenticated || !isSetupComplete) return;
+    fetchConversations(true, true); // true = show loading, true = force immediate
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, isAuthenticated, isSetupComplete]); // Removed currentConversationId from deps to prevent refetch on navigation
+
+  // Set up event listeners for real-time sidebar updates
+  useEffect(() => {
+    if (!projectId) return;
 
     // Listen for conversation creation events to refresh the list
     const handleConversationCreated = (event: CustomEvent) => {
@@ -186,7 +207,7 @@ export function ConversationSidebar({
 
         // Just fetch the real data from server - don't add placeholder
         // This ensures we get the correct count and avoid race conditions
-        fetchConversations();
+        fetchConversations(false); // false = no loading state for background refresh
       }
     };
 
@@ -278,6 +299,7 @@ export function ConversationSidebar({
         handleStreamingStopped as EventListener
       );
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, isAuthenticated, isSetupComplete]);
 
   // Handle conversation click
