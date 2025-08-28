@@ -27,8 +27,9 @@ COPY --from=rust-cacher /usr/local/cargo /usr/local/cargo
 COPY backend/Cargo.toml backend/Cargo.lock* ./
 COPY backend/migration ./migration
 COPY backend/src ./src
-# Build only the changed code
-RUN cargo build --release
+# Build only the changed code (both binaries)
+RUN cargo build --release --bin clay-studio-backend && \
+    cargo build --release --bin mcp_server
 
 # Stage 5: Build frontend (runs parallel to backend)
 FROM oven/bun:1 AS frontend-builder

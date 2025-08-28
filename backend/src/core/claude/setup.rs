@@ -134,6 +134,16 @@ impl ClaudeSetup {
             let _ = tx.send("Installing @anthropic-ai/claude-code package...".to_string()).await;
         }
         
+        // Ensure client directory exists before trying to canonicalize
+        std::fs::create_dir_all(&self.client_dir)?;
+        
+        // Initialize package.json if it doesn't exist
+        let package_json = self.client_dir.join("package.json");
+        if !package_json.exists() {
+            let package_json_content = r#"{"name":"claude-client","version":"1.0.0","type":"module"}"#;
+            std::fs::write(&package_json, package_json_content)?;
+        }
+        
         let bun_executable = self.bun_path.join("bin/bun");
         let bun_path = bun_executable.canonicalize()?;
         let client_dir = self.client_dir.canonicalize()?;

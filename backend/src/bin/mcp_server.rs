@@ -16,13 +16,6 @@ fn main() {
         })
         .unwrap_or_else(|| std::path::PathBuf::from("backend/.env"));
     
-    if let Err(e) = dotenv::from_path(&backend_env_path) {
-        // Try current directory as fallback
-        if let Err(e2) = dotenv::dotenv() {
-            eprintln!("Note: .env file not found at {:?} or current directory: {} / {}", backend_env_path, e, e2);
-        }
-    }
-    
     // Set up basic logging to stderr (so it doesn't interfere with stdout JSON-RPC)
     let start_time = chrono::Utc::now();
     eprintln!(
