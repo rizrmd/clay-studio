@@ -162,6 +162,9 @@ impl ClaudeSDK {
         let oauth_token = self.oauth_token.lock().await.clone()
             .ok_or("No OAuth token available")?;
         
+        // Log if we have a token (without exposing it)
+        tracing::info!("OAuth token present: {}", !oauth_token.is_empty());
+        
         let working_dir = self.project_dir.as_ref().unwrap_or(&self.client_dir);
         
         let working_dir_clone = working_dir.clone();
@@ -234,8 +237,8 @@ impl ClaudeSDK {
                     let mut lines = reader.lines();
                     
                     while let Ok(Some(line)) = lines.next_line().await {
-                        // Log stderr for debugging
-                        tracing::debug!("[CLAUDE_STDERR] {}", line);
+                        // Log stderr as error so it shows in production
+                        tracing::error!("[CLAUDE_STDERR] {}", line);
                     }
                 });
             }
