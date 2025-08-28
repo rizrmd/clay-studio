@@ -170,15 +170,19 @@ impl ClaudeSDK {
         let _project_dir = self.project_dir.clone();
         
         let bun_executable = self.bun_path.join("bin/bun");
-        let command_debug = format!("{} claude -p --verbose --dangerously-skip-permissions --output-format stream-json [prompt]", bun_executable.display());
+        // Claude CLI is installed at the client level, not project level
+        let claude_cli_path = self.client_dir.join("node_modules/@anthropic-ai/claude-code/cli.js");
+        let command_debug = format!("{} {} -p --verbose --dangerously-skip-permissions --output-format stream-json [prompt]", bun_executable.display(), claude_cli_path.display());
         let command_debug_clone = command_debug.clone();
         let command_debug_clone2 = command_debug.clone();
         let command_debug_clone3 = command_debug.clone();
+        let claude_cli_path_clone = claude_cli_path.clone();
+        let claude_cli_path_clone2 = claude_cli_path.clone();
         
         tokio::spawn(async move {
             let mut cmd_builder = TokioCommand::new(&bun_executable);
             cmd_builder
-                .arg("claude");
+                .arg(&claude_cli_path_clone);
             
             // Add MCP config if we have a project directory - must come before --print
             if let Some(ref project_dir) = _project_dir {
@@ -466,14 +470,13 @@ impl ClaudeSDK {
                         tracing::error!("Command executed: {}", command_debug_clone);
                         tracing::error!("Working directory: {:?}", working_dir_clone);
                         tracing::error!("Bun path: {:?}", bun_executable);
-                        tracing::error!("Claude CLI path: {:?}", working_dir_clone.join("node_modules/@anthropic-ai/claude-code/cli.js"));
+                        tracing::error!("Claude CLI path: {:?}", claude_cli_path_clone2);
                         
                         // Check if the Claude CLI exists
-                        let claude_cli = working_dir_clone.join("node_modules/@anthropic-ai/claude-code/cli.js");
-                        if !claude_cli.exists() {
-                            tracing::error!("Claude CLI not found at expected path: {:?}", claude_cli);
+                        if !claude_cli_path_clone2.exists() {
+                            tracing::error!("Claude CLI not found at expected path: {:?}", claude_cli_path_clone2);
                         } else {
-                            tracing::info!("Claude CLI exists at: {:?}", claude_cli);
+                            tracing::info!("Claude CLI exists at: {:?}", claude_cli_path_clone2);
                         }
                     }
                 });
