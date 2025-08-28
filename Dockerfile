@@ -68,16 +68,15 @@ COPY --from=frontend-builder /app/dist /app/frontend/dist
 
 # Create .clients directory for client data with proper permissions
 RUN mkdir -p /app/.clients /app/tmp && \
-    chown -R clayuser:clayuser /app/.clients /app/tmp && \
     chmod 755 /app/.clients /app/tmp
 
 # Pre-install Bun globally for the application to use
 ENV BUN_INSTALL=/app/.clients/bun
 RUN curl -fsSL https://bun.sh/install | bash && \
-    chown -R clayuser:clayuser /app/.clients && \
     chmod -R 755 /app/.clients
 
-# Set ownership of the application directory
+# Set ownership of the entire application directory to clayuser
+# This must be done AFTER all files are copied and installed
 RUN chown -R clayuser:clayuser /app
 
 # Set environment variables
@@ -87,19 +86,8 @@ ENV STATIC_FILES_PATH=/app/frontend/dist
 ENV CLIENTS_DIR=/app/.clients
 ENV HOME=/app
 
-# Create entrypoint script to fix permissions on mounted volume
-RUN echo '#!/bin/bash\n\
-# Fix permissions on mounted volume if it exists\n\
-if [ -d "/app/.clients" ]; then\n\
-    sudo chown -R clayuser:clayuser /app/.clients 2>/dev/null || true\n\
-    sudo chmod -R 755 /app/.clients 2>/dev/null || true\n\
-fi\n\
-exec "$@"' > /entrypoint.sh && chmod +x /entrypoint.sh
-
-# Install sudo for the entrypoint script
-RUN apt-get update && apt-get install -y --no-install-recommends sudo && \
-    echo "clayuser ALL=(ALL) NOPASSWD: /bin/chown, /bin/chmod" >> /etc/sudoers && \
-    rm -rf /var/lib/apt/lists/*
+# Remove the entrypoint script that was causing permission issues
+# The .clients directory permissions will be handled by the volume mount
 
 # Switch to non-root user
 USER clayuser
@@ -110,6 +98,5 @@ VOLUME ["/app/.clients"]
 # Expose the backend port
 EXPOSE 7680
 
-# Use entrypoint to fix permissions, then run the binary
-ENTRYPOINT ["/entrypoint.sh"]
+# Run the binary directly as clayuser
 CMD ["/app/clay-studio-backend"]
