@@ -1,4 +1,4 @@
-import { API_BASE_URL } from "@/lib/url";
+import { api } from "@/lib/api";
 import { logger } from "@/lib/logger";
 import {
   getConversationState,
@@ -24,9 +24,8 @@ export async function loadConversationMessages(
   state.isLoadingMessages = true;
 
   try {
-    const response = await fetch(
-      `${API_BASE_URL}/conversations/${conversationId}/messages`,
-      { credentials: "include" }
+    const response = await api.fetchStream(
+      `/conversations/${conversationId}/messages`
     );
 
     if (!response.ok) {
@@ -141,9 +140,8 @@ export async function loadUploadedFiles(
     const clientId = localStorage.getItem("activeClientId");
     if (!clientId) return;
 
-    const response = await fetch(
-      `${API_BASE_URL}/uploads?client_id=${clientId}&project_id=${projectId}&conversation_id=${conversationId}`,
-      { credentials: "include" }
+    const response = await api.fetchStream(
+      `/uploads?client_id=${clientId}&project_id=${projectId}&conversation_id=${conversationId}`
     );
 
     if (response.ok) {
@@ -160,9 +158,8 @@ export async function loadUploadedFiles(
  */
 export async function checkForgottenStatus(conversationId: string): Promise<void> {
   try {
-    const response = await fetch(
-      `${API_BASE_URL}/conversations/${conversationId}/forget-after`,
-      { credentials: "include" }
+    const response = await api.fetchStream(
+      `/conversations/${conversationId}/forget-after`
     );
     
     if (response.ok) {
@@ -214,11 +211,10 @@ export async function forgetMessagesFrom(
     }
     
     // Then make the API call
-    const response = await fetch(
-      `${API_BASE_URL}/conversations/${conversationId}/forget-after`,
+    const response = await api.fetchStream(
+      `/conversations/${conversationId}/forget-after`,
       {
         method: "PUT",
-        credentials: "include",
         headers: {
           "Content-Type": "application/json",
         },
@@ -256,11 +252,10 @@ export async function restoreForgottenMessages(
   conversationId: string
 ): Promise<void> {
   try {
-    const response = await fetch(
-      `${API_BASE_URL}/conversations/${conversationId}/forget-after`,
+    const response = await api.fetchStream(
+      `/conversations/${conversationId}/forget-after`,
       {
         method: "DELETE",
-        credentials: "include",
       }
     );
 
@@ -272,9 +267,8 @@ export async function restoreForgottenMessages(
     setConversationForgotten(conversationId, null, 0);
 
     // Reload all messages
-    const messagesResponse = await fetch(
-      `${API_BASE_URL}/conversations/${conversationId}/messages`,
-      { credentials: "include" }
+    const messagesResponse = await api.fetchStream(
+      `/conversations/${conversationId}/messages`
     );
 
     if (messagesResponse.ok) {
@@ -320,11 +314,10 @@ export async function uploadFiles(
       const formData = new FormData();
       formData.append("file", file);
 
-      const response = await fetch(
-        `${API_BASE_URL}/upload?client_id=${clientId}&project_id=${projectId}`,
+      const response = await api.fetchStream(
+        `/upload?client_id=${clientId}&project_id=${projectId}`,
         {
           method: "POST",
-          credentials: "include",
           body: formData,
         }
       );

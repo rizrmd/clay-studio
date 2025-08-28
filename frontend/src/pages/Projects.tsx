@@ -8,7 +8,7 @@ import {
   MessageSquare,
   Database,
 } from "lucide-react";
-import { API_BASE_URL } from "@/lib/url";
+import { api } from "@/lib/api";
 import { useValtioAuth } from "@/hooks/use-valtio-auth";
 import { AppHeader } from "@/components/layout/app-header";
 
@@ -39,13 +39,7 @@ export function ProjectsPage() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${API_BASE_URL}/projects`, {
-        credentials: "include",
-      });
-      if (!response.ok) {
-        throw new Error("Failed to fetch projects");
-      }
-      const data = await response.json();
+      const data = await api.get<Project[]>("/projects");
       setProjects(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load projects");
@@ -60,25 +54,10 @@ export function ProjectsPage() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${API_BASE_URL}/projects`, {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ name: newProjectName }),
+      const newProject = await api.post<Project>("/projects", {
+        name: newProjectName,
       });
-
-      if (!response.ok) {
-        const errorData = await response
-          .json()
-          .catch(() => ({ error: "Failed to create project" }));
-        throw new Error(
-          errorData.error || errorData.message || "Failed to create project"
-        );
-      }
-
-      const newProject = await response.json();
+      
       setProjects([...projects, newProject]);
       setNewProjectName("");
       setIsCreating(false);

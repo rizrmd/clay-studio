@@ -1,4 +1,4 @@
-import { API_BASE_URL } from '@/lib/url';
+import { api } from '@/lib/api';
 import { logger } from '@/lib/logger';
 import { ConversationManager } from '../../store/chat/conversation-manager';
 import { conversationStore } from '../../store/chat/conversation-store';
@@ -163,9 +163,8 @@ export class MessageService {
       
       await this.conversationManager.updateStatus(conversationId, 'loading');
       
-      const response = await fetch(
-        `${API_BASE_URL}/conversations/${conversationId}/messages`,
-        { credentials: 'include' }
+      const response = await api.fetchStream(
+        `/conversations/${conversationId}/messages`
       );
 
       if (!response.ok) {
@@ -256,11 +255,10 @@ export class MessageService {
     abortControllerManager.abort(conversationId);
     
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/conversations/${conversationId}/forget-after`,
+      const response = await api.fetchStream(
+        `/conversations/${conversationId}/forget-after`,
         {
           method: 'PUT',
-          credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ message_id: messageId }),
         }
@@ -292,11 +290,10 @@ export class MessageService {
   // Restore forgotten messages
   async restoreForgottenMessages(conversationId: string): Promise<void> {
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/conversations/${conversationId}/forget-after`,
+      const response = await api.fetchStream(
+        `/conversations/${conversationId}/forget-after`,
         {
           method: 'DELETE',
-          credentials: 'include',
         }
       );
 
@@ -333,9 +330,8 @@ export class MessageService {
     formData.append('project_id', projectId);
     formData.append('conversation_id', conversationId);
 
-    const response = await fetch(`${API_BASE_URL}/upload`, {
+    const response = await api.fetchStream('/upload', {
       method: 'POST',
-      credentials: 'include',
       body: formData,
     });
 
@@ -370,9 +366,8 @@ export class MessageService {
         }
         
         // Fetch latest messages
-        const response = await fetch(
-          `${API_BASE_URL}/conversations/${conversationId}/messages`,
-          { credentials: 'include' }
+        const response = await api.fetchStream(
+          `/conversations/${conversationId}/messages`
         );
         
         if (response.ok) {

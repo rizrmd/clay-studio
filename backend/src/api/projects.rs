@@ -3,6 +3,7 @@ use crate::models::*;
 use crate::utils::AppState;
 use crate::utils::AppError;
 use crate::utils::claude_md_template;
+use crate::utils::middleware::{get_current_client_id, is_current_user_root};
 use crate::core::projects::{ProjectManager, ProjectInfo, ProjectInfoWithStats};
 use crate::core::tools::ToolApplicabilityChecker;
 use chrono::Utc;
@@ -227,22 +228,8 @@ pub async fn create_project(
     let create_req: CreateProjectRequest = req.parse_json().await
         .map_err(|_| AppError::BadRequest("Invalid request body".to_string()))?;
     
-    // Get the first active client
-    let client_row = sqlx::query(
-        "SELECT id FROM clients WHERE status = 'active' LIMIT 1"
-    )
-    .fetch_optional(&state.db_pool)
-    .await
-    .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
-    
-    let client_id = if let Some(row) = client_row {
-        let id: Uuid = row.get("id");
-        id
-    } else {
-        return Err(AppError::ServiceUnavailable(
-            "No active client available. Please set up a client first.".to_string()
-        ));
-    };
+    // Get current user's client_id
+    let client_id = get_current_client_id(depot)?;
     
     // Insert project into database - PostgreSQL will generate the UUID as string
     let project_id = Uuid::new_v4().to_string();
@@ -251,7 +238,7 @@ pub async fn create_project(
     )
     .bind(&project_id)
     .bind(&create_req.name)
-    .bind(&client_id)
+    .bind(client_id)
     .fetch_one(&state.db_pool)
     .await
     .map_err(|e| AppError::InternalServerError(format!("Failed to create project: {}", e)))?;
@@ -289,13 +276,26 @@ pub async fn list_projects(
 ) -> Result<(), AppError> {
     let state = depot.obtain::<AppState>().unwrap();
     
-    // Get all projects from database
-    let project_rows = sqlx::query(
-        "SELECT id, name, created_at, updated_at FROM projects ORDER BY created_at DESC"
-    )
-    .fetch_all(&state.db_pool)
-    .await
-    .map_err(|e| AppError::InternalServerError(format!("Failed to fetch projects: {}", e)))?;
+    // Get current user's client_id for filtering
+    let client_id = get_current_client_id(depot)?;
+    
+    // Get projects filtered by client_id (unless user is root)
+    let project_rows = if is_current_user_root(depot) {
+        sqlx::query(
+            "SELECT id, name, created_at, updated_at FROM projects ORDER BY created_at DESC"
+        )
+        .fetch_all(&state.db_pool)
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("Failed to fetch projects: {}", e)))?
+    } else {
+        sqlx::query(
+            "SELECT id, name, created_at, updated_at FROM projects WHERE client_id = $1 ORDER BY created_at DESC"
+        )
+        .bind(client_id)
+        .fetch_all(&state.db_pool)
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("Failed to fetch projects: {}", e)))?
+    };
     
     // Get the first active client for directory info (if needed)
     let client_row = sqlx::query(

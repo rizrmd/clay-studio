@@ -84,9 +84,6 @@ pub async fn register(req: &mut Request, depot: &mut Depot, res: &mut Response) 
     let client_id = Uuid::parse_str(&register_req.client_id)
         .map_err(|_| AppError::BadRequest("Invalid client ID".to_string()))?;
 
-    // Validate that the client can be accessed from this domain
-    domain::validate_client_domain(&state.db_pool, client_id, req).await?;
-
     // Get client and check if registration is enabled
     let client_row = sqlx::query("SELECT id, config FROM clients WHERE id = $1")
         .bind(client_id)
@@ -105,6 +102,12 @@ pub async fn register(req: &mut Request, depot: &mut Depot, res: &mut Response) 
     
     let user_count: i64 = user_count_row.get("count");
     let is_first_user = user_count == 0;
+
+    // Skip domain validation for first user (who will become admin/root)
+    // For subsequent users, validate domain access
+    if !is_first_user {
+        domain::validate_client_domain(&state.db_pool, client_id, req).await?;
+    }
 
     // Parse client config
     let config: serde_json::Value = client_row.get("config");
@@ -225,11 +228,9 @@ pub async fn login(req: &mut Request, depot: &mut Depot, res: &mut Response) -> 
     let client_id = Uuid::parse_str(&login_req.client_id)
         .map_err(|_| AppError::BadRequest("Invalid client ID".to_string()))?;
 
-    // Validate that the client can be accessed from this domain
-    domain::validate_client_domain(&state.db_pool, client_id, req).await?;
-
-    // Find user by username and client_id
-    let row = sqlx::query(
+    // Find user first to check if they are root before validating domain
+    // First try to find user with the provided client_id
+    let mut row = sqlx::query(
         r#"
         SELECT id, client_id, username, password, role 
         FROM users 
@@ -241,6 +242,22 @@ pub async fn login(req: &mut Request, depot: &mut Depot, res: &mut Response) -> 
     .fetch_optional(&state.db_pool)
     .await
     .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
+
+    // If not found and username is "root", try to find any root user regardless of client_id
+    if row.is_none() && login_req.username == "root" {
+        row = sqlx::query(
+            r#"
+            SELECT id, client_id, username, password, role 
+            FROM users 
+            WHERE username = $1 AND role = 'root'
+            LIMIT 1
+            "#,
+        )
+        .bind(&login_req.username)
+        .fetch_optional(&state.db_pool)
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
+    }
 
     let row = row.ok_or_else(|| AppError::BadRequest("Invalid credentials".to_string()))?;
 
@@ -258,6 +275,11 @@ pub async fn login(req: &mut Request, depot: &mut Depot, res: &mut Response) -> 
         role: row.get("role"),
     };
 
+    // Skip domain validation for root users, validate for others
+    if user.role != "root" {
+        domain::validate_client_domain(&state.db_pool, client_id, req).await?;
+    }
+
     // Verify password
     let is_valid = verify(&login_req.password, &user.password)
         .map_err(|e| AppError::InternalServerError(format!("Failed to verify password: {}", e)))?;
@@ -267,6 +289,13 @@ pub async fn login(req: &mut Request, depot: &mut Depot, res: &mut Response) -> 
     }
 
     // Create session
+    // For root users, use the requested client_id instead of their database client_id
+    let session_client_id = if user.role == "root" {
+        login_req.client_id.clone()
+    } else {
+        user.client_id.clone()
+    };
+
     if let Some(session) = depot.session_mut() {
         session.insert("user_id", &user.id)
             .map_err(|e| AppError::InternalServerError(format!("Failed to create session: {}", e)))?;
@@ -274,7 +303,7 @@ pub async fn login(req: &mut Request, depot: &mut Depot, res: &mut Response) -> 
             .map_err(|e| AppError::InternalServerError(format!("Failed to create session: {}", e)))?;
         session.insert("role", &user.role)
             .map_err(|e| AppError::InternalServerError(format!("Failed to create session: {}", e)))?;
-        session.insert("client_id", &user.client_id)
+        session.insert("client_id", &session_client_id)
             .map_err(|e| AppError::InternalServerError(format!("Failed to create session: {}", e)))?;
     } else {
         return Err(AppError::InternalServerError("No session available".to_string()));
@@ -562,6 +591,7 @@ pub fn auth_routes() -> Router {
         .push(Router::with_path("/registration-status").get(check_registration_status))
         .push(Router::with_path("/clients").get(list_public_clients))
         .push(Router::with_path("/clients/all").get(list_all_clients))
+        .push(Router::with_path("/clients/detect-by-domain").get(detect_client_by_domain))
         .push(Router::with_path("/users/exists").get(check_users_exist))
 }
 
@@ -591,6 +621,53 @@ pub async fn check_users_exist(req: &mut Request, depot: &mut Depot, res: &mut R
         "users_exist": users_exist,
         "user_count": user_count
     })));
+    Ok(())
+}
+
+#[handler]
+pub async fn detect_client_by_domain(req: &mut Request, depot: &mut Depot, res: &mut Response) -> Result<(), AppError> {
+    let state = depot.obtain::<AppState>()
+        .map_err(|_| AppError::InternalServerError("Failed to get app state".to_string()))?;
+    
+    // Get the domain from query params (the frontend will send the current hostname)
+    let domain = req.query::<String>("domain")
+        .ok_or_else(|| AppError::BadRequest("domain parameter required".to_string()))?;
+    
+    tracing::info!("Detecting client for domain: {}", domain);
+    
+    // Query to find a client that has this domain in its domains array
+    let row = sqlx::query(
+        "SELECT id, name, status FROM clients 
+         WHERE $1 = ANY(domains) 
+         AND deleted_at IS NULL 
+         AND status = 'active'
+         LIMIT 1"
+    )
+    .bind(&domain)
+    .fetch_optional(&state.db_pool)
+    .await
+    .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
+    
+    if let Some(row) = row {
+        let client_id: Uuid = row.get("id");
+        let client_name: String = row.get("name");
+        let status: String = row.get("status");
+        
+        res.render(Json(serde_json::json!({
+            "found": true,
+            "client": {
+                "id": client_id.to_string(),
+                "name": client_name,
+                "status": status
+            }
+        })));
+    } else {
+        res.render(Json(serde_json::json!({
+            "found": false,
+            "message": "No client found for this domain"
+        })));
+    }
+    
     Ok(())
 }
 

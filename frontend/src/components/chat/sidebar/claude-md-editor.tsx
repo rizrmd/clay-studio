@@ -3,7 +3,7 @@ import { FileText, Save, RotateCcw, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { API_BASE_URL } from "@/lib/url";
+import { api } from "@/lib/api";
 
 interface ClaudeMdEditorProps {
   projectId: string;
@@ -26,9 +26,7 @@ export function ClaudeMdEditor({ projectId, isCollapsed }: ClaudeMdEditorProps) 
       setLoading(true);
       setError(null);
       try {
-        const response = await fetch(`${API_BASE_URL}/projects/${projectId}/claude-md`, {
-          credentials: "include",
-        });
+        const response = await api.fetchStream(`/projects/${projectId}/claude-md`);
 
         if (!response.ok) {
           if (response.status === 404) {
@@ -75,12 +73,11 @@ Add any project-specific context or instructions here that Claude should be awar
     setSaving(true);
     setError(null);
     try {
-      const response = await fetch(`${API_BASE_URL}/projects/${projectId}/claude-md`, {
+      const response = await api.fetchStream(`/projects/${projectId}/claude-md`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
         },
-        credentials: "include",
         body: JSON.stringify({ content }),
       });
 

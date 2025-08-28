@@ -4,6 +4,7 @@ import { useSnapshot } from "valtio";
 import { authStore } from "@/store/auth-store";
 import { rootService, ClientRootResponse } from "@/services/root-service";
 import { ClientManagement } from "@/components/root/client-management";
+import { AddClientDialog } from "@/components/root/add-client-dialog";
 import {
   Card,
   CardContent,
@@ -30,6 +31,7 @@ export function RootDashboard() {
   const [clients, setClients] = useState<ClientRootResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [stats, setStats] = useState({
     totalClients: 0,
     activeClients: 0,
@@ -198,8 +200,16 @@ export function RootDashboard() {
           loading={loading}
           error={error}
           onRefresh={loadClients}
+          onAddClient={() => setAddDialogOpen(true)}
         />
       </div>
+
+      {/* Add Client Dialog */}
+      <AddClientDialog
+        open={addDialogOpen}
+        onOpenChange={setAddDialogOpen}
+        onSuccess={loadClients}
+      />
     </div>
   );
 }

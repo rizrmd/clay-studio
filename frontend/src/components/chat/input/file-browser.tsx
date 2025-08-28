@@ -18,7 +18,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { API_BASE_URL } from "@/lib/url";
+import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 interface FileUpload {
@@ -130,9 +130,8 @@ export function FileBrowser({
       const clientId = localStorage.getItem("activeClientId");
       if (!clientId) return;
 
-      const response = await fetch(
-        `${API_BASE_URL}/uploads?client_id=${clientId}&project_id=${projectId}`,
-        { credentials: "include" }
+      const response = await api.fetchStream(
+        `/uploads?client_id=${clientId}&project_id=${projectId}`
       );
 
       if (response.ok) {
@@ -180,11 +179,10 @@ export function FileBrowser({
       const clientId = localStorage.getItem("activeClientId");
       if (!clientId) return;
 
-      const response = await fetch(
-        `${API_BASE_URL}/uploads/${fileId}/description`,
+      const response = await api.fetchStream(
+        `/uploads/${fileId}/description`,
         {
           method: "PUT",
-          credentials: "include",
           headers: {
             "Content-Type": "application/json",
           },
@@ -224,11 +222,10 @@ export function FileBrowser({
       const clientId = localStorage.getItem("activeClientId");
       if (!clientId) return;
 
-      const response = await fetch(
-        `${API_BASE_URL}/uploads/${fileId}?client_id=${clientId}`,
+      const response = await api.fetchStream(
+        `/uploads/${fileId}?client_id=${clientId}`,
         {
           method: "DELETE",
-          credentials: "include",
         }
       );
 
@@ -293,7 +290,7 @@ export function FileBrowser({
 
           xhr.open(
             "POST",
-            `${API_BASE_URL}/upload?client_id=${clientId}&project_id=${projectId}`
+            `/api/upload?client_id=${clientId}&project_id=${projectId}`
           );
           xhr.withCredentials = true;
           xhr.send(formData);
@@ -422,7 +419,7 @@ export function FileBrowser({
                           ) ? (
                             <div className="relative w-12 h-12 sm:w-16 sm:h-16 border rounded overflow-hidden bg-secondary flex-shrink-0">
                               <img
-                                src={`${API_BASE_URL}/uploads/${localStorage.getItem(
+                                src={`/api/uploads/${localStorage.getItem(
                                   "activeClientId"
                                 )}/${projectId}/${
                                   file.file_name ||
@@ -569,7 +566,7 @@ export function FileBrowser({
                           )) && (
                           <div className="relative w-full aspect-video border rounded overflow-hidden bg-secondary">
                             <img
-                              src={`${API_BASE_URL}/uploads/${localStorage.getItem(
+                              src={`/api/uploads/${localStorage.getItem(
                                 "activeClientId"
                               )}/${projectId}/${
                                 file.file_name ||

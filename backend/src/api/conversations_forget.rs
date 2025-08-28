@@ -47,7 +47,7 @@ pub async fn forget_messages_after(
          AND created_at > $2"
     )
     .bind(&conversation_id)
-    .bind(&message_timestamp)
+    .bind(message_timestamp)
     .execute(&state.db_pool)
     .await
     .map_err(|e| AppError::InternalServerError(format!("Failed to mark messages as forgotten: {}", e)))?;

@@ -4,12 +4,14 @@ import { ProjectsPage } from "./pages/Projects";
 import { AuthPage } from "./pages/AuthPage";
 import { SetupPage } from "./pages/SetupPage";
 import { RootDashboard } from "./pages/RootDashboard";
+import { ClientDetailPage } from "./pages/ClientDetail";
 import { ConfigPage } from "./pages/ConfigPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { ValtioProvider } from "./providers/ValtioProvider";
 import { SetupRoute } from "./components/auth/setup-route";
 import { ProtectedRoute } from "./components/auth/protected-route";
 import { AdminRoute } from "./components/auth/admin-route";
+import { RootRoute } from "./components/auth/root-route";
 
 function App() {
   return (
@@ -60,9 +62,17 @@ function App() {
         <Route
           path="/root"
           element={
-            <ProtectedRoute>
+            <RootRoute>
               <RootDashboard />
-            </ProtectedRoute>
+            </RootRoute>
+          }
+        />
+        <Route
+          path="/root/client/:clientId"
+          element={
+            <RootRoute>
+              <ClientDetailPage />
+            </RootRoute>
           }
         />
         <Route

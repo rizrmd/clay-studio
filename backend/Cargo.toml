@@ -16,9 +16,6 @@ path = "src/main.rs"
 name = "mcp_server"
 path = "src/bin/mcp_server.rs"
 
-[[example]]
-name = "claude_sdk_usage"
-path = "examples/claude_sdk_usage.rs"
 
 [workspace]
 members = [".", "migration"]

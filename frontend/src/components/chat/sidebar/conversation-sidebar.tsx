@@ -29,7 +29,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { API_BASE_URL } from "@/lib/url";
+import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { logger } from "@/lib/logger";
 import { useValtioAuth } from "@/hooks/use-valtio-auth";
@@ -140,13 +140,11 @@ export function ConversationSidebar({
     }
     setError(null);
     try {
-      const url = `${API_BASE_URL}/conversations?project_id=${encodeURIComponent(
+      const url = `/conversations?project_id=${encodeURIComponent(
         projectId
       )}`;
 
-      const response = await fetch(url, {
-        credentials: "include",
-      });
+      const response = await api.fetchStream(url);
 
       if (!response.ok) {
         throw new Error(
@@ -359,11 +357,10 @@ export function ConversationSidebar({
     if (!renamingConversation || !newTitle.trim()) return;
 
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/conversations/${renamingConversation.id}`,
+      const response = await api.fetchStream(
+        `/conversations/${renamingConversation.id}`,
         {
           method: "PUT",
-          credentials: "include",
           headers: {
             "Content-Type": "application/json",
           },
@@ -408,11 +405,10 @@ export function ConversationSidebar({
     }
 
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/conversations/${conversation.id}`,
+      const response = await api.fetchStream(
+        `/conversations/${conversation.id}`,
         {
           method: "DELETE",
-          credentials: "include",
         }
       );
 

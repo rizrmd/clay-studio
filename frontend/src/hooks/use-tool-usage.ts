@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { logger } from "@/lib/logger";
-import { API_BASE_URL } from "@/lib/url";
+import { api } from "@/lib/api";
 import { ToolUsage } from "@/types/chat";
 
 interface UseToolUsageReturn {
@@ -19,11 +19,8 @@ export function useToolUsage(): UseToolUsageReturn {
     setError(null);
     
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/messages/${messageId}/tool-usage/${encodeURIComponent(toolName)}`,
-        {
-          credentials: "include",
-        }
+      const response = await api.fetchStream(
+        `/messages/${messageId}/tool-usage/${encodeURIComponent(toolName)}`
       );
 
       if (!response.ok) {
@@ -51,11 +48,8 @@ export function useToolUsage(): UseToolUsageReturn {
     setError(null);
     
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/messages/${messageId}/tool-usages`,
-        {
-          credentials: "include",
-        }
+      const response = await api.fetchStream(
+        `/messages/${messageId}/tool-usages`
       );
 
       if (!response.ok) {

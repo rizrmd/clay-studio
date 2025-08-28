@@ -9,7 +9,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { API_BASE_URL } from '@/lib/url';
+import { api } from '@/lib/api';
 
 interface FileUpload {
   id: string;
@@ -56,9 +56,7 @@ export function FileManager({ projectId, conversationId, onFileSelect }: FileMan
         params.append('conversation_id', conversationId);
       }
 
-      const response = await fetch(`${API_BASE_URL}/uploads?${params}`, {
-        credentials: 'include',
-      });
+      const response = await api.fetchStream(`/uploads?${params}`);
 
       if (response.ok) {
         const data = await response.json();
@@ -84,9 +82,8 @@ export function FileManager({ projectId, conversationId, onFileSelect }: FileMan
   const saveDescription = async (fileId: string) => {
     setSavingDescription(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/uploads/${fileId}/description`, {
+      const response = await api.fetchStream(`/uploads/${fileId}/description`, {
         method: 'PUT',
-        credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
         },

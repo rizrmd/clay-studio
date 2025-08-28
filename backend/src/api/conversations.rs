@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::models::*;
 use crate::utils::AppState;
 use crate::utils::AppError;
+use crate::utils::middleware::{get_current_client_id, is_current_user_root};
 use crate::core::tools::ToolApplicabilityChecker;
 use chrono::Utc;
 use uuid::Uuid;
@@ -159,54 +160,111 @@ pub async fn list_conversations(
 ) -> Result<(), AppError> {
     let state = depot.obtain::<AppState>().unwrap();
     
+    // Get current user's client_id for filtering
+    let client_id = get_current_client_id(depot)?;
+    
     // Optional project_id filter from query params
     let project_id = req.query::<String>("project_id");
     
     // Build query based on filters - calculate actual message count excluding forgotten messages
+    // Include client_id filtering through projects table join
     let conversations = if let Some(pid) = project_id {
-        sqlx::query(
-            "SELECT 
-                c.id, 
-                c.project_id, 
-                c.title, 
-                (
-                    SELECT COUNT(*)::INTEGER 
-                    FROM messages m 
-                    WHERE m.conversation_id = c.id
-                    AND (m.is_forgotten = false OR m.is_forgotten IS NULL)
-                ) AS message_count,
-                c.created_at, 
-                c.updated_at, 
-                c.is_title_manually_set 
-             FROM conversations c
-             WHERE c.project_id = $1 
-             ORDER BY c.created_at DESC 
-             LIMIT 100"
-        )
-        .bind(pid)
-        .fetch_all(&state.db_pool)
-        .await
+        if is_current_user_root(depot) {
+            sqlx::query(
+                "SELECT 
+                    c.id, 
+                    c.project_id, 
+                    c.title, 
+                    (
+                        SELECT COUNT(*)::INTEGER 
+                        FROM messages m 
+                        WHERE m.conversation_id = c.id
+                        AND (m.is_forgotten = false OR m.is_forgotten IS NULL)
+                    ) AS message_count,
+                    c.created_at, 
+                    c.updated_at, 
+                    c.is_title_manually_set 
+                 FROM conversations c
+                 WHERE c.project_id = $1 
+                 ORDER BY c.created_at DESC 
+                 LIMIT 100"
+            )
+            .bind(pid)
+            .fetch_all(&state.db_pool)
+            .await
+        } else {
+            sqlx::query(
+                "SELECT 
+                    c.id, 
+                    c.project_id, 
+                    c.title, 
+                    (
+                        SELECT COUNT(*)::INTEGER 
+                        FROM messages m 
+                        WHERE m.conversation_id = c.id
+                        AND (m.is_forgotten = false OR m.is_forgotten IS NULL)
+                    ) AS message_count,
+                    c.created_at, 
+                    c.updated_at, 
+                    c.is_title_manually_set 
+                 FROM conversations c
+                 JOIN projects p ON c.project_id = p.id
+                 WHERE c.project_id = $1 AND p.client_id = $2
+                 ORDER BY c.created_at DESC 
+                 LIMIT 100"
+            )
+            .bind(pid)
+            .bind(client_id)
+            .fetch_all(&state.db_pool)
+            .await
+        }
     } else {
-        sqlx::query(
-            "SELECT 
-                c.id, 
-                c.project_id, 
-                c.title, 
-                (
-                    SELECT COUNT(*)::INTEGER 
-                    FROM messages m 
-                    WHERE m.conversation_id = c.id
-                    AND (m.is_forgotten = false OR m.is_forgotten IS NULL)
-                ) AS message_count,
-                c.created_at, 
-                c.updated_at, 
-                c.is_title_manually_set 
-             FROM conversations c
-             ORDER BY c.created_at DESC 
-             LIMIT 100"
-        )
-        .fetch_all(&state.db_pool)
-        .await
+        if is_current_user_root(depot) {
+            sqlx::query(
+                "SELECT 
+                    c.id, 
+                    c.project_id, 
+                    c.title, 
+                    (
+                        SELECT COUNT(*)::INTEGER 
+                        FROM messages m 
+                        WHERE m.conversation_id = c.id
+                        AND (m.is_forgotten = false OR m.is_forgotten IS NULL)
+                    ) AS message_count,
+                    c.created_at, 
+                    c.updated_at, 
+                    c.is_title_manually_set 
+                 FROM conversations c
+                 ORDER BY c.created_at DESC 
+                 LIMIT 100"
+            )
+            .fetch_all(&state.db_pool)
+            .await
+        } else {
+            sqlx::query(
+                "SELECT 
+                    c.id, 
+                    c.project_id, 
+                    c.title, 
+                    (
+                        SELECT COUNT(*)::INTEGER 
+                        FROM messages m 
+                        WHERE m.conversation_id = c.id
+                        AND (m.is_forgotten = false OR m.is_forgotten IS NULL)
+                    ) AS message_count,
+                    c.created_at, 
+                    c.updated_at, 
+                    c.is_title_manually_set 
+                 FROM conversations c
+                 JOIN projects p ON c.project_id = p.id
+                 WHERE p.client_id = $1
+                 ORDER BY c.created_at DESC 
+                 LIMIT 100"
+            )
+            .bind(client_id)
+            .fetch_all(&state.db_pool)
+            .await
+        }
     }
     .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
     

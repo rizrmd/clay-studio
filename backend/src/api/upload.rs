@@ -8,6 +8,7 @@ use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use crate::utils::AppError;
 use crate::utils::AppState;
+use crate::utils::middleware::{get_current_client_id, is_current_user_root};
 use crate::models::file_upload::{FileUpload, UpdateFileDescription, FileUploadResponse, is_text_file};
 use crate::core::claude::ClaudeManager;
 use chrono::Utc;
@@ -31,8 +32,16 @@ pub async fn handle_file_upload(
     let params: UploadParams = req.parse_queries()
         .map_err(|_| AppError::BadRequest("Missing client_id or project_id".to_string()))?;
     
+    // Get current user's client_id for filtering
+    let current_client_id = get_current_client_id(depot)?;
+    
     let client_uuid = Uuid::parse_str(&params.client_id)
         .map_err(|_| AppError::BadRequest("Invalid client_id".to_string()))?;
+    
+    // Ensure requested client_id matches current user's client_id (unless root)
+    if !is_current_user_root(depot) && client_uuid != current_client_id {
+        return Err(AppError::Forbidden("Cannot upload to different client".to_string()));
+    }
     
     let file = req.file("file").await
         .ok_or_else(|| AppError::BadRequest("No file provided".to_string()))?;
@@ -305,6 +314,9 @@ pub async fn handle_list_uploads(
 ) -> Result<(), AppError> {
     let state = depot.obtain::<AppState>().unwrap();
     
+    // Get current user's client_id for filtering
+    let current_client_id = get_current_client_id(depot)?;
+    
     let client_id = req.query::<String>("client_id")
         .ok_or_else(|| AppError::BadRequest("Missing client_id".to_string()))?;
     let project_id = req.query::<String>("project_id")
@@ -313,6 +325,11 @@ pub async fn handle_list_uploads(
     
     let client_uuid = Uuid::parse_str(&client_id)
         .map_err(|_| AppError::BadRequest("Invalid client_id".to_string()))?;
+    
+    // Ensure requested client_id matches current user's client_id (unless root)
+    if !is_current_user_root(depot) && client_uuid != current_client_id {
+        return Err(AppError::Forbidden("Access denied to client data".to_string()));
+    }
     
     // Query from database instead of filesystem
     let files = if let Some(conv_id) = conversation_id {

@@ -120,12 +120,12 @@ pub async fn save_tool_usage(
             execution_time_ms = EXCLUDED.execution_time_ms
         "#,
     )
-    .bind(&tool_usage.id)
+    .bind(tool_usage.id)
     .bind(&tool_usage.message_id)
     .bind(&tool_usage.tool_name)
     .bind(&tool_usage.parameters)
     .bind(&tool_usage.output)
-    .bind(&tool_usage.execution_time_ms)
+    .bind(tool_usage.execution_time_ms)
     .bind(
         tool_usage.created_at
             .as_ref()

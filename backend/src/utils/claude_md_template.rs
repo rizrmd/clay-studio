@@ -234,7 +234,7 @@ pub fn generate_init_script(datasource_ids: Vec<String>) -> String {
         script.push_str("datasource_list\n\n");
         
         for id in datasource_ids {
-            script.push_str(&format!("# Inspect datasource\n"));
+            script.push_str("# Inspect datasource\n");
             script.push_str(&format!("datasource_inspect datasource_id=\"{}\"\n\n", id));
         }
         

@@ -4,8 +4,10 @@ use uuid::Uuid;
 use chrono::Utc;
 use sqlx::Row;
 
-use crate::models::client::{ClientStatus, ClientAdminResponse, ClientRootResponse, ClientUpdateRequest};
+use crate::models::client::{ClientStatus, ClientAdminResponse, ClientRootResponse, ClientUpdateRequest, ClientCreateRequest};
+use crate::models::client_config::ClientConfig;
 use crate::utils::{AppState, AppError};
+use crate::core::claude::ClaudeManager;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UpdateConfigRequest {
@@ -15,6 +17,11 @@ pub struct UpdateConfigRequest {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UpdateDomainsRequest {
     pub domains: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SetClaudeTokenRequest {
+    pub claude_token: String,
 }
 
 // Admin endpoints (read-only, accessible to admin and root)
@@ -74,6 +81,7 @@ pub async fn list_clients_admin(depot: &mut Depot, res: &mut Response) -> Result
             "pending" => ClientStatus::Pending,
             "installing" => ClientStatus::Installing,
             "active" => ClientStatus::Active,
+            "suspended" => ClientStatus::Suspended,
             "error" => ClientStatus::Error,
             _ => ClientStatus::Pending,
         };
@@ -197,6 +205,7 @@ pub async fn list_clients_root(depot: &mut Depot, res: &mut Response) -> Result<
             "pending" => ClientStatus::Pending,
             "installing" => ClientStatus::Installing,
             "active" => ClientStatus::Active,
+            "suspended" => ClientStatus::Suspended,
             "error" => ClientStatus::Error,
             _ => ClientStatus::Pending,
         };
@@ -353,7 +362,7 @@ pub async fn update_client(req: &mut Request, depot: &mut Depot, res: &mut Respo
         query = query.bind(description);
     }
     if let Some(domains) = update_req.domains {
-        query = query.bind(serde_json::to_value(domains).unwrap());
+        query = query.bind(domains);
     }
     query = query.bind(Utc::now());
     
@@ -504,11 +513,9 @@ pub async fn update_client_domains(req: &mut Request, depot: &mut Depot, res: &m
     let state = depot.obtain::<AppState>()
         .map_err(|_| AppError::InternalServerError("Failed to get app state".to_string()))?;
     
-    let domains_json = serde_json::to_value(domains_req.domains)
-        .map_err(|e| AppError::InternalServerError(format!("Failed to serialize domains: {}", e)))?;
-    
+    // Convert Vec<String> to PostgreSQL array
     sqlx::query("UPDATE clients SET domains = $1, updated_at = $2 WHERE id = $3 AND deleted_at IS NULL")
-        .bind(domains_json)
+        .bind(&domains_req.domains)
         .bind(Utc::now())
         .bind(client_uuid)
         .execute(&state.db_pool)
@@ -522,6 +529,145 @@ pub async fn update_client_domains(req: &mut Request, depot: &mut Depot, res: &m
     Ok(())
 }
 
+#[handler]
+pub async fn suspend_client(req: &mut Request, depot: &mut Depot, res: &mut Response) -> Result<(), AppError> {
+    let client_id = req.param::<String>("id")
+        .ok_or_else(|| AppError::BadRequest("Missing client ID".to_string()))?;
+    
+    let client_uuid = Uuid::parse_str(&client_id)
+        .map_err(|_| AppError::BadRequest("Invalid client ID format".to_string()))?;
+    
+    let state = depot.obtain::<AppState>()
+        .map_err(|_| AppError::InternalServerError("Failed to get app state".to_string()))?;
+    
+    // Update client status to suspended
+    sqlx::query("UPDATE clients SET status = $1, updated_at = $2 WHERE id = $3 AND deleted_at IS NULL")
+        .bind("suspended")
+        .bind(Utc::now())
+        .bind(client_uuid)
+        .execute(&state.db_pool)
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("Failed to suspend client: {}", e)))?;
+    
+    res.render(Json(serde_json::json!({
+        "message": "Client suspended",
+        "id": client_id
+    })));
+    Ok(())
+}
+
+#[handler]
+pub async fn create_client_root(req: &mut Request, depot: &mut Depot, res: &mut Response) -> Result<(), AppError> {
+    let create_request: ClientCreateRequest = req.parse_json().await
+        .map_err(|_| AppError::BadRequest("Invalid JSON".to_string()))?;
+    
+    let state = depot.obtain::<AppState>()
+        .map_err(|_| AppError::InternalServerError("Failed to get app state".to_string()))?;
+    
+    let client_id = Uuid::new_v4();
+    let install_path = format!(".clients/{}", client_id);
+    let now = Utc::now();
+    
+    // Create default client config with registration enabled by default for new clients
+    let default_config = ClientConfig {
+        registration_enabled: true,
+        ..Default::default()
+    };
+    let config_json = serde_json::to_value(default_config)
+        .map_err(|e| AppError::InternalServerError(format!("Failed to serialize config: {}", e)))?;
+    
+    // Insert into database with active status for root-created clients
+    sqlx::query(
+        r#"
+        INSERT INTO clients (id, name, description, status, install_path, config, domains, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        "#,
+    )
+    .bind(client_id)
+    .bind(&create_request.name)
+    .bind(&create_request.description)
+    .bind("active")  // Set as active by default for root-created clients
+    .bind(&install_path)
+    .bind(&config_json)
+    .bind(&create_request.domains)
+    .bind(now)
+    .bind(now)
+    .execute(&state.db_pool)
+    .await
+    .map_err(|e| AppError::InternalServerError(format!("Failed to create client: {}", e)))?;
+    
+    res.render(Json(serde_json::json!({
+        "message": "Client created successfully",
+        "id": client_id.to_string(),
+        "name": create_request.name,
+        "description": create_request.description,
+        "status": "active",
+        "installPath": install_path,
+        "createdAt": now,
+        "updatedAt": now
+    })));
+    Ok(())
+}
+
+#[handler]
+pub async fn set_claude_token(req: &mut Request, depot: &mut Depot, res: &mut Response) -> Result<(), AppError> {
+    let client_id = req.param::<String>("id")
+        .ok_or_else(|| AppError::BadRequest("Missing client ID".to_string()))?;
+    
+    let client_uuid = Uuid::parse_str(&client_id)
+        .map_err(|_| AppError::BadRequest("Invalid client ID format".to_string()))?;
+    
+    let token_request: SetClaudeTokenRequest = req.parse_json().await
+        .map_err(|_| AppError::BadRequest("Invalid JSON".to_string()))?;
+    
+    let state = depot.obtain::<AppState>()
+        .map_err(|_| AppError::InternalServerError("Failed to get app state".to_string()))?;
+    
+    // Verify client exists
+    let client_row = sqlx::query("SELECT id, name, install_path FROM clients WHERE id = $1 AND deleted_at IS NULL")
+        .bind(client_uuid)
+        .fetch_optional(&state.db_pool)
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
+    
+    let _client_row = client_row.ok_or_else(|| AppError::NotFound("Client not found".to_string()))?;
+    
+    // Submit token to Claude CLI and get OAUTH_TOKEN
+    match ClaudeManager::submit_token(client_uuid, &token_request.claude_token).await {
+        Ok(oauth_token) => {
+            // Validate that we got a non-empty OAUTH_TOKEN
+            if oauth_token.trim().is_empty() {
+                return Err(AppError::InternalServerError("Received empty OAUTH_TOKEN from Claude CLI".to_string()));
+            }
+            
+            // Store OAUTH_TOKEN in database and mark as active
+            sqlx::query("UPDATE clients SET claude_token = $1, status = $2, updated_at = $3 WHERE id = $4")
+                .bind(&oauth_token)
+                .bind("active")
+                .bind(Utc::now())
+                .bind(client_uuid)
+                .execute(&state.db_pool)
+                .await
+                .map_err(|e| AppError::InternalServerError(format!("Failed to update client token: {}", e)))?;
+            
+            tracing::info!("Claude token set successfully for client {} by root user", client_uuid);
+            
+            res.render(Json(serde_json::json!({
+                "success": true,
+                "message": "Claude token set successfully",
+                "id": client_id,
+                "status": "active"
+            })));
+        }
+        Err(e) => {
+            tracing::error!("Failed to submit token to Claude CLI for client {}: {}", client_uuid, e);
+            return Err(AppError::InternalServerError(format!("Failed to set Claude token: {}", e)));
+        }
+    }
+    
+    Ok(())
+}
+
 // Route builders
 pub fn admin_routes() -> Router {
     Router::new()
@@ -532,12 +678,15 @@ pub fn admin_routes() -> Router {
 pub fn root_routes() -> Router {
     Router::new()
         .get(list_clients_root)
+        .post(create_client_root)
         .push(Router::with_path("{id}")
             .get(get_client_root)
             .put(update_client)
             .delete(delete_client))
         .push(Router::with_path("{id}/enable").post(enable_client))
         .push(Router::with_path("{id}/disable").post(disable_client))
+        .push(Router::with_path("{id}/suspend").post(suspend_client))
+        .push(Router::with_path("{id}/claude-token").post(set_claude_token))
         .push(Router::with_path("{id}/config").put(update_client_config))
         .push(Router::with_path("{id}/domains").put(update_client_domains))
 }

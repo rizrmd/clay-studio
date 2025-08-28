@@ -3,18 +3,23 @@ use uuid::Uuid;
 use sqlx::{PgPool, Row};
 use crate::utils::AppError;
 
-/// Extract domain from the Host header
+/// Extract domain from the request headers
+/// First tries X-Frontend-Host (for proxied requests), then falls back to Host header
 pub fn extract_domain_from_request(req: &Request) -> Option<String> {
+    // First try to get the real frontend host from custom header
+    if let Some(frontend_host) = req.headers()
+        .get("x-frontend-host")
+        .and_then(|h| h.to_str().ok()) {
+        return Some(frontend_host.to_string());
+    }
+    
+    // Fall back to regular Host header
     req.headers()
         .get("host")
         .and_then(|h| h.to_str().ok())
         .map(|host| {
-            // Remove port if present
-            if let Some(colon_pos) = host.rfind(':') {
-                host[..colon_pos].to_string()
-            } else {
-                host.to_string()
-            }
+            // Keep the full host including port for domain matching
+            host.to_string()
         })
 }
 

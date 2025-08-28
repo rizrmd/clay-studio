@@ -8,3 +8,4 @@ pub mod conversations_forget;
 pub mod projects;
 pub mod tool_usage;
 pub mod upload;
+pub mod user_management;

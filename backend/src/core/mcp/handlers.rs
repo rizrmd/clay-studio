@@ -1773,7 +1773,7 @@ impl McpHandlers {
         
         // Parse auth part (user:pass)
         let auth_parts: Vec<&str> = parts[0].splitn(2, ':').collect();
-        if auth_parts.len() >= 1 {
+        if !auth_parts.is_empty() {
             // URL decode the username
             let username = urlencoding::decode(auth_parts[0]).unwrap_or_else(|_| auth_parts[0].into());
             components.insert("username".to_string(), json!(username.to_string()));
@@ -1793,7 +1793,7 @@ impl McpHandlers {
         }
         
         // Parse host:port
-        if let Some(host_port) = host_db_parts.get(0) {
+        if let Some(host_port) = host_db_parts.first() {
             let host_port_parts: Vec<&str> = host_port.splitn(2, ':').collect();
             components.insert("host".to_string(), json!(host_port_parts[0]));
             
@@ -1823,7 +1823,7 @@ impl McpHandlers {
         
         // Parse auth part (user:pass)
         let auth_parts: Vec<&str> = parts[0].splitn(2, ':').collect();
-        if auth_parts.len() >= 1 {
+        if !auth_parts.is_empty() {
             // URL decode the username
             let username = urlencoding::decode(auth_parts[0]).unwrap_or_else(|_| auth_parts[0].into());
             components.insert("username".to_string(), json!(username.to_string()));
@@ -1843,7 +1843,7 @@ impl McpHandlers {
         }
         
         // Parse host:port
-        if let Some(host_port) = host_db_parts.get(0) {
+        if let Some(host_port) = host_db_parts.first() {
             let host_port_parts: Vec<&str> = host_port.splitn(2, ':').collect();
             components.insert("host".to_string(), json!(host_port_parts[0]));
             
@@ -1894,15 +1894,13 @@ impl McpHandlers {
                     } else {
                         components.insert("host".to_string(), json!(host_port));
                     }
-                } else {
-                    if let Some(colon_pos) = host_part.find(':') {
-                        components.insert("host".to_string(), json!(&host_part[..colon_pos]));
-                        if let Ok(port) = host_part[colon_pos + 1..].parse::<i32>() {
-                            components.insert("port".to_string(), json!(port));
-                        }
-                    } else {
-                        components.insert("host".to_string(), json!(host_part));
+                } else if let Some(colon_pos) = host_part.find(':') {
+                    components.insert("host".to_string(), json!(&host_part[..colon_pos]));
+                    if let Ok(port) = host_part[colon_pos + 1..].parse::<i32>() {
+                        components.insert("port".to_string(), json!(port));
                     }
+                } else {
+                    components.insert("host".to_string(), json!(host_part));
                 }
             }
             

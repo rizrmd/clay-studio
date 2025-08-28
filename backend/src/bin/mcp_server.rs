@@ -1,7 +1,6 @@
 // Entry point for the MCP server binary
 // This creates a separate executable that Claude CLI will spawn
 
-use chrono;
 
 fn main() {
     // Load environment variables from backend/.env file if present

@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { logger } from "@/lib/logger";
-import { Messages } from "../display";
+import { Messages, ChatSkeleton } from "../display";
 import { MultimodalInput } from "../input/multimodal-input";
 import { useValtioChat } from "@/hooks/use-valtio-chat";
 import { useInputState } from "@/hooks/use-input-state";
 import { updateConversationMessages } from "@/store/chat-store";
-import { API_BASE_URL } from "@/lib/url";
+import { api } from "@/lib/api";
 import { AlertTriangle, FileText, PanelLeftOpen, PanelLeftClose } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { Message } from "@/types/chat";
@@ -160,11 +160,10 @@ export function Chat({
 
     // Call API to create new chat with cloned messages
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/conversations/new-from-message`,
+      const response = await api.fetchStream(
+        `/conversations/new-from-message`,
         {
           method: "POST",
-          credentials: "include",
           headers: {
             "Content-Type": "application/json",
           },
@@ -324,12 +323,7 @@ export function Chat({
                 </p>
               </div>
             ) : isLoadingMessages ? (
-              <div className="text-center py-12 mt-20">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-                <p className="text-sm text-muted-foreground">
-                  Loading conversation...
-                </p>
-              </div>
+              <ChatSkeleton />
             ) : (
               <div className="flex-1 overflow-hidden">
                 <Messages

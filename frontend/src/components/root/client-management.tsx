@@ -1,31 +1,17 @@
-import { useState } from 'react'
-import { ClientRootResponse, rootService } from '@/services/root-service'
-import { ClientDetailDialog } from './client-detail-dialog'
+import { useNavigate } from 'react-router-dom'
+import { ClientRootResponse } from '@/services/root-service'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { 
-  RefreshCw, 
-  Settings, 
-  Trash2, 
-  Power, 
-  PowerOff,
-  Edit,
+  RefreshCw,
   Globe,
   Users,
   MessageSquare,
   Calendar,
-  MoreVertical
+  Plus
 } from 'lucide-react'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { format } from 'date-fns'
 
@@ -34,62 +20,22 @@ interface ClientManagementProps {
   loading: boolean
   error: string | null
   onRefresh: () => void
+  onAddClient?: () => void
 }
 
-export function ClientManagement({ clients, loading, error, onRefresh }: ClientManagementProps) {
-  const [selectedClient, setSelectedClient] = useState<ClientRootResponse | null>(null)
-  const [dialogOpen, setDialogOpen] = useState(false)
-  const [actionLoading, setActionLoading] = useState<string | null>(null)
+export function ClientManagement({ clients, loading, error, onRefresh, onAddClient }: ClientManagementProps) {
+  const navigate = useNavigate()
 
-  const handleEnableClient = async (clientId: string) => {
-    try {
-      setActionLoading(clientId)
-      await rootService.enableClient(clientId)
-      onRefresh()
-    } catch (err) {
-      console.error('Failed to enable client:', err)
-    } finally {
-      setActionLoading(null)
-    }
-  }
-
-  const handleDisableClient = async (clientId: string) => {
-    try {
-      setActionLoading(clientId)
-      await rootService.disableClient(clientId)
-      onRefresh()
-    } catch (err) {
-      console.error('Failed to disable client:', err)
-    } finally {
-      setActionLoading(null)
-    }
-  }
-
-  const handleDeleteClient = async (clientId: string) => {
-    if (!confirm('Are you sure you want to delete this client? This action cannot be undone.')) {
-      return
-    }
-    
-    try {
-      setActionLoading(clientId)
-      await rootService.deleteClient(clientId)
-      onRefresh()
-    } catch (err: any) {
-      alert(err.response?.data?.error || 'Failed to delete client')
-    } finally {
-      setActionLoading(null)
-    }
-  }
-
-  const handleEditClient = (client: ClientRootResponse) => {
-    setSelectedClient(client)
-    setDialogOpen(true)
+  const handleRowClick = (clientId: string) => {
+    navigate(`/root/client/${clientId}`)
   }
 
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'active':
         return <Badge className="bg-green-500">Active</Badge>
+      case 'suspended':
+        return <Badge className="bg-orange-500">Suspended</Badge>
       case 'error':
         return <Badge variant="destructive">Error</Badge>
       case 'installing':
@@ -130,10 +76,18 @@ export function ClientManagement({ clients, loading, error, onRefresh }: ClientM
                 Manage all clients in the system
               </CardDescription>
             </div>
-            <Button onClick={onRefresh} variant="outline" size="sm">
-              <RefreshCw className="h-4 w-4 mr-2" />
-              Refresh
-            </Button>
+            <div className="flex items-center gap-2">
+              {onAddClient && (
+                <Button onClick={onAddClient} size="sm">
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Client
+                </Button>
+              )}
+              <Button onClick={onRefresh} variant="outline" size="sm">
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Refresh
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent>
@@ -146,12 +100,14 @@ export function ClientManagement({ clients, loading, error, onRefresh }: ClientM
                 <TableHead>Users</TableHead>
                 <TableHead>Conversations</TableHead>
                 <TableHead>Created</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {clients.map((client) => (
-                <TableRow key={client.id} className={client.deletedAt ? 'opacity-50' : ''}>
+                <TableRow 
+                  key={client.id} 
+                  className={`${client.deletedAt ? 'opacity-50' : ''} cursor-pointer hover:bg-muted/50 transition-colors`}
+                  onClick={() => handleRowClick(client.id)}>
                   <TableCell>
                     <div>
                       <div className="font-medium">{client.name}</div>
@@ -200,76 +156,12 @@ export function ClientManagement({ clients, loading, error, onRefresh }: ClientM
                       </span>
                     </div>
                   </TableCell>
-                  <TableCell className="text-right">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button 
-                          variant="ghost" 
-                          size="sm"
-                          disabled={actionLoading === client.id}
-                        >
-                          {actionLoading === client.id ? (
-                            <RefreshCw className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <MoreVertical className="h-4 w-4" />
-                          )}
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                        <DropdownMenuItem onClick={() => handleEditClient(client)}>
-                          <Edit className="h-4 w-4 mr-2" />
-                          Edit Details
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleEditClient(client)}>
-                          <Settings className="h-4 w-4 mr-2" />
-                          Configuration
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        {client.status === 'active' ? (
-                          <DropdownMenuItem 
-                            onClick={() => handleDisableClient(client.id)}
-                            className="text-orange-600"
-                          >
-                            <PowerOff className="h-4 w-4 mr-2" />
-                            Disable
-                          </DropdownMenuItem>
-                        ) : (
-                          <DropdownMenuItem 
-                            onClick={() => handleEnableClient(client.id)}
-                            className="text-green-600"
-                          >
-                            <Power className="h-4 w-4 mr-2" />
-                            Enable
-                          </DropdownMenuItem>
-                        )}
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem 
-                          onClick={() => handleDeleteClient(client.id)}
-                          className="text-red-600"
-                          disabled={client.userCount > 0}
-                        >
-                          <Trash2 className="h-4 w-4 mr-2" />
-                          Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
         </CardContent>
       </Card>
-
-      {selectedClient && (
-        <ClientDetailDialog
-          client={selectedClient}
-          open={dialogOpen}
-          onOpenChange={setDialogOpen}
-          onUpdate={onRefresh}
-        />
-      )}
     </>
   )
 }

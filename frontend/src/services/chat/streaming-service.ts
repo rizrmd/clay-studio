@@ -1,4 +1,4 @@
-import { API_BASE_URL } from '@/lib/url';
+import { api } from '@/lib/api';
 import { logger } from '@/lib/logger';
 import { ConversationManager } from '../../store/chat/conversation-manager';
 import { conversationStore } from '../../store/chat/conversation-store';
@@ -49,9 +49,8 @@ export class StreamingService {
 
     try {
       logger.debug('StreamingService: Fetching stream for:', conversationId);
-      const response = await fetch(`${API_BASE_URL}/chat/stream`, {
+      const response = await api.fetchStream('/chat/stream', {
         method: 'POST',
-        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: [

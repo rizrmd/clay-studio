@@ -66,7 +66,7 @@ fn generate_title_from_message(content: &str) -> String {
     let truncated = if content.len() > 100 {
         // Find first sentence ending
         let sentence_end = content[..100]
-            .find(|c: char| c == '.' || c == '?' || c == '!')
+            .find(['.', '?', '!'])
             .map(|i| i + 1)
             .unwrap_or(100);
         
@@ -186,7 +186,7 @@ async fn save_message(
                     output = EXCLUDED.output,
                     execution_time_ms = EXCLUDED.execution_time_ms"
             )
-            .bind(&tool_usage.id)
+            .bind(tool_usage.id)
             .bind(&message.id)  // message_id is varchar, keep as string
             .bind(&tool_usage.tool_name)
             .bind(&tool_usage.parameters)
@@ -593,14 +593,14 @@ pub async fn handle_chat_stream(
                                 chrono::Utc::now(), tool, args);
                             
                             // Save tool usage immediately to database so MCP server can update it
-                            let tool_usage_id = tool_usage.id.clone();
+                            let tool_usage_id = tool_usage.id;
                             let save_start = std::time::Instant::now();
                             
                             if let Err(e) = sqlx::query(
                                 "INSERT INTO tool_usages (id, message_id, tool_name, parameters, output, execution_time_ms, created_at)
                                  VALUES ($1, $2, $3, $4, $5, $6, $7)"
                             )
-                            .bind(&tool_usage.id)
+                            .bind(tool_usage.id)
                             .bind(&message_id)
                             .bind(&tool_usage.tool_name)  // Use tool_usage.tool_name to preserve exact name
                             .bind(&args)
@@ -706,7 +706,7 @@ pub async fn handle_chat_stream(
                                 });
                                 
                                 // Update in memory
-                                let tool_usage_id = tool_usage.id.clone();
+                                let tool_usage_id = tool_usage.id;
                                 tool_usage.output = Some(actual_output.clone());
                                 tool_usage.execution_time_ms = execution_time_ms;
                                 
@@ -719,7 +719,7 @@ pub async fn handle_chat_stream(
                                 )
                                 .bind(&actual_output)
                                 .bind(execution_time_ms)
-                                .bind(&tool_usage_id)
+                                .bind(tool_usage_id)
                                 .execute(&db_pool)
                                 .await {
                                     Ok(_) => {
@@ -763,7 +763,7 @@ pub async fn handle_chat_stream(
                                         "timestamp": chrono::Utc::now().to_rfc3339()
                                     });
                                     
-                                    if let Ok(_) = sqlx::query(
+                                    if (sqlx::query(
                                         "UPDATE tool_usages 
                                          SET output = $1, execution_time_ms = $2
                                          WHERE id = $3"
@@ -772,7 +772,7 @@ pub async fn handle_chat_stream(
                                     .bind(execution_time_ms)
                                     .bind(&found_tool_usage_id)
                                     .execute(&db_pool)
-                                    .await {
+                                    .await).is_ok() {
                                         tracing::info!("Tool usage {} updated with result and execution time {:?}ms from database lookup", 
                                             found_tool_usage_id, execution_time_ms.unwrap_or(0));
                                     }

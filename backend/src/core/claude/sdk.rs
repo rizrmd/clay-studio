@@ -200,7 +200,7 @@ impl ClaudeSDK {
                 let mcp_arg = if let Some(ref project_dir) = _project_dir {
                     let mcp_config_path = project_dir.join(".claude/mcp_servers.json");
                     if mcp_config_path.exists() {
-                        format!(" --mcp-config .claude/mcp_servers.json")
+                        " --mcp-config .claude/mcp_servers.json".to_string()
                     } else {
                         String::new()
                     }

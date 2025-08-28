@@ -10,6 +10,8 @@ pub enum ClientStatus {
     Installing,
     #[serde(rename = "active")]
     Active,
+    #[serde(rename = "suspended")]
+    Suspended,
     #[serde(rename = "error")]
     Error,
 }

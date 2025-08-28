@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
-import { API_BASE_URL } from "@/lib/url";
+import { api } from "@/lib/api";
 import { setConversationContext, cacheProjectContext } from "../../store/chat-store";
 
 /**
@@ -20,9 +20,8 @@ export function useConversationContext(conversationId: string | null) {
     queryFn: async () => {
       if (!conversationId) throw new Error("Conversation ID required");
 
-      const response = await fetch(
-        `${API_BASE_URL}/conversations/${conversationId}/context`,
-        { credentials: "include" }
+      const response = await api.fetchStream(
+        `/conversations/${conversationId}/context`
       );
       
       if (!response.ok) {
@@ -82,9 +81,8 @@ export function useProjectContext(projectId: string | null) {
     queryFn: async () => {
       if (!projectId) throw new Error("Project ID required");
 
-      const response = await fetch(
-        `${API_BASE_URL}/projects/${projectId}/context`,
-        { credentials: "include" }
+      const response = await api.fetchStream(
+        `/projects/${projectId}/context`
       );
       if (!response.ok) throw new Error("Failed to fetch project context");
 

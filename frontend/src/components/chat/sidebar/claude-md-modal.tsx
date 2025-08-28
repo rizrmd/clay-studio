@@ -8,7 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { API_BASE_URL } from "@/lib/url";
+import { api } from "@/lib/api";
 
 interface ClaudeMdModalProps {
   projectId: string;
@@ -32,9 +32,7 @@ export function ClaudeMdModal({ projectId, isOpen, onOpenChange }: ClaudeMdModal
       setLoading(true);
       setError(null);
       try {
-        const response = await fetch(`${API_BASE_URL}/projects/${projectId}/claude-md`, {
-          credentials: "include",
-        });
+        const response = await api.fetchStream(`/projects/${projectId}/claude-md`);
 
         if (!response.ok) {
           if (response.status === 404) {
@@ -81,12 +79,11 @@ Add any project-specific context or instructions here that Claude should be awar
     setSaving(true);
     setError(null);
     try {
-      const response = await fetch(`${API_BASE_URL}/projects/${projectId}/claude-md`, {
+      const response = await api.fetchStream(`/projects/${projectId}/claude-md`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
         },
-        credentials: "include",
         body: JSON.stringify({ content }),
       });
 

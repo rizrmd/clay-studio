@@ -1,0 +1,1 @@
+- VERY IMPORTANT: always use /frontend/src/lib/api to do api calls. DO NOT use fetch or axios manually!

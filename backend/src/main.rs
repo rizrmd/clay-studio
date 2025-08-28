@@ -14,9 +14,9 @@ use tokio::signal;
 use crate::utils::{Config, AppState};
 use crate::api::{
     admin, auth, chat, clients, client_management,
-    conversations, conversations_forget, projects, tool_usage, upload
+    conversations, conversations_forget, projects, tool_usage, upload, user_management
 };
-use crate::utils::middleware::{inject_state, auth::{auth_required, admin_required, root_required}};
+use crate::utils::middleware::{inject_state, client_scoped, auth::{auth_required, admin_required, root_required}};
 use crate::core::sessions::PostgresSessionStore;
 
 /// Bind to address with retry logic by adding delay before binding
@@ -210,9 +210,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .push(Router::with_path("/auth").push(auth::auth_routes()))
         .push(Router::new().push(clients::client_routes())); // Allow client creation during initial setup
 
-    // Protected routes (auth required)
+    // Protected routes (auth required + client scoped)
     let protected_router = Router::new()
         .hoop(auth_required)
+        .hoop(client_scoped)
         .push(Router::with_path("/chat/stream").post(chat::handle_chat_stream))
         .push(
             Router::with_path("/projects")
@@ -296,7 +297,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Root routes (accessible only to root role)
     let root_router = Router::new()
         .hoop(root_required)
-        .push(Router::with_path("/root/clients").push(client_management::root_routes()));
+        .push(Router::with_path("/root/clients").push(client_management::root_routes()))
+        .push(Router::with_path("/root/clients").push(user_management::root_routes()));
 
     // API routes with state injection and session handling
     let api_router = Router::new()
@@ -317,10 +319,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // List files in static directory for debugging
     if let Ok(entries) = std::fs::read_dir(&static_path) {
         tracing::info!("Files in static directory:");
-        for entry in entries {
-            if let Ok(entry) = entry {
-                tracing::info!("  - {:?}", entry.path());
-            }
+        for entry in entries.flatten() {
+            tracing::info!("  - {:?}", entry.path());
         }
     }
     
