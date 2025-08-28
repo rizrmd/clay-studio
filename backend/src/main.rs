@@ -156,6 +156,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .init();
 
+    // Log the current user running the server
+    let current_user = std::process::Command::new("whoami")
+        .output()
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
+    
+    tracing::info!("🔐 Server running as user: {}", current_user);
+    
+    if current_user == "root" {
+        tracing::warn!("⚠️  WARNING: Server is running as root! This will prevent Claude CLI from working.");
+        tracing::warn!("⚠️  Claude CLI requires --dangerously-skip-permissions flag which cannot be used with root.");
+    }
+
     let config = Config::from_env()?;
     let state = AppState::new(&config).await?;
 
