@@ -9,6 +9,13 @@ export function AuthPage() {
   const [activeTab, setActiveTab] = useState<'login' | 'register'>('login')
   const { registrationEnabled, firstClient, isAuthenticated, isSetupComplete } = useValtioAuth()
 
+  // If registration is disabled, always show login tab
+  useEffect(() => {
+    if (!registrationEnabled && activeTab === 'register') {
+      setActiveTab('login')
+    }
+  }, [registrationEnabled, activeTab])
+
   // If user is already authenticated, redirect them
   if (isAuthenticated) {
     // If setup is complete, go to projects
@@ -20,13 +27,6 @@ export function AuthPage() {
       return <Navigate to="/projects" replace />
     }
   }
-
-  // If registration is disabled, always show login tab
-  useEffect(() => {
-    if (!registrationEnabled && activeTab === 'register') {
-      setActiveTab('login')
-    }
-  }, [registrationEnabled, activeTab])
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
