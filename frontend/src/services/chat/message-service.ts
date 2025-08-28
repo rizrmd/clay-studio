@@ -171,7 +171,11 @@ export class MessageService {
         throw new Error(`Failed to load messages: ${response.status}`);
       }
 
-      const messages: Message[] = await response.json();
+      const data = await response.json();
+      
+      // Handle both old array format and new object format with streaming info
+      const messages: Message[] = Array.isArray(data) ? data : (data.messages || []);
+      const hasActiveStream = !Array.isArray(data) && data.has_active_stream || false;
       
       // Double-check we're still the active conversation before updating
       // This prevents race conditions where another conversation became active
@@ -182,50 +186,94 @@ export class MessageService {
         return messages;
       }
       
-      // Check if we need to show loading state based on message patterns
-      // If the last message is from a user (no assistant response yet),
-      // or if the last assistant message is empty/incomplete, show loading
+      // If backend indicates an active stream, use SSE resume
+      if (hasActiveStream) {
+        logger.info('MessageService: Backend indicates active stream for conversation:', conversationId);
+        
+        // Create a defensive copy of messages to prevent mutation issues
+        const messagesCopy = messages.map(m => ({ ...m })); // Deep copy each message
+        
+        // Log all message IDs to track what we have
+        logger.debug('MessageService: All message IDs before filtering:', 
+          messagesCopy.map(m => `${m.role}:${m.id.substring(0,8)}:${m.content.length}`).join(', '));
+        
+        // Log any assistant messages with partial content
+        const partialAssistantMessages = messagesCopy.filter(m => 
+          m.role === 'assistant' && m.content.length > 0 && m.content.length < 50
+        );
+        if (partialAssistantMessages.length > 0) {
+          logger.warn('MessageService: Found partial assistant messages:', 
+            partialAssistantMessages.map(m => ({
+              id: m.id,
+              content: m.content,
+              length: m.content.length
+            }))
+          );
+        }
+        
+        // Filter out empty or incomplete assistant messages before setting
+        // These will be replaced by the loading indicator
+        // Also filter out assistant messages that appear to be incomplete JSON or partial content
+        const filteredMessages = messagesCopy.filter(msg => {
+          if (msg.role !== 'assistant') return true;
+          
+          // Remove empty assistant messages
+          if (msg.content === '') {
+            logger.warn('MessageService: Filtering out empty assistant message:', {
+              id: msg.id,
+              content: msg.content
+            });
+            return false;
+          }
+          
+          // Remove assistant messages that look like incomplete JSON or partial streaming content
+          // These typically start with {"type": or similar patterns and are under 100 chars
+          if (msg.content.length < 100 && 
+              (msg.content.startsWith('{"') || 
+               msg.content.startsWith('[\n') ||
+               msg.content.includes('"type":'))) {
+            logger.warn('MessageService: Filtering out incomplete assistant message:', {
+              id: msg.id,
+              content: msg.content
+            });
+            return false;
+          }
+          
+          return true;
+        });
+        
+        logger.debug('MessageService: All message IDs after filtering:', 
+          filteredMessages.map(m => `${m.role}:${m.id.substring(0,8)}:${m.content.length}`).join(', '));
+        
+        // Update messages first (without empty assistant stub)
+        await this.conversationManager.setMessages(conversationId, filteredMessages);
+        
+        // Resume the stream using SSE
+        const streamingService = StreamingService.getInstance();
+        streamingService.resumeStream(conversationId, _projectId).catch(error => {
+          logger.error('MessageService: Failed to resume stream:', error);
+          // Fallback to idle if resume fails
+          this.conversationManager.updateStatus(conversationId, 'idle');
+        });
+        
+        return filteredMessages;
+      }
+      
+      // Old polling logic - only use if backend doesn't have active stream
+      // and message is very recent (for backward compatibility)
       if (messages.length > 0) {
         const lastMessage = messages[messages.length - 1];
         
-        // Check if there's an incomplete pattern:
-        // 1. Last message is from user (assistant hasn't responded yet)
-        // 2. Or last assistant message is empty/very short (incomplete streaming)
         if (lastMessage.role === 'user') {
-          // Get the time since the last message
           const lastMessageTime = new Date(lastMessage.createdAt || '').getTime();
           const timeSinceLastMessage = Date.now() - lastMessageTime;
           
-          // If the message is less than 30 seconds old, assume streaming might be happening
-          if (timeSinceLastMessage < 30000) {
-            logger.info('MessageService: User message without assistant response detected, showing loading:', {
-              conversationId,
-              timeSinceLastMessage,
-              messageId: lastMessage.id
-            });
-            
-            // Show streaming status
+          // Only poll if message is very recent and backend doesn't have active stream
+          if (timeSinceLastMessage < 5000 && !hasActiveStream) {
+            logger.info('MessageService: Recent user message without backend stream, using polling fallback');
             await this.conversationManager.updateStatus(conversationId, 'streaming');
-            
-            // Poll for new messages or timeout after a reasonable time
             this.pollForResponse(conversationId, messages.length);
           }
-        } else if (lastMessage.role === 'assistant' && lastMessage.content.length === 0) {
-          // Empty assistant message indicates interrupted streaming
-          logger.info('MessageService: Empty assistant message detected - streaming was interrupted:', {
-            conversationId,
-            messageId: lastMessage.id
-          });
-          
-          // Remove the empty assistant message and show streaming state
-          const filteredMessages = messages.slice(0, -1);
-          await this.conversationManager.setMessages(conversationId, filteredMessages);
-          
-          // Show streaming status as if waiting for assistant response
-          await this.conversationManager.updateStatus(conversationId, 'streaming');
-          
-          // Poll for the real assistant response
-          this.pollForResponse(conversationId, filteredMessages.length);
         }
       }
       
@@ -371,7 +419,9 @@ export class MessageService {
         );
         
         if (response.ok) {
-          const messages: Message[] = await response.json();
+          const data = await response.json();
+          // Handle both old array format and new object format
+          const messages: Message[] = Array.isArray(data) ? data : (data.messages || []);
           
           // Check if we got a proper assistant response
           // We're looking for a non-empty assistant message after the expected count

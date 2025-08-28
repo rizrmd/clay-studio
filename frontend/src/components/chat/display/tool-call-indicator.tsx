@@ -25,7 +25,8 @@ export function ToolCallIndicator({
   isCompleted = false,
   messageId,
 }: ToolCallIndicatorProps) {
-  if (tools.length === 0) return null;
+  
+  if (!tools || tools.length === 0) return null;
 
   if (variant === "compact") {
     if (isCompleted) {
@@ -146,7 +147,6 @@ export function ToolCallIndicator({
             variant="outline"
             className={cn(
               "flex items-center gap-1.5 text-xs px-2 py-1",
-              isCompleted ? "" : "animate-pulse",
               parsedTool.color
             )}
           >

@@ -131,10 +131,6 @@ export class ConversationManager {
   async updateStatus(conversationId: string, status: ConversationStatus): Promise<void> {
     return this.atomicOperation(conversationId, () => {
       const state = getOrCreateConversationState(conversationId);
-      logger.debug('ConversationManager: Updating status:', conversationId, 'from', state.status, 'to', status);
-      if (status === 'idle' && state.status === 'streaming') {
-        console.trace('[ConversationManager] Setting streaming to idle - stack trace:');
-      }
       state.status = status;
       state.lastUpdated = Date.now();
       state.version++;
@@ -156,17 +152,71 @@ export class ConversationManager {
     });
   }
 
-  // Update last message atomically
-  async updateLastMessage(conversationId: string, updates: Partial<Message>): Promise<void> {
+  // Helper function to update last assistant message (without atomic wrapper)
+  private updateLastAssistantMessageInternal(state: any, updates: Partial<Message>, conversationId: string): void {
+    if (state.messages.length > 0) {
+      // Find the last ASSISTANT message, not just the last message
+      // This prevents accidentally overwriting user messages
+      for (let i = state.messages.length - 1; i >= 0; i--) {
+        if (state.messages[i].role === 'assistant') {
+          // CRITICAL SAFETY CHECK: Never update role field to prevent corruption
+          if (updates.role && updates.role !== 'assistant') {
+            logger.error('ConversationManager: Attempted to change assistant message role to', updates.role, '- blocking update');
+            return;
+          }
+          
+          // Apply updates safely
+          Object.assign(state.messages[i], updates);
+          state.lastUpdated = Date.now();
+          state.version++;
+          return;
+        }
+      }
+      
+      // If no assistant message found, log a warning with message details for debugging
+      logger.warn('ConversationManager: No assistant message found to update in conversation', conversationId, 
+        'Messages:', state.messages.map((m: Message) => `${m.role}:${m.id.substring(0,8)}`).join(', '));
+    }
+  }
+
+  // Update message by ID atomically - ONLY updates ASSISTANT messages
+  async updateMessageById(conversationId: string, messageId: string, updates: Partial<Message>): Promise<void> {
     return this.atomicOperation(conversationId, () => {
       const state = getOrCreateConversationState(conversationId);
       
-      if (state.messages.length > 0) {
-        const lastMessage = state.messages[state.messages.length - 1];
-        Object.assign(lastMessage, updates);
+      // Find message by ID
+      const messageIndex = state.messages.findIndex(m => m.id === messageId);
+      if (messageIndex >= 0) {
+        const message = state.messages[messageIndex];
+        
+        // CRITICAL SAFETY CHECK: Only allow updating assistant messages
+        if (message.role !== 'assistant') {
+          logger.error('ConversationManager: Attempted to update non-assistant message', messageId, 'with role', message.role, '- blocking update');
+          return;
+        }
+        
+        // CRITICAL SAFETY CHECK: Never update role field to prevent corruption
+        if (updates.role && updates.role !== 'assistant') {
+          logger.error('ConversationManager: Attempted to change assistant message role to', updates.role, '- blocking update');
+          return;
+        }
+        Object.assign(state.messages[messageIndex], updates);
         state.lastUpdated = Date.now();
         state.version++;
+      } else {
+        logger.warn('ConversationManager: Message not found by ID', messageId, 'in conversation', conversationId, '- falling back to update last assistant message');
+        // Fallback: Update the last assistant message instead
+        // This handles the case where the target message was filtered out but we still want to apply the completion data
+        this.updateLastAssistantMessageInternal(state, updates, conversationId);
       }
+    });
+  }
+
+  // Update last message atomically - ONLY updates the last ASSISTANT message
+  async updateLastMessage(conversationId: string, updates: Partial<Message>): Promise<void> {
+    return this.atomicOperation(conversationId, () => {
+      const state = getOrCreateConversationState(conversationId);
+      this.updateLastAssistantMessageInternal(state, updates, conversationId);
     });
   }
 
@@ -174,6 +224,8 @@ export class ConversationManager {
   async setMessages(conversationId: string, messages: Message[]): Promise<void> {
     return this.atomicOperation(conversationId, () => {
       const state = getOrCreateConversationState(conversationId);
+      
+      
       state.messages = [...messages];
       state.lastUpdated = Date.now();
       state.version++;
@@ -213,8 +265,6 @@ export class ConversationManager {
   async getNextQueuedMessage(conversationId: string): Promise<QueuedMessage | null> {
     return this.atomicOperation(conversationId, () => {
       const state = getOrCreateConversationState(conversationId);
-      
-      logger.debug('ConversationManager: getNextQueuedMessage - status:', state.status, 'queue length:', state.messageQueue.length);
       
       // Only process queue if not streaming and no errors
       if (state.status !== 'idle' || state.messageQueue.length === 0) {
@@ -268,10 +318,8 @@ export class ConversationManager {
   async addActiveTool(conversationId: string, tool: string): Promise<void> {
     return this.atomicOperation(conversationId, () => {
       const state = getOrCreateConversationState(conversationId);
-      logger.debug('ConversationManager: Adding active tool:', tool, 'to conversation:', conversationId);
       if (!state.activeTools.includes(tool)) {
         state.activeTools.push(tool);
-        logger.debug('ConversationManager: Active tools now:', state.activeTools);
         state.lastUpdated = Date.now();
         state.version++;
       }

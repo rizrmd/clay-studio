@@ -588,6 +588,7 @@ export function Messages({
 
   // Combine messages with loading indicator and queued messages
   const allItems = useMemo(() => {
+    // No need to filter here since message-service already filters empty assistant messages
     const items: DisplayMessage[] = [...messages];
 
     // Add loading indicator if AI is responding
@@ -626,7 +627,7 @@ export function Messages({
     }
 
     return items;
-  }, [messages, isLoading, messageQueue, editingQueuedId, editingContent]);
+  }, [messages, isLoading, messageQueue, editingQueuedId, editingContent, activeTools.length]);
 
   // Find the last user message (excluding queued messages)
   const lastUserMessageId = useMemo(() => {
@@ -807,8 +808,10 @@ export function Messages({
                                   {/* Show active tools if any are being used */}
                                   {activeTools.length > 0 && (
                                     <ToolCallIndicator
+                                      key={`active-tools-${activeTools.join('-')}`}
                                       tools={activeTools}
                                       variant="full"
+                                      isCompleted={false}
                                       className="ml-3"
                                     />
                                   )}

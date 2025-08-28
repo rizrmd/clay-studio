@@ -11,6 +11,7 @@ import {
 import { api } from "@/lib/api";
 import { useValtioAuth } from "@/hooks/use-valtio-auth";
 import { AppHeader } from "@/components/layout/app-header";
+import { ProjectsSkeleton } from "@/components/projects/projects-skeleton";
 
 interface Project {
   id: string;
@@ -107,14 +108,7 @@ export function ProjectsPage() {
 
         {/* Loading State */}
         {loading && projects.length === 0 ? (
-          <div className="flex items-center justify-center py-12">
-            <div className="text-center">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-              <p className="mt-4 text-gray-600 dark:text-gray-400">
-                Loading projects...
-              </p>
-            </div>
-          </div>
+          <ProjectsSkeleton />
         ) : (
           <>
             {/* Projects Grid */}

@@ -31,6 +31,128 @@ export class StreamingService {
     return StreamingService.instance;
   }
 
+  async resumeStream(conversationId: string, projectId: string): Promise<void> {
+    logger.info('StreamingService: Resuming stream for conversation:', conversationId);
+    
+    // Create abort controller
+    const abortController = abortControllerManager.create(conversationId);
+    
+    // Mark as active stream
+    this.activeStreams.set(conversationId, true);
+    let assistantContent = '';
+    let completedSuccessfully = false;
+
+    try {
+      // Update status to streaming
+      await this.conversationManager.updateStatus(conversationId, 'streaming');
+      
+      const response = await api.fetchStream('/chat/resume', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversation_id: conversationId }),
+        signal: abortController.signal,
+      });
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          logger.warn('StreamingService: No active stream found to resume');
+          // Stream already completed or doesn't exist - set to idle
+          await this.conversationManager.updateStatus(conversationId, 'idle');
+          return; // Exit gracefully, messages are already loaded
+        }
+        throw new Error(`Resume failed: ${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+
+      if (!reader) {
+        throw new Error('No response body');
+      }
+
+      let buffer = '';
+      let hasInitialContent = false;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        buffer += chunk;
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmedLine = line.trim();
+          if (trimmedLine.startsWith('data:')) {
+            const data = trimmedLine.slice(5).trim();
+            if (data === '[DONE]') continue;
+            if (!data) continue;
+
+            try {
+              const event = JSON.parse(data);
+              
+              switch (event.type) {
+                case 'start':
+                  logger.debug('Resume: Received start event', event);
+                  break;
+                  
+                case 'content':
+                  // Initial partial content
+                  if (!hasInitialContent && event.content) {
+                    assistantContent = event.content;
+                    hasInitialContent = true;
+                    await this.handleProgressEvent(
+                      { content: JSON.stringify({ type: 'text', text: assistantContent }) },
+                      conversationId,
+                      ''
+                    );
+                  }
+                  break;
+                  
+                case 'tool_use':
+                  logger.debug('Resume: Received tool_use event', event.tool);
+                  if (event.tool) {
+                    await this.conversationManager.addActiveTool(conversationId, event.tool);
+                  }
+                  break;
+                  
+                case 'progress':
+                  assistantContent = await this.handleProgressEvent(event, conversationId, assistantContent);
+                  break;
+                  
+                case 'complete':
+                  completedSuccessfully = true;
+                  await this.handleCompleteEvent(event, conversationId, projectId);
+                  break;
+                  
+                case 'error':
+                  throw new Error(event.error);
+              }
+            } catch (e) {
+              logger.error('Resume: Failed to parse SSE event:', e);
+            }
+          }
+        }
+      }
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        logger.info('Resume: Stream aborted by user');
+      } else {
+        logger.error('Resume: Stream error:', error);
+        await this.conversationManager.setError(conversationId, error.message);
+      }
+    } finally {
+      this.activeStreams.delete(conversationId);
+      
+      if (!completedSuccessfully) {
+        await this.conversationManager.updateStatus(conversationId, 'idle');
+      }
+      
+      // Abort controller is already cleaned up by abortControllerManager.abort() if called
+    }
+  }
+
   async handleStream(options: StreamingOptions): Promise<void> {
     const { projectId, conversationId, content, abortController } = options;
     
@@ -214,7 +336,6 @@ export class StreamingService {
         break;
 
       case 'tool_use':
-        logger.debug('StreamingService: Tool use event:', event.tool);
         if (event.tool) {
           await this.conversationManager.addActiveTool(currentConversationId, event.tool);
         }
@@ -356,19 +477,30 @@ export class StreamingService {
   ): Promise<void> {
     logger.debug('StreamingService: Handling complete event for:', conversationId);
     
-    // Update last message with final data
-    await this.conversationManager.updateLastMessage(conversationId, {
-      id: event.id,
+    // Update specific message by ID with final data - this is more precise than updateLastMessage
+    // and prevents accidentally updating the wrong message when filtering changes message order
+    const updates = {
       clay_tools_used: event.tools_used?.length > 0 ? event.tools_used : undefined,
       processing_time_ms: event.processing_time_ms,
-    });
+    };
     
-    // Clear active tools
-    await this.conversationManager.clearActiveTools(conversationId);
+    if (event.id) {
+      // Try to update by specific ID first
+      await this.conversationManager.updateMessageById(conversationId, event.id, updates);
+    } else {
+      // Fallback to updating last message if no specific ID provided
+      logger.debug('StreamingService: No event ID, using fallback to update last message');
+      await this.conversationManager.updateLastMessage(conversationId, updates);
+    }
     
     // Set status back to idle after streaming completes
     logger.debug('StreamingService: Setting status to idle after complete for:', conversationId);
     await this.conversationManager.updateStatus(conversationId, 'idle');
+    
+    // Clear active tools after a brief delay to allow UI transition from active to completed tools
+    setTimeout(() => {
+      this.conversationManager.clearActiveTools(conversationId);
+    }, 100);
     
     // Emit completion event
     await chatEventBus.emit({
