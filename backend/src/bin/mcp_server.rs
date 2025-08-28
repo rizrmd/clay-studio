@@ -16,6 +16,8 @@ fn main() {
         })
         .unwrap_or_else(|| std::path::PathBuf::from("backend/.env"));
     
+    let _ = dotenv::from_path(&backend_env_path);
+    
     // Set up basic logging to stderr (so it doesn't interfere with stdout JSON-RPC)
     let start_time = chrono::Utc::now();
     eprintln!(

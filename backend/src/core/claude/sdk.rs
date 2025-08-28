@@ -170,6 +170,10 @@ impl ClaudeSDK {
         let _project_dir = self.project_dir.clone();
         
         let bun_executable = self.bun_path.join("bin/bun");
+        let command_debug = format!("{} claude -p --verbose --dangerously-skip-permissions --output-format stream-json [prompt]", bun_executable.display());
+        let command_debug_clone = command_debug.clone();
+        let command_debug_clone2 = command_debug.clone();
+        let command_debug_clone3 = command_debug.clone();
         
         tokio::spawn(async move {
             let mut cmd_builder = TokioCommand::new(&bun_executable);
@@ -203,9 +207,19 @@ impl ClaudeSDK {
             
             tracing::debug!("Executing Claude CLI command: {:?}", cmd);
             
-            let mut cmd = cmd
-                .spawn()
-                .expect("Failed to spawn Claude CLI process");
+            let mut cmd = match cmd.spawn() {
+                Ok(child) => child,
+                Err(e) => {
+                    tracing::error!("Failed to spawn Claude CLI process: {}", e);
+                    tracing::error!("Command was: {}", command_debug);
+                    tracing::error!("Working directory: {:?}", working_dir_clone);
+                    tracing::error!("Bun executable: {:?}", bun_executable);
+                    let _ = tx.send(ClaudeMessage::Error {
+                        error: format!("Failed to spawn Claude CLI: {}", e),
+                    }).await;
+                    return;
+                }
+            };
             
             // Also capture stderr for debugging
             if let Some(stderr) = cmd.stderr.take() {
@@ -445,6 +459,23 @@ impl ClaudeSDK {
                     }
                     
                     tracing::info!("[CLAUDE_STDOUT] Stream ended after {} lines", line_count);
+                    
+                    // Debug information when no output is received
+                    if line_count == 0 {
+                        tracing::error!("Claude CLI produced no output!");
+                        tracing::error!("Command executed: {}", command_debug_clone);
+                        tracing::error!("Working directory: {:?}", working_dir_clone);
+                        tracing::error!("Bun path: {:?}", bun_executable);
+                        tracing::error!("Claude CLI path: {:?}", working_dir_clone.join("node_modules/@anthropic-ai/claude-code/cli.js"));
+                        
+                        // Check if the Claude CLI exists
+                        let claude_cli = working_dir_clone.join("node_modules/@anthropic-ai/claude-code/cli.js");
+                        if !claude_cli.exists() {
+                            tracing::error!("Claude CLI not found at expected path: {:?}", claude_cli);
+                        } else {
+                            tracing::info!("Claude CLI exists at: {:?}", claude_cli);
+                        }
+                    }
                 });
             }
             
@@ -453,25 +484,42 @@ impl ClaudeSDK {
                     use tokio::io::{BufReader, AsyncBufReadExt};
                     let reader = BufReader::new(stderr);
                     let mut lines = reader.lines();
+                    let mut stderr_lines = Vec::new();
                     
                     while let Ok(Some(line)) = lines.next_line().await {
+                        stderr_lines.push(line.clone());
                         tracing::debug!("Claude SDK stderr: {}", line);
+                    }
+                    
+                    // If we got stderr output, log it as error
+                    if !stderr_lines.is_empty() {
+                        tracing::error!("Claude CLI stderr output:");
+                        for line in &stderr_lines {
+                            tracing::error!("  {}", line);
+                        }
+                        tracing::error!("Command that produced stderr: {}", command_debug_clone2);
                     }
                 });
             }
             
             match cmd.wait().await {
                 Ok(status) if !status.success() => {
+                    tracing::error!("Claude CLI exited with non-zero status: {}", status);
+                    tracing::error!("Command was: {}", command_debug_clone3);
                     let _ = tx.send(ClaudeMessage::Error {
                         error: format!("Process exited with status: {}", status),
                     }).await;
                 }
                 Err(e) => {
+                    tracing::error!("Error waiting for Claude CLI process: {}", e);
+                    tracing::error!("Command was: {}", command_debug_clone3);
                     let _ = tx.send(ClaudeMessage::Error {
                         error: format!("Process error: {}", e),
                     }).await;
                 }
-                _ => {}
+                Ok(status) => {
+                    tracing::debug!("Claude CLI exited successfully with status: {}", status);
+                }
             }
             
             tracing::debug!("Query completed for client {}", client_id);
