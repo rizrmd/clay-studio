@@ -1,1 +1,2 @@
 - VERY IMPORTANT: always use /frontend/src/lib/api to do api calls. DO NOT use fetch or axios manually!
+- IMPORTANT: Before committing backend changes, run `npm run sqlx:prepare` to update SQLx query cache for CI/CD compatibility

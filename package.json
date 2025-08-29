@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "bun run scripts/dev.ts",
     "build": "bun run scripts/build.ts",
-    "deploy": "bun run scripts/deploy.ts"
+    "deploy": "bun run scripts/deploy.ts",
+    "sqlx:prepare": "cd backend && cargo sqlx prepare",
+    "check": "cd backend && cargo sqlx prepare && cd ../frontend && npm run typecheck"
   },
   "devDependencies": {
     "@types/bun": "latest"
