@@ -4,7 +4,7 @@ import { FolderOpen, ChevronRight, Calendar, MessageSquare, Database } from "luc
 export function ProjectsSkeleton() {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-6">
-      {[1, 2, 3, 4, 5, 6].map((index) => (
+      {[1, 2, 3].map((index) => (
         <div
           key={index}
           className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700"

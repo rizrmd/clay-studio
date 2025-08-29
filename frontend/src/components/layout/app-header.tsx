@@ -1,6 +1,8 @@
 import { Link, useLocation } from 'react-router-dom'
 import { Home, User, Settings, LogOut } from 'lucide-react'
 import { useValtioAuth } from '@/hooks/use-valtio-auth'
+import { navigationMenuTriggerStyle } from '@/components/ui/navigation-menu'
+import { cn } from '@/lib/utils'
 
 export function AppHeader() {
   const { user, logout } = useValtioAuth()
@@ -10,56 +12,64 @@ export function AppHeader() {
     return location.pathname === path
   }
 
+  const clientName = user?.username || 'Clay Studio'
+
   return (
     <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
-          <div className="flex items-center">
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
-              Clay Studio
-            </h2>
-          </div>
+          <Link
+            to="/"
+            className="text-xl font-semibold text-gray-900 dark:text-gray-100 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
+          >
+            {clientName}
+          </Link>
+
           <div className="flex items-center gap-4">
-            {user && (
-              <span className="text-sm text-gray-600 dark:text-gray-400">
-                {user.username}
-              </span>
-            )}
             <Link
               to="/projects"
-              className={`p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors ${
-                isActive('/projects') ? 'bg-gray-100 dark:bg-gray-700' : ''
-              }`}
-              title="Projects"
+              className={cn(
+                navigationMenuTriggerStyle(),
+                "h-9 px-3",
+                isActive('/projects') && "bg-accent"
+              )}
             >
-              <Home className="h-5 w-5 text-gray-600 dark:text-gray-400" />
+              <Home className="h-4 w-4 mr-2" />
+              Projects
             </Link>
             <Link
               to="/profile"
-              className={`p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors ${
-                isActive('/profile') ? 'bg-gray-100 dark:bg-gray-700' : ''
-              }`}
-              title="Profile"
+              className={cn(
+                navigationMenuTriggerStyle(),
+                "h-9 px-3",
+                isActive('/profile') && "bg-accent"
+              )}
             >
-              <User className="h-5 w-5 text-gray-600 dark:text-gray-400" />
+              <User className="h-4 w-4 mr-2" />
+              Profile
             </Link>
             {user?.role === 'admin' && (
               <Link
                 to="/config"
-                className={`p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors ${
-                  isActive('/config') ? 'bg-gray-100 dark:bg-gray-700' : ''
-                }`}
-                title="Settings"
+                className={cn(
+                  navigationMenuTriggerStyle(),
+                  "h-9 px-3",
+                  isActive('/config') && "bg-accent"
+                )}
               >
-                <Settings className="h-5 w-5 text-gray-600 dark:text-gray-400" />
+                <Settings className="h-4 w-4 mr-2" />
+                Settings
               </Link>
             )}
             <button
               onClick={logout}
-              className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-              title="Logout"
+              className={cn(
+                navigationMenuTriggerStyle(),
+                "h-9 px-3 hover:bg-destructive/10 hover:text-destructive"
+              )}
             >
-              <LogOut className="h-5 w-5 text-gray-600 dark:text-gray-400" />
+              <LogOut className="h-4 w-4 mr-2" />
+              Logout
             </button>
           </div>
         </div>

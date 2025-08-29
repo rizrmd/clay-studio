@@ -279,17 +279,17 @@ pub async fn list_projects(
     // Get current user's client_id for filtering
     let client_id = get_current_client_id(depot)?;
     
-    // Get projects filtered by client_id (unless user is root)
+    // Get projects filtered by client_id (unless user is root), excluding soft-deleted projects
     let project_rows = if is_current_user_root(depot) {
         sqlx::query(
-            "SELECT id, name, created_at, updated_at FROM projects ORDER BY created_at DESC"
+            "SELECT id, name, created_at, updated_at FROM projects WHERE deleted_at IS NULL ORDER BY created_at DESC"
         )
         .fetch_all(&state.db_pool)
         .await
         .map_err(|e| AppError::InternalServerError(format!("Failed to fetch projects: {}", e)))?
     } else {
         sqlx::query(
-            "SELECT id, name, created_at, updated_at FROM projects WHERE client_id = $1 ORDER BY created_at DESC"
+            "SELECT id, name, created_at, updated_at FROM projects WHERE client_id = $1 AND deleted_at IS NULL ORDER BY created_at DESC"
         )
         .bind(client_id)
         .fetch_all(&state.db_pool)
@@ -527,6 +527,65 @@ pub async fn save_claude_md(
     
     res.render(Json(SaveClaudeMdResponse {
         message: "CLAUDE.md saved successfully".to_string(),
+    }));
+    Ok(())
+}
+
+#[handler]
+pub async fn delete_project(
+    req: &mut Request,
+    depot: &mut Depot,
+    res: &mut Response,
+) -> Result<(), AppError> {
+    let state = depot.obtain::<AppState>().unwrap();
+    let project_id = req.param::<String>("project_id")
+        .ok_or(AppError::BadRequest("Missing project_id".to_string()))?;
+    
+    // Get current user's client_id
+    let client_id = get_current_client_id(depot)?;
+    
+    // Verify the project belongs to the current user (unless they're root)
+    let project_exists = if is_current_user_root(depot) {
+        sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM projects WHERE id = $1 AND deleted_at IS NULL)"
+        )
+        .bind(&project_id)
+        .fetch_one(&state.db_pool)
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?
+    } else {
+        sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM projects WHERE id = $1 AND client_id = $2 AND deleted_at IS NULL)"
+        )
+        .bind(&project_id)
+        .bind(client_id)
+        .fetch_one(&state.db_pool)
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?
+    };
+    
+    if !project_exists {
+        return Err(AppError::NotFound("Project not found or already deleted".to_string()));
+    }
+    
+    // Soft delete the project by setting deleted_at timestamp
+    sqlx::query(
+        "UPDATE projects SET deleted_at = NOW() WHERE id = $1"
+    )
+    .bind(&project_id)
+    .execute(&state.db_pool)
+    .await
+    .map_err(|e| AppError::InternalServerError(format!("Failed to delete project: {}", e)))?;
+    
+    #[derive(Serialize)]
+    struct DeleteProjectResponse {
+        message: String,
+        project_id: String,
+    }
+    
+    res.render(Json(DeleteProjectResponse {
+        message: "Project deleted successfully".to_string(),
+        project_id,
     }));
     Ok(())
 }

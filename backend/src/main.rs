@@ -240,6 +240,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .get(projects::get_claude_md)
                 .put(projects::save_claude_md)
         )
+        .push(
+            Router::with_path("/projects/{project_id}")
+                .delete(projects::delete_project)
+        )
         // Conversation routes - more specific paths first
         .push(
             Router::with_path("/conversations/{conversation_id}/messages")
@@ -298,6 +302,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let admin_router = Router::new()
         .hoop(admin_required)
         .push(Router::with_path("/admin").push(client_management::admin_routes()))
+        .push(Router::with_path("/admin").push(user_management::admin_routes()))
         .push(Router::with_path("/admin").push(admin::admin_router()));
     
     // Root routes (accessible only to root role)

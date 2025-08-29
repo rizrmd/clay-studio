@@ -39,16 +39,11 @@ export class StreamingService {
     // With WebSocket, resuming is handled automatically by subscribing to the conversation
     // The WebSocket service will receive any active streaming events for this conversation
     try {
+      // Connect will now handle authentication waiting internally
       await this.wsService.connect();
       
-      // Wait a moment for authentication to complete
-      let attempts = 0;
-      while (!this.wsService.authenticated && attempts < 50) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        attempts++;
-      }
-      
       if (!this.wsService.authenticated) {
+        logger.error('StreamingService: WebSocket not authenticated after connect');
         throw new Error('WebSocket authentication failed');
       }
       
@@ -75,19 +70,15 @@ export class StreamingService {
     let realConversationId = conversationId;
 
     try {
-      // Ensure WebSocket connection is established
+      // Ensure WebSocket connection is established and authenticated
       await this.wsService.connect();
       
-      // Wait for authentication if needed
-      let attempts = 0;
-      while (!this.wsService.authenticated && attempts < 50) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        attempts++;
-      }
-      
       if (!this.wsService.authenticated) {
+        logger.error('StreamingService: WebSocket not authenticated after connect');
         throw new Error('WebSocket authentication failed');
       }
+      
+      logger.debug('StreamingService: WebSocket authenticated successfully');
       
       // Subscribe to this project/conversation for streaming events
       this.wsService.subscribe(projectId);

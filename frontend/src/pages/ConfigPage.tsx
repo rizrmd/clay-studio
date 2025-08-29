@@ -1,87 +1,63 @@
-import { useValtioAuth } from '@/hooks/use-valtio-auth'
-import { Navigate } from 'react-router-dom'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Label } from '@/components/ui/label'
-import { Input } from '@/components/ui/input'
-import { Button } from '@/components/ui/button'
-// import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { useState, useEffect } from 'react'
-import api from '@/lib/api'
-import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Skeleton } from '@/components/ui/skeleton'
-import { AppHeader } from '@/components/layout/app-header'
+import { useValtioAuth } from "@/hooks/use-valtio-auth";
+import { Navigate } from "react-router-dom";
+import { useState, useEffect } from "react";
+import api from "@/lib/api";
+import { Skeleton } from "@/components/ui/skeleton";
+import { AppHeader } from "@/components/layout/app-header";
+import { DomainManagement } from "@/components/root/domain-management";
+import { UserManagement } from "@/components/shared/user-management";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Card, CardContent } from "@/components/ui/card";
+import { Users, Globe } from "lucide-react";
 
 interface SystemConfig {
-  registrationEnabled: boolean
-  requireInviteCode: boolean
-  allowedDomains: string[]
+  registrationEnabled: boolean;
+  requireInviteCode: boolean;
+  allowedDomains: string[];
 }
 
 export function ConfigPage() {
-  const { user, isAuthenticated } = useValtioAuth()
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
+  const { user, isAuthenticated } = useValtioAuth();
+  const [loading, setLoading] = useState(true);
   const [config, setConfig] = useState<SystemConfig>({
     registrationEnabled: false,
     requireInviteCode: false,
-    allowedDomains: []
-  })
-  const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
-  const [newDomain, setNewDomain] = useState('')
+    allowedDomains: [],
+  });
+  const [clientId, setClientId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (isAuthenticated && user?.role === 'admin') {
-      fetchConfig()
+    if (isAuthenticated && (user?.role === "admin" || user?.role === "root")) {
+      const storedClientId = localStorage.getItem('activeClientId');
+      setClientId(storedClientId);
+      fetchConfig();
     }
-  }, [isAuthenticated, user])
+  }, [isAuthenticated, user]);
 
   const fetchConfig = async () => {
     try {
-      const response = await api.get('/admin/config')
+      const response = await api.get("/admin/config");
+      console.log(response);
+      
       setConfig({
         ...response,
-        allowedDomains: response.allowedDomains || []
-      })
+        allowedDomains: response.allowedDomains || [],
+      });
     } catch (error) {
-      setMessage({ type: 'error', text: 'Failed to load configuration' })
+      console.error("Failed to load configuration:", error);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
-  const saveConfig = async () => {
-    setSaving(true)
-    setMessage(null)
-    try {
-      await api.put('/admin/config', config)
-      setMessage({ type: 'success', text: 'Configuration saved successfully' })
-    } catch (error) {
-      setMessage({ type: 'error', text: 'Failed to save configuration' })
-    } finally {
-      setSaving(false)
-    }
-  }
 
-  const handleAddDomain = () => {
-    const domains = config.allowedDomains || []
-    if (newDomain && !domains.includes(newDomain)) {
-      setConfig({
-        ...config,
-        allowedDomains: [...domains, newDomain]
-      })
-      setNewDomain('')
-    }
-  }
+  const handleUpdate = () => {
+    // Refresh config after any update
+    fetchConfig();
+  };
 
-  const handleRemoveDomain = (domain: string) => {
-    setConfig({
-      ...config,
-      allowedDomains: (config.allowedDomains || []).filter(d => d !== domain)
-    })
-  }
-
-  if (!isAuthenticated || user?.role !== 'admin') {
-    return <Navigate to="/" replace />
+  if (!isAuthenticated || (user?.role !== "admin" && user?.role !== "root")) {
+    return <Navigate to="/" replace />;
   }
 
   if (loading) {
@@ -93,7 +69,7 @@ export function ConfigPage() {
           <Skeleton className="h-96 w-full" />
         </div>
       </div>
-    )
+    );
   }
 
   return (
@@ -101,97 +77,57 @@ export function ConfigPage() {
       <AppHeader />
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Header */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold mb-2 text-gray-900 dark:text-gray-100">System Configuration</h1>
-          <p className="text-gray-600 dark:text-gray-400">Manage system-wide settings and preferences</p>
+          <h1 className="text-3xl font-bold mb-2 text-gray-900 dark:text-gray-100">
+            System Configuration
+          </h1>
+          <p className="text-gray-600 dark:text-gray-400">
+            Manage system-wide settings and preferences
+          </p>
         </div>
 
-      {message && (
-        <Alert className={`mb-6 ${message.type === 'success' ? 'border-green-500' : 'border-red-500'}`}>
-          <AlertDescription>{message.text}</AlertDescription>
-        </Alert>
-      )}
+        {/* Tabbed Interface */}
+        <Tabs defaultValue="users" className="space-y-4">
+          <TabsList className="grid w-full grid-cols-2 lg:w-auto lg:inline-flex">
+            <TabsTrigger value="users" className="flex items-center gap-2">
+              <Users className="h-4 w-4" />
+              <span className="hidden sm:inline">Users</span>
+            </TabsTrigger>
+            <TabsTrigger value="domains" className="flex items-center gap-2">
+              <Globe className="h-4 w-4" />
+              <span className="hidden sm:inline">Domains</span>
+            </TabsTrigger>
+          </TabsList>
 
-      <div className="space-y-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>Registration Settings</CardTitle>
-            <CardDescription>Configure how new users can join the system</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label>Enable Registration</Label>
-                <p className="text-sm text-muted-foreground">Allow new users to register</p>
-              </div>
-              <Button
-                variant={config.registrationEnabled ? "default" : "outline"}
-                onClick={() => setConfig({ ...config, registrationEnabled: !config.registrationEnabled })}
-              >
-                {config.registrationEnabled ? 'Enabled' : 'Disabled'}
-              </Button>
-            </div>
+          <TabsContent value="users" className="space-y-4">
+            <UserManagement
+              initialRegistrationEnabled={config.registrationEnabled}
+              initialRequireInviteCode={config.requireInviteCode}
+              {...(user?.role === "root" && clientId ? { clientId } : {})}
+              onUpdate={handleUpdate}
+            />
+          </TabsContent>
 
-            {config.registrationEnabled && (
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label>Require Invite Code</Label>
-                  <p className="text-sm text-muted-foreground">Users need an invite code to register</p>
-                </div>
-                <Button
-                  variant={config.requireInviteCode ? "default" : "outline"}
-                  onClick={() => setConfig({ ...config, requireInviteCode: !config.requireInviteCode })}
-                >
-                  {config.requireInviteCode ? 'Required' : 'Not Required'}
-                </Button>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Domain Management</CardTitle>
-            <CardDescription>Restrict registration to specific email domains</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex gap-2">
-              <Input
-                placeholder="example.com"
-                value={newDomain}
-                onChange={(e) => setNewDomain(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleAddDomain()}
+          <TabsContent value="domains" className="space-y-4">
+            {clientId ? (
+              <DomainManagement
+                clientId={clientId}
+                initialDomains={config.allowedDomains}
+                onUpdate={handleUpdate}
               />
-              <Button onClick={handleAddDomain}>Add Domain</Button>
-            </div>
-            <div className="space-y-2">
-              {!config.allowedDomains || config.allowedDomains.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No domain restrictions (all domains allowed)</p>
-              ) : (
-                config.allowedDomains.map((domain) => (
-                  <div key={domain} className="flex items-center justify-between p-2 border rounded">
-                    <span>{domain}</span>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleRemoveDomain(domain)}
-                    >
-                      Remove
-                    </Button>
-                  </div>
-                ))
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-        <div className="mt-8 flex justify-end">
-          <Button onClick={saveConfig} disabled={saving}>
-            {saving ? 'Saving...' : 'Save Changes'}
-          </Button>
-        </div>
+            ) : (
+              <Card>
+                <CardContent className="flex items-center justify-center py-16">
+                  <p className="text-muted-foreground">
+                    No client selected. Domain management is not available.
+                  </p>
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
+        </Tabs>
       </div>
     </div>
-  )
+  );
 }

@@ -7,11 +7,28 @@ import {
   ChevronRight,
   MessageSquare,
   Database,
+  Trash2,
+  MoreVertical,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useValtioAuth } from "@/hooks/use-valtio-auth";
 import { AppHeader } from "@/components/layout/app-header";
 import { ProjectsSkeleton } from "@/components/projects/projects-skeleton";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 
 interface Project {
   id: string;
@@ -29,6 +46,9 @@ export function ProjectsPage() {
   const [newProjectName, setNewProjectName] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const navigate = useNavigate();
   const {} = useValtioAuth();
 
@@ -83,6 +103,29 @@ export function ProjectsPage() {
     });
   };
 
+  const handleDeleteClick = (e: React.MouseEvent, project: Project) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setProjectToDelete(project);
+    setDeleteDialogOpen(true);
+  };
+
+  const deleteProject = async () => {
+    if (!projectToDelete) return;
+
+    setIsDeleting(true);
+    try {
+      await api.delete(`/projects/${projectToDelete.id}`);
+      setProjects(projects.filter(p => p.id !== projectToDelete.id));
+      setDeleteDialogOpen(false);
+      setProjectToDelete(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete project");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <AppHeader />
@@ -115,17 +158,21 @@ export function ProjectsPage() {
             {projects.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-6">
                 {projects.map((project) => (
-                  <Link
+                  <div
                     key={project.id}
-                    to={`/chat/${project.id}`}
-                    className="bg-white dark:bg-gray-800 rounded-lg shadow-sm hover:shadow-md transition-shadow cursor-pointer border border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-600 block"
+                    className="relative bg-white dark:bg-gray-800 rounded-lg shadow-sm hover:shadow-md transition-shadow border border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-600 group"
                   >
-                    <div className="p-6">
+                    <Link
+                      to={`/chat/${project.id}`}
+                      className="block p-6"
+                    >
                       <div className="flex items-start justify-between mb-4">
                         <div className="flex items-center">
                           <FolderOpen className="h-8 w-8 text-blue-600 dark:text-blue-400" />
                         </div>
-                        <ChevronRight className="h-5 w-5 text-gray-400" />
+                        <div className="flex items-center gap-2">
+                          <ChevronRight className="h-5 w-5 text-gray-400" />
+                        </div>
                       </div>
 
                       <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
@@ -150,8 +197,30 @@ export function ProjectsPage() {
                           </span>
                         </div>
                       </div>
+                    </Link>
+                    {/* Project Actions Dropdown */}
+                    <div className="absolute bottom-4 right-4">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            onClick={(e) => e.preventDefault()}
+                            className="p-1 rounded-md opacity-0 group-hover:opacity-100 hover:bg-gray-100 dark:hover:bg-gray-700 transition-opacity"
+                          >
+                            <MoreVertical className="h-5 w-5 text-gray-600 dark:text-gray-400" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            onClick={(e) => handleDeleteClick(e, project)}
+                            className="text-red-600 dark:text-red-400"
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Delete Project
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
-                  </Link>
+                  </div>
                 ))}
 
                 {/* Create New Project Card */}
@@ -258,6 +327,35 @@ export function ProjectsPage() {
           </>
         )}
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Project</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete "{projectToDelete?.name}"? This action cannot be undone.
+              All conversations and data sources associated with this project will be removed.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteDialogOpen(false)}
+              disabled={isDeleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={deleteProject}
+              disabled={isDeleting}
+            >
+              {isDeleting ? "Deleting..." : "Delete Project"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

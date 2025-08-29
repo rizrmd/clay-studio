@@ -58,6 +58,9 @@ export class WebSocketService {
   private activeStreams = new Map<string, { content: string; messageId?: string }>();
   private isAuthenticated = false;
   private userInfo: { user_id?: string; client_id?: string; role?: string } | null = null;
+  private authenticationPromise: Promise<void> | null = null;
+  private authenticationResolver: (() => void) | null = null;
+  private isSubscribed = false;
 
   private constructor() {
     this.conversationManager = ConversationManager.getInstance();
@@ -72,14 +75,25 @@ export class WebSocketService {
 
   async connect(): Promise<void> {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      // Already connected, wait for authentication if needed
+      if (!this.isAuthenticated && this.authenticationPromise) {
+        await this.authenticationPromise;
+      }
       return;
     }
 
-    if (this.isConnecting) {
+    if (this.isConnecting && this.authenticationPromise) {
+      // Already connecting, wait for it to complete
+      await this.authenticationPromise;
       return;
     }
 
     this.isConnecting = true;
+    
+    // Create authentication promise
+    this.authenticationPromise = new Promise<void>((resolve) => {
+      this.authenticationResolver = resolve;
+    });
 
     try {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -109,6 +123,7 @@ export class WebSocketService {
         logger.info('WebSocketService: Connection closed', event.code, event.reason);
         this.isConnecting = false;
         this.ws = null;
+        this.isSubscribed = false; // Reset subscription status on disconnect
         
         if (!event.wasClean && this.reconnectAttempts < this.maxReconnectAttempts) {
           this.scheduleReconnect();
@@ -187,6 +202,12 @@ export class WebSocketService {
   }
 
   subscribe(projectId: string): void {
+    // Check if already subscribed to this project
+    if (this.currentProjectId === projectId && this.isSubscribed) {
+      logger.debug('WebSocketService: Already subscribed to project', projectId);
+      return;
+    }
+    
     this.currentProjectId = projectId;
     
     logger.info('WebSocketService: Subscribing to project', projectId);
@@ -197,6 +218,7 @@ export class WebSocketService {
         type: 'subscribe',
         project_id: projectId,
       });
+      // Mark as pending subscription (will be confirmed by 'subscribed' message)
     } else {
       logger.warn('WebSocketService: Cannot subscribe - not authenticated. Will subscribe after authentication.');
     }
@@ -210,6 +232,7 @@ export class WebSocketService {
   unsubscribe(): void {
     this.currentProjectId = null;
     this.currentConversationId = null;
+    this.isSubscribed = false;
     
     logger.info('WebSocketService: Unsubscribing from all streams');
     
@@ -239,6 +262,12 @@ export class WebSocketService {
             role: message.role
           });
           
+          // Resolve authentication promise
+          if (this.authenticationResolver) {
+            this.authenticationResolver();
+            this.authenticationResolver = null;
+          }
+          
           // Auto-subscribe to current project if we have one and we're authenticated
           if (this.isAuthenticated && this.currentProjectId) {
             this.subscribe(this.currentProjectId);
@@ -249,10 +278,17 @@ export class WebSocketService {
           this.isAuthenticated = false;
           this.userInfo = null;
           logger.warn('WebSocketService: Authentication required');
+          
+          // Resolve authentication promise (even though not authenticated)
+          if (this.authenticationResolver) {
+            this.authenticationResolver();
+            this.authenticationResolver = null;
+          }
           break;
 
         case 'subscribed':
           logger.info('WebSocketService: Subscribed to project', message.project_id, 'conversation', message.conversation_id);
+          this.isSubscribed = true;
           break;
 
         case 'start':
@@ -558,6 +594,9 @@ export class WebSocketService {
     this.activeStreams.clear();
     this.isAuthenticated = false;
     this.userInfo = null;
+    this.authenticationPromise = null;
+    this.authenticationResolver = null;
+    this.isSubscribed = false;
   }
 
   // Getters for authentication status

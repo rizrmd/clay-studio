@@ -24,7 +24,7 @@ import { ProtectedRoute } from '@/components/auth/protected-route'
 import { ClientDetailDialog } from '@/components/root/client-detail-dialog'
 import { SetupClaudeDialog } from '@/components/root/setup-claude-dialog'
 import { DomainManagement } from '@/components/root/domain-management'
-import { UserManagement } from '@/components/root/user-management'
+import { UserManagement } from '@/components/shared/user-management'
 
 export function ClientDetailPage() {
   const { clientId } = useParams()
@@ -368,7 +368,8 @@ export function ClientDetailPage() {
 
             <TabsContent value="users">
               <UserManagement 
-                clientName={client.name}
+                initialRegistrationEnabled={false}
+                initialRequireInviteCode={false}
                 clientId={client.id}
               />
             </TabsContent>

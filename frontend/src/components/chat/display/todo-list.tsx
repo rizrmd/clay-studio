@@ -22,7 +22,7 @@ export function TodoList({ todos, className }: TodoListProps) {
     <div className={cn("rounded-lg border bg-muted/30 p-3 -mt-3", className)}>
       {/* Header */}
       <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-1.5 text-sky-600">
+        <div className="flex items-center gap-1.5 text-gray-600">
           <ListTodo className="h-4 w-4" />
           <span className="font-medium text-xs">Tasks</span>
         </div>

@@ -14,6 +14,7 @@ mod m20250826_create_tool_usages_table;
 mod m20250827_000001_add_role_to_users;
 mod m20250827_add_domains_to_clients;
 mod m20250829_drop_clay_tools_used_column;
+mod m20250829_add_deleted_at_to_projects;
 
 pub struct Migrator;
 
@@ -35,6 +36,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20250827_000001_add_role_to_users::Migration),
             Box::new(m20250827_add_domains_to_clients::Migration),
             Box::new(m20250829_drop_clay_tools_used_column::Migration),
+            Box::new(m20250829_add_deleted_at_to_projects::Migration),
         ]
     }
 }
