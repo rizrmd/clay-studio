@@ -1,10 +1,16 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AskUserOption {
+    pub value: String,
+    pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct QueryOptions {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub system_prompt: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_turns: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -35,6 +41,15 @@ pub enum ClaudeMessage {
     ToolUse { tool: String, args: Value, tool_use_id: Option<String> },
     #[serde(rename = "tool_result")]
     ToolResult { tool: String, result: Value },
+    #[serde(rename = "ask_user")]
+    AskUser { 
+        prompt_type: String, // "checkbox" | "buttons" | "input"
+        title: String,
+        options: Option<Vec<AskUserOption>>,
+        input_type: Option<String>, // "text" | "password" for input fields
+        placeholder: Option<String>,
+        tool_use_id: Option<String>,
+    },
     #[serde(rename = "result")]
     Result { result: String },
     #[serde(rename = "error")]

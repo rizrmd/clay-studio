@@ -1,17 +1,29 @@
 use super::base::DataSourceConnector;
 use serde_json::{json, Value};
-use sqlx::{mysql::MySqlPool, Row as SqlxRow, Column};
+use sqlx::{mysql::{MySqlPool, MySqlPoolOptions}, Row as SqlxRow, Column};
 use std::error::Error;
 use async_trait::async_trait;
+use std::time::Duration;
 
 pub struct MySQLConnector {
     connection_string: String,
 }
 
 impl MySQLConnector {
+    async fn create_pool(&self) -> Result<MySqlPool, sqlx::Error> {
+        let pool_options = MySqlPoolOptions::new()
+            .max_connections(5)
+            .min_connections(1)
+            .acquire_timeout(Duration::from_secs(10))
+            .idle_timeout(Some(Duration::from_secs(30)));
+        
+        pool_options.connect(&self.connection_string).await
+    }
+    
     pub fn new(config: &Value) -> Result<Self, Box<dyn Error>> {
         // Prefer URL if provided, otherwise construct from individual components
         let connection_string = if let Some(url) = config.get("url").and_then(|v| v.as_str()) {
+            eprintln!("[DEBUG] Using provided MySQL URL directly");
             url.to_string()
         } else {
             // Fallback to individual components for backward compatibility
@@ -20,6 +32,9 @@ impl MySQLConnector {
             let database = config.get("database").and_then(|v| v.as_str()).ok_or("Missing database name")?;
             let username = config.get("username").and_then(|v| v.as_str()).unwrap_or("root");
             let password = config.get("password").and_then(|v| v.as_str()).unwrap_or("");
+            
+            eprintln!("[DEBUG] Building MySQL URL from components: host={}, port={}, database={}, username={}", 
+                host, port, database, username);
             
             // URL encode username and password to handle special characters
             let encoded_username = urlencoding::encode(username);
@@ -36,6 +51,33 @@ impl MySQLConnector {
             }
         };
         
+        // Log connection string (masking password for security)
+        let masked_conn_str = if connection_string.contains('@') {
+            let parts: Vec<&str> = connection_string.splitn(2, '@').collect();
+            if parts.len() == 2 {
+                // Extract the protocol and auth part
+                if let Some(protocol_end) = parts[0].find("://") {
+                    let protocol = &parts[0][..protocol_end+3];
+                    let auth = &parts[0][protocol_end+3..];
+                    
+                    // Check if there's a password
+                    if auth.contains(':') {
+                        let user_parts: Vec<&str> = auth.splitn(2, ':').collect();
+                        format!("{}{}:****@{}", protocol, user_parts[0], parts[1])
+                    } else {
+                        connection_string.clone()
+                    }
+                } else {
+                    "mysql://****".to_string()
+                }
+            } else {
+                connection_string.clone()
+            }
+        } else {
+            connection_string.clone()
+        };
+        eprintln!("[DEBUG] MySQL connection string (masked): {}", masked_conn_str);
+        
         Ok(Self { connection_string })
     }
 }
@@ -43,13 +85,50 @@ impl MySQLConnector {
 #[async_trait]
 impl DataSourceConnector for MySQLConnector {
     async fn test_connection(&self) -> Result<bool, Box<dyn Error>> {
-        let pool = MySqlPool::connect(&self.connection_string).await?;
-        sqlx::query("SELECT 1").fetch_one(&pool).await?;
-        Ok(true)
+        eprintln!("[DEBUG] Attempting MySQL connection test...");
+        
+        // Try to connect with a timeout
+        match self.create_pool().await {
+            Ok(pool) => {
+                eprintln!("[DEBUG] MySQL pool created successfully");
+                
+                // Try a simple query
+                match sqlx::query("SELECT 1 as test").fetch_one(&pool).await {
+                    Ok(_) => {
+                        eprintln!("[DEBUG] MySQL test query successful");
+                        pool.close().await;
+                        Ok(true)
+                    }
+                    Err(e) => {
+                        eprintln!("[ERROR] MySQL test query failed: {}", e);
+                        pool.close().await;
+                        Err(Box::new(e) as Box<dyn Error>)
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("[ERROR] Failed to create MySQL connection pool: {}", e);
+                eprintln!("[ERROR] Error type: {:?}", e);
+                
+                // Check if it's a specific type of error
+                let error_string = e.to_string();
+                if error_string.contains("Access denied") {
+                    eprintln!("[ERROR] Authentication failed - check username and password");
+                } else if error_string.contains("Unknown database") {
+                    eprintln!("[ERROR] Database does not exist");
+                } else if error_string.contains("Can't connect") || error_string.contains("Connection refused") {
+                    eprintln!("[ERROR] Cannot reach MySQL server - check host and port");
+                } else if error_string.contains("timeout") {
+                    eprintln!("[ERROR] Connection timeout - server may be unreachable or slow");
+                }
+                
+                Err(Box::new(e) as Box<dyn Error>)
+            }
+        }
     }
     
     async fn execute_query(&self, query: &str, limit: i32) -> Result<Value, Box<dyn Error>> {
-        let pool = MySqlPool::connect(&self.connection_string).await?;
+        let pool = self.create_pool().await.map_err(|e| Box::new(e) as Box<dyn Error>)?;
         
         let query_with_limit = if query.to_lowercase().contains("limit") {
             query.to_string()
@@ -62,6 +141,7 @@ impl DataSourceConnector for MySQLConnector {
         let execution_time_ms = start.elapsed().as_millis() as i64;
         
         if rows.is_empty() {
+            pool.close().await;
             return Ok(json!({
                 "columns": [],
                 "rows": [],
@@ -103,16 +183,19 @@ impl DataSourceConnector for MySQLConnector {
             result_rows.push(row_data);
         }
         
-        Ok(json!({
+        let result = json!({
             "columns": columns,
             "rows": result_rows,
             "row_count": result_rows.len(),
             "execution_time_ms": execution_time_ms
-        }))
+        });
+        
+        pool.close().await;
+        Ok(result)
     }
     
     async fn fetch_schema(&self) -> Result<Value, Box<dyn Error>> {
-        let pool = MySqlPool::connect(&self.connection_string).await?;
+        let pool = self.create_pool().await.map_err(|e| Box::new(e) as Box<dyn Error>)?;
         
         let tables = sqlx::query(
             "SELECT 
@@ -146,22 +229,24 @@ impl DataSourceConnector for MySQLConnector {
             schema["tables"][&table_name].as_array_mut().unwrap().push(column_info);
         }
         
+        pool.close().await;
         Ok(schema)
     }
     
     async fn list_tables(&self) -> Result<Vec<String>, Box<dyn Error>> {
-        let pool = MySqlPool::connect(&self.connection_string).await?;
+        let pool = self.create_pool().await.map_err(|e| Box::new(e) as Box<dyn Error>)?;
         
         let tables = sqlx::query("SHOW TABLES")
             .fetch_all(&pool)
             .await?;
         
         let table_names: Vec<String> = tables.iter().map(|row| row.get(0)).collect();
+        pool.close().await;
         Ok(table_names)
     }
     
     async fn analyze_database(&self) -> Result<Value, Box<dyn Error>> {
-        let pool = MySqlPool::connect(&self.connection_string).await?;
+        let pool = self.create_pool().await.map_err(|e| Box::new(e) as Box<dyn Error>)?;
         
         // Get basic statistics
         let stats = sqlx::query(
@@ -254,7 +339,7 @@ impl DataSourceConnector for MySQLConnector {
             -(connections as i64 * 1000 + size / 1000000)
         });
         
-        Ok(json!({
+        let result = json!({
             "statistics": {
                 "table_count": table_count,
                 "total_size": total_size.unwrap_or(0),
@@ -264,11 +349,14 @@ impl DataSourceConnector for MySQLConnector {
             "key_tables": key_tables.into_iter().take(10).collect::<Vec<_>>(),
             "largest_tables": largest_tables,
             "analyzed_at": chrono::Utc::now().to_rfc3339(),
-        }))
+        });
+        
+        pool.close().await;
+        Ok(result)
     }
     
     async fn get_tables_schema(&self, tables: Vec<&str>) -> Result<Value, Box<dyn Error>> {
-        let pool = MySqlPool::connect(&self.connection_string).await?;
+        let pool = self.create_pool().await.map_err(|e| Box::new(e) as Box<dyn Error>)?;
         let mut result = json!({});
         
         for table_name in tables {
@@ -385,11 +473,12 @@ impl DataSourceConnector for MySQLConnector {
             });
         }
         
+        pool.close().await;
         Ok(result)
     }
     
     async fn search_tables(&self, pattern: &str) -> Result<Value, Box<dyn Error>> {
-        let pool = MySqlPool::connect(&self.connection_string).await?;
+        let pool = self.create_pool().await.map_err(|e| Box::new(e) as Box<dyn Error>)?;
         
         let tables = sqlx::query(
             "SELECT 
@@ -416,14 +505,17 @@ impl DataSourceConnector for MySQLConnector {
             })
         }).collect();
         
-        Ok(json!({
+        let result = json!({
             "matches": results,
             "total_matches": results.len(),
-        }))
+        });
+        
+        pool.close().await;
+        Ok(result)
     }
     
     async fn get_related_tables(&self, table: &str) -> Result<Value, Box<dyn Error>> {
-        let pool = MySqlPool::connect(&self.connection_string).await?;
+        let pool = self.create_pool().await.map_err(|e| Box::new(e) as Box<dyn Error>)?;
         
         // Get the main table schema
         let main_schema = self.get_tables_schema(vec![table]).await?;
@@ -476,15 +568,18 @@ impl DataSourceConnector for MySQLConnector {
             json!({})
         };
         
-        Ok(json!({
+        let result = json!({
             "main_table": main_schema[table],
             "related_tables": related_schemas,
             "relationship_count": related_tables.len(),
-        }))
+        });
+        
+        pool.close().await;
+        Ok(result)
     }
     
     async fn get_database_stats(&self) -> Result<Value, Box<dyn Error>> {
-        let pool = MySqlPool::connect(&self.connection_string).await?;
+        let pool = self.create_pool().await.map_err(|e| Box::new(e) as Box<dyn Error>)?;
         
         // Get overall statistics
         let stats = sqlx::query(
@@ -549,7 +644,7 @@ impl DataSourceConnector for MySQLConnector {
         .fetch_all(&pool)
         .await?;
         
-        Ok(json!({
+        let result = json!({
             "summary": {
                 "total_tables": stats.get::<i64, _>("table_count"),
                 "total_size_bytes": stats.get::<Option<i64>, _>("total_size").unwrap_or(0),
@@ -568,6 +663,9 @@ impl DataSourceConnector for MySQLConnector {
                 "referenced_by_count": c.get::<i64, _>("referenced_by_count"),
                 "total_connections": c.get::<i64, _>("total_connections"),
             })).collect::<Vec<_>>(),
-        }))
+        });
+        
+        pool.close().await;
+        Ok(result)
     }
 }

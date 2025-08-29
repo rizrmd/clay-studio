@@ -7,6 +7,21 @@ pub fn generate_claude_md(project_id: &str, project_name: &str) -> String {
 You are Clay Studio. an ai assistant to help analyzing data.
 When user ask who are you, answer as Clay Studio.
 
+## CRITICAL INSTRUCTIONS - READ FIRST
+
+**DO NOT USE datasource_list TOOL** - The datasources are ALREADY PROVIDED in this document.
+
+When the user asks any of these questions:
+- "what's connected?"
+- "what datasources are connected?"
+- "what databases are available?"
+- "show me the datasources"
+- Any similar question about available datasources
+
+YOU MUST: Look at the "Connected Data Sources" section below and tell them what's there.
+YOU MUST NOT: Use the datasource_list tool.
+
+If there are no datasources in the "Connected Data Sources" section, simply say "No data sources are currently connected to your project. You can add a database connection using the datasource_add command if you'd like to connect one."
 
 ## MCP Tools Available
 
@@ -14,11 +29,12 @@ This project uses Model Context Protocol (MCP) tools for database operations.
 
 ### When to Use Each Datasource Tool
 
-- **datasource_list**: List all datasources (always use first)
+- **datasource_list**: List all datasources (DO NOT USE - datasources are already provided below. Only use if explicitly asked to refresh)
 - **datasource_detail**: Check connection info (host, port, database, user, status) - FAST
 - **datasource_inspect**: Analyze database schema and structure - SLOW/HEAVY
-- **datasource_add**: Add a new datasource - do not use unless asked
-- **datasource_remove**: Remove a datasource - do not use unless asked
+- **datasource_add**: Add a new datasource (check for duplicates first!)
+- **datasource_update**: Update existing datasource configuration (use this to modify connection details)
+- **datasource_remove**: Remove a datasource
 - **datasource_test**: Test if connection works
 
 IMPORTANT: Always use datasource_detail when user asks about:
@@ -32,11 +48,13 @@ IMPORTANT: Always use datasource_detail when user asks about:
 ### Quick Start - Database Inspection
 
 ```mcp
-# Always start by listing available data sources
-datasource_list
+# IMPORTANT: Check the "Connected Data Sources" section below for available datasources
+# DO NOT use datasource_list - the datasources are already provided
 
 # IMPORTANT: always check existing datasource before adding new one. 
-# VERY IMPORTANT: prevent duplicated datasource.
+# IMPORTANT: when adding new datasource ensure all required information is provided (e.g. host,is it mysql,postgresql,username, password). 
+# VERY IMPORTANT: If a datasource exists but needs updated credentials or connection details, use datasource_update instead of removing and re-adding.
+# VERY IMPORTANT: prevent duplicated datasource - use datasource_update to modify existing ones.
 # VERY IMPORTANT: prevent re-inspecting recently inspected datasource. 
 
 # Get lightweight details about a specific datasource (fast)
@@ -61,6 +79,19 @@ schema_get_related datasource_id="<id>" table="orders"
 schema_stats datasource_id="<id>"
 ```
 
+### Updating Existing Datasources
+
+```mcp
+# Update datasource connection details (use this instead of remove + add)
+datasource_update datasource_id="<id>" host="new-host.com" port=5432
+
+# Update credentials
+datasource_update datasource_id="<id>" username="new_user" password="new_password"
+
+# Update multiple properties at once
+datasource_update datasource_id="<id>" host="new-host.com" database="new_db" username="new_user"
+```
+
 ### Data Querying
 
 ```mcp
@@ -74,14 +105,11 @@ PROJECT_ID: {project_id}
 
 ### Initial Setup Commands
 
-When starting work on this project, ALWAYS run these commands first:
+When starting work on this project:
 
-1. List all data sources:
-   ```mcp
-   datasource_list
-   ```
-
-2. For each data source, get basic details first (lightweight):
+1. **READ THE "Connected Data Sources" SECTION BELOW** - it already contains all datasource information
+   
+2. If you need additional details about a specific datasource (lightweight):
    ```mcp
    datasource_detail datasource_id="<datasource_id>"
    ```
@@ -166,13 +194,15 @@ data_query datasource_id="<id>" query="
 
 ## Best Practices
 
-1. **Use datasource_detail for connection info**: Always use `datasource_detail` when asked about host, port, database name, user, or connection status
-2. **Check details before inspect**: Use `datasource_detail` for quick info before running the heavy `datasource_inspect`
-3. **Inspect only when needed**: Only use `datasource_inspect` when you need to understand the database schema/structure for writing queries
-4. **Use pattern search**: For large databases, use `schema_search` to find relevant tables quickly
-5. **Check relationships**: Use `schema_get_related` to understand how tables connect
-6. **Limit results**: Always use LIMIT in queries during exploration to avoid large result sets
-7. **Cache inspection results**: The inspection results are cached, so subsequent calls are faster
+1. **Update don't replace**: When modifying datasource details, ALWAYS use `datasource_update` instead of removing and re-adding
+2. **Use datasource_detail for connection info**: Always use `datasource_detail` when asked about host, port, database name, user, or connection status
+3. **Check details before inspect**: Use `datasource_detail` for quick info before running the heavy `datasource_inspect`
+4. **Inspect only when needed**: Only use `datasource_inspect` when you need to understand the database schema/structure for writing queries
+5. **Use pattern search**: For large databases, use `schema_search` to find relevant tables quickly
+6. **Check relationships**: Use `schema_get_related` to understand how tables connect
+7. **Limit results**: Always use LIMIT in queries during exploration to avoid large result sets
+8. **Cache inspection results**: The inspection results are cached, so subsequent calls are faster
+9. **Avoid duplicates**: Check existing datasources before adding new ones - update existing ones if needed
 
 ## Notes
 
@@ -194,10 +224,14 @@ pub async fn generate_claude_md_with_datasources(
 ) -> String {
     let mut base_content = generate_claude_md(project_id, project_name);
     
-    if !datasources.is_empty() {
-        let mut datasource_section = String::from("\n## Connected Data Sources\n\n");
-        let mut datasource_ids = Vec::new();
-        
+    // Always add the Connected Data Sources section, even if empty
+    let mut datasource_section = String::from("\n## Connected Data Sources\n\n");
+    let mut datasource_ids = Vec::new();
+    
+    if datasources.is_empty() {
+        datasource_section.push_str("**No datasources currently connected.**\n\n");
+        datasource_section.push_str("To add a datasource, use the `datasource_add` command.\n\n");
+    } else {
         for ds in datasources {
             if let (Some(id), Some(name), Some(source_type)) = (
                 ds.get("id").and_then(|v| v.as_str()),
@@ -225,24 +259,24 @@ pub async fn generate_claude_md_with_datasources(
                 }
             }
         }
-        
-        // Insert the datasource section after the Project Context section
-        let insert_position = base_content.find("### Initial Setup Commands")
-            .unwrap_or(base_content.find("## Project Context").unwrap_or(base_content.len()));
-        
-        base_content.insert_str(insert_position, &datasource_section);
-        
-        // Add auto-initialization script at the end
-        if !datasource_ids.is_empty() {
+    }
+    
+    // Insert the datasource section after the Project Context section
+    let insert_position = base_content.find("### Initial Setup Commands")
+        .unwrap_or(base_content.find("## Project Context").unwrap_or(base_content.len()));
+    
+    base_content.insert_str(insert_position, &datasource_section);
+    
+    // Add auto-initialization script at the end only if there are datasources
+    if !datasource_ids.is_empty() {
             base_content.push_str("\n## Auto-Initialization Script\n\n");
             base_content.push_str("```mcp-auto-init\n");
-            base_content.push_str("# This script runs automatically when Claude loads this project\n");
-            base_content.push_str("datasource_list\n");
+            base_content.push_str("# Data sources are already embedded in this document\n");
+            base_content.push_str("# Auto-inspecting datasources if not already cached\n");
             for id in datasource_ids {
                 base_content.push_str(&format!("datasource_inspect datasource_id=\"{}\"\n", id));
             }
             base_content.push_str("```\n");
-        }
     }
     
     base_content

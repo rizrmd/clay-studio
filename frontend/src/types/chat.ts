@@ -21,6 +21,21 @@ export interface ToolUsage {
   createdAt?: string;
 }
 
+export interface AskUserOption {
+  value: string;
+  label: string;
+  description?: string;
+}
+
+export interface AskUserData {
+  prompt_type: "checkbox" | "buttons" | "input";
+  title: string;
+  options?: AskUserOption[];
+  input_type?: "text" | "password";
+  placeholder?: string;
+  tool_use_id?: string;
+}
+
 export interface Message {
   id: string;
   content: string;
@@ -30,15 +45,20 @@ export interface Message {
   processing_time_ms?: number;
   file_attachments?: FileAttachment[];
   tool_usages?: ToolUsage[];
+  ask_user?: AskUserData;
 }
 
 // Helper to get tool names from a message
 export function getToolNamesFromMessage(message: Message): string[] {
   // Prefer tool_usages if available, fallback to clay_tools_used for backward compatibility
+  let tools: string[] = [];
   if (message.tool_usages && message.tool_usages.length > 0) {
-    return message.tool_usages.map(tu => tu.tool_name);
+    tools = message.tool_usages.map(tu => tu.tool_name);
+  } else {
+    tools = message.clay_tools_used || [];
   }
-  return message.clay_tools_used || [];
+  // Filter out TodoWrite as it's not a real tool call
+  return tools.filter(tool => tool !== 'TodoWrite');
 }
 
 export interface ConversationContext {

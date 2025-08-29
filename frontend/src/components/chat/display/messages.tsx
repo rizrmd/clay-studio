@@ -1,8 +1,10 @@
 import { Badge } from "@/components/ui/badge";
-import { getToolNamesFromMessage } from "@/types/chat";
+import { getToolNamesFromMessage, type AskUserData } from "@/types/chat";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ToolCallIndicator } from "./tool-call-indicator";
+import { TodoList } from "./todo-list";
+import { AskUser } from "./ask-user";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -51,6 +53,7 @@ interface Message {
   file_attachments?: FileAttachment[];
   clay_tools_used?: string[];
   tool_usages?: any[]; // Added for compatibility
+  ask_user?: AskUserData;
 }
 
 interface QueuedMessage {
@@ -75,6 +78,7 @@ interface MessagesProps {
   activeTools?: string[]; // Active tools being used
   onResendMessage?: (message: Message) => void; // Add resend callback
   onNewChatFromHere?: (messageId: string) => void; // Add new chat from here callback
+  onAskUserSubmit?: (response: string | string[]) => void; // Add ask user submission callback
 }
 
 // Helper function to format file size
@@ -129,6 +133,10 @@ const MessageItem = memo(
     onResendMessage,
     isLastUserMessage,
     onNewChatFromHere,
+    latestTodoWrite,
+    onAskUserSubmit,
+    isStreaming,
+    isLoading,
   }: {
     message: DisplayMessage;
     onForgetFrom?: (messageId: string) => void;
@@ -141,6 +149,10 @@ const MessageItem = memo(
     onResendMessage?: (message: Message) => void;
     isLastUserMessage?: boolean;
     onNewChatFromHere?: (messageId: string) => void;
+    latestTodoWrite?: { messageId: string; todos: any[] } | null;
+    onAskUserSubmit?: (response: string | string[]) => void;
+    isStreaming?: boolean;
+    isLoading?: boolean;
   }) => {
     const isQueued = message.isQueued;
     const isEditing = message.isEditing;
@@ -382,6 +394,32 @@ const MessageItem = memo(
                     ))}
                   </div>
                 )}
+              {/* Show TodoList only for the latest TodoWrite message */}
+              {latestTodoWrite && latestTodoWrite.messageId === message.id && (
+                <div className="mt-3">
+                  <TodoList todos={latestTodoWrite.todos} />
+                </div>
+              )}
+              {/* Show AskUser component if present */}
+              {message.ask_user && message.role === 'assistant' && (
+                <div className="mt-3">
+                  <AskUser
+                    promptType={message.ask_user.prompt_type}
+                    title={message.ask_user.title}
+                    options={message.ask_user.options}
+                    inputType={message.ask_user.input_type}
+                    placeholder={message.ask_user.placeholder}
+                    toolUseId={message.ask_user.tool_use_id}
+                    onSubmit={(response) => {
+                      // Handle the submission
+                      if (onAskUserSubmit) {
+                        onAskUserSubmit(response);
+                      }
+                    }}
+                    isDisabled={isStreaming || isLoading}
+                  />
+                </div>
+              )}
               {/* Show tools used for completed messages */}
               {getToolNamesFromMessage(message as any).length > 0 &&
                 !message.isQueued && (
@@ -525,6 +563,7 @@ export function Messages({
   activeTools = [],
   onResendMessage,
   onNewChatFromHere,
+  onAskUserSubmit,
 }: MessagesProps) {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -704,6 +743,37 @@ export function Messages({
     for (let i = messages.length - 1; i >= 0; i--) {
       if (messages[i].role === "user") {
         return messages[i].id;
+      }
+    }
+    return null;
+  }, [messages]);
+
+  // Find the latest TodoWrite tool usage across all messages
+  const latestTodoWrite = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      // Get all TodoWrite usages in this message
+      const todoUsages = messages[i].tool_usages?.filter(tu => tu.tool_name === 'TodoWrite') || [];
+      
+      // If this message has TodoWrite usages, return the last one
+      if (todoUsages.length > 0) {
+        const lastTodoUsage = todoUsages[todoUsages.length - 1];
+        return {
+          messageId: messages[i].id,
+          todos: (() => {
+            const params = lastTodoUsage.parameters;
+            // Handle both direct object and stringified JSON
+            if (typeof params === 'string') {
+              try {
+                const parsed = JSON.parse(params);
+                return parsed.todos || [];
+              } catch (e) {
+                console.error('Failed to parse TodoWrite parameters:', e);
+                return [];
+              }
+            }
+            return params?.todos || [];
+          })()
+        };
       }
     }
     return null;
@@ -974,6 +1044,10 @@ export function Messages({
                             onResendMessage={onResendMessage}
                             isLastUserMessage={item.id === lastUserMessageId}
                             onNewChatFromHere={onNewChatFromHere}
+                            latestTodoWrite={latestTodoWrite}
+                            onAskUserSubmit={onAskUserSubmit}
+                            isStreaming={_isStreaming}
+                            isLoading={isLoading}
                           />
                           {bottomPadding}
                         </>

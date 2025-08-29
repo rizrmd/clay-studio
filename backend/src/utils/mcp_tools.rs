@@ -45,6 +45,13 @@ pub fn get_mcp_tools() -> HashMap<String, McpTool> {
         result_indicators: vec!["Data source", "removed successfully", "Successfully removed"],
     });
     
+    tools.insert("mcp__data-analysis__datasource_update".to_string(), McpTool {
+        name: "datasource_update",
+        display_name: "Update Data Source",
+        description: "Updates an existing data source configuration",
+        result_indicators: vec!["Data source", "updated successfully", "Successfully updated", "Configuration updated"],
+    });
+    
     tools.insert("mcp__data-analysis__datasource_test".to_string(), McpTool {
         name: "datasource_test",
         display_name: "Test Connection",

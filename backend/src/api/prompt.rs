@@ -11,8 +11,6 @@ use uuid::Uuid;
 pub struct PromptRequest {
     pub prompt: String,
     #[serde(default)]
-    pub system_prompt: Option<String>,
-    #[serde(default)]
     pub max_turns: Option<u32>,
 }
 
@@ -103,7 +101,6 @@ pub async fn handle_prompt_stream(
         
         // Prepare query options
         let options = QueryOptions {
-            system_prompt: prompt_request.system_prompt,
             max_turns: prompt_request.max_turns,
             allowed_tools: None,
             permission_mode: None,

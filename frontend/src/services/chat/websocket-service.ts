@@ -6,7 +6,7 @@ import type { Message } from '../../types/chat';
 
 // WebSocket message types from server
 interface ServerMessage {
-  type: 'connected' | 'authentication_required' | 'subscribed' | 'pong' | 'start' | 'progress' | 'tool_use' | 'content' | 'complete' | 'error';
+  type: 'connected' | 'authentication_required' | 'subscribed' | 'pong' | 'start' | 'progress' | 'tool_use' | 'content' | 'complete' | 'error' | 'title_updated' | 'ask_user' | 'context_usage';
   // Connection fields
   user_id?: string;
   authenticated?: boolean;
@@ -21,6 +21,20 @@ interface ServerMessage {
   tools_used?: string[];
   error?: string;
   project_id?: string;
+  // Title update fields
+  title?: string;
+  // Ask user fields
+  prompt_type?: string;
+  options?: any[];
+  input_type?: string;
+  placeholder?: string;
+  tool_use_id?: string;
+  // Context usage fields
+  total_chars?: number;
+  max_chars?: number;
+  percentage?: number;
+  message_count?: number;
+  needs_compaction?: boolean;
 }
 
 // WebSocket message types to server
@@ -276,6 +290,24 @@ export class WebSocketService {
             await this.handleErrorEvent(message.error, message.conversation_id);
           }
           break;
+        
+        case 'title_updated':
+          if (message.title && message.conversation_id) {
+            await this.handleTitleUpdatedEvent(message.title, message.conversation_id);
+          }
+          break;
+
+        case 'ask_user':
+          if (message.conversation_id) {
+            await this.handleAskUserEvent(message);
+          }
+          break;
+
+        case 'context_usage':
+          if (message.conversation_id) {
+            await this.handleContextUsageEvent(message);
+          }
+          break;
 
         case 'pong':
           // Heartbeat response
@@ -433,6 +465,82 @@ export class WebSocketService {
     await this.conversationManager.setError(conversationId, error);
     await this.conversationManager.updateStatus(conversationId, 'idle');
     await this.conversationManager.clearActiveTools(conversationId);
+  }
+
+  private async handleTitleUpdatedEvent(title: string, conversationId: string): Promise<void> {
+    logger.info('WebSocketService: Title updated for conversation', conversationId, 'to', title);
+    
+    // Emit event to update sidebar and other UI components
+    await chatEventBus.emit({
+      type: 'CONVERSATION_TITLE_UPDATED',
+      conversationId,
+      title,
+    });
+  }
+
+  private async handleContextUsageEvent(message: ServerMessage): Promise<void> {
+    const { conversation_id, total_chars, max_chars, percentage, message_count, needs_compaction } = message;
+    
+    if (!conversation_id) return;
+    
+    logger.info('WebSocketService: Context usage update', { 
+      conversation_id,
+      percentage,
+      message_count,
+      needs_compaction
+    });
+    
+    // Update conversation context usage
+    await this.conversationManager.updateContextUsage(conversation_id, {
+      totalChars: total_chars || 0,
+      maxChars: max_chars || 800000,
+      percentage: percentage || 0,
+      messageCount: message_count || 0,
+      needsCompaction: needs_compaction || false,
+    });
+  }
+
+  private async handleAskUserEvent(message: ServerMessage): Promise<void> {
+    const { conversation_id, prompt_type, title, options, input_type, placeholder, tool_use_id } = message;
+    
+    if (!conversation_id) return;
+    
+    logger.info('WebSocketService: Ask user event received', { 
+      conversation_id, 
+      prompt_type,
+      title 
+    });
+    
+    // Update the last assistant message with ask_user data
+    const state = conversationStore.conversations[conversation_id];
+    if (state && state.messages.length > 0) {
+      const lastMessage = state.messages[state.messages.length - 1];
+      
+      if (lastMessage.role === 'assistant') {
+        await this.conversationManager.updateLastMessage(conversation_id, {
+          ask_user: {
+            prompt_type: prompt_type as "checkbox" | "buttons" | "input",
+            title: title || '',
+            options,
+            input_type: input_type as "text" | "password" | undefined,
+            placeholder,
+            tool_use_id,
+          }
+        });
+      }
+    }
+    
+    // Emit event for UI to respond
+    chatEventBus.emit({
+      type: 'ASK_USER',
+      conversationId: conversation_id,
+      promptType: prompt_type,
+      title,
+      options,
+      inputType: input_type,
+      placeholder,
+      toolUseId: tool_use_id,
+    });
   }
 
   ping(): void {

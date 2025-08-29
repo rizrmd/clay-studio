@@ -53,6 +53,15 @@ pub enum ServerMessage {
         tool: String,
         conversation_id: String 
     },
+    AskUser {
+        prompt_type: String,
+        title: String,
+        options: Option<Vec<serde_json::Value>>,
+        input_type: Option<String>,
+        placeholder: Option<String>,
+        tool_use_id: Option<String>,
+        conversation_id: String,
+    },
     Content { 
         content: String,
         conversation_id: String 
@@ -66,6 +75,18 @@ pub enum ServerMessage {
     Error { 
         error: String,
         conversation_id: String 
+    },
+    TitleUpdated {
+        conversation_id: String,
+        title: String
+    },
+    ContextUsage {
+        conversation_id: String,
+        total_chars: usize,
+        max_chars: usize,
+        percentage: f32,
+        message_count: usize,
+        needs_compaction: bool,
     },
 }
 

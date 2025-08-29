@@ -80,10 +80,19 @@ export function MultimodalInput({
   );
   const dragCounter = useRef(0);
 
-  useEffect(() => {
+  // Auto-resize textarea
+  const adjustTextareaHeight = () => {
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
       textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+    }
+  };
+
+  // Set initial value and adjust height when input prop changes externally
+  useEffect(() => {
+    if (textareaRef.current && textareaRef.current.value !== input) {
+      textareaRef.current.value = input;
+      adjustTextareaHeight();
     }
   }, [input]);
 
@@ -291,6 +300,12 @@ export function MultimodalInput({
     handleSubmit(e, allFiles);
     setSelectedFiles([]);
     onExternalFilesChange?.([]);
+    
+    // Clear the textarea manually since we're using defaultValue
+    if (textareaRef.current) {
+      textareaRef.current.value = '';
+      adjustTextareaHeight();
+    }
   };
 
   // Drag and drop handlers
@@ -670,9 +685,12 @@ export function MultimodalInput({
       )}
       <Textarea
         ref={textareaRef}
-        value={input}
+        defaultValue={input}
         autoFocus
-        onChange={(e) => setInput(e.target.value)}
+        onChange={(e) => {
+          setInput(e.target.value);
+          adjustTextareaHeight();
+        }}
         onEnterSubmit={(e) => handleFormSubmit(e as any)}
         placeholder={
           isLoading

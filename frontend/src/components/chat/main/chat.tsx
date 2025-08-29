@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { logger } from "@/lib/logger";
 import { Messages, ChatSkeleton } from "../display";
 import { MultimodalInput } from "../input/multimodal-input";
+import { ContextIndicator } from "../display/context-indicator";
 import { useValtioChat } from "@/hooks/use-valtio-chat";
 import { useInputState } from "@/hooks/use-input-state";
 import { updateConversationMessages } from "@/store/chat-store";
@@ -51,6 +52,7 @@ export function Chat({
     editQueuedMessage,
     cancelQueuedMessage,
     activeTools,
+    contextUsage,
   } = useValtioChat(projectId || "", propConversationId);
 
   // Use the input state hook to persist input across conversation switches
@@ -186,6 +188,24 @@ export function Chat({
       }
     } catch (error) {
       logger.error("Chat: Failed to create new chat from message:", error);
+    }
+  };
+
+  const handleAskUserSubmit = (response: string | string[]) => {
+    // Format the response for sending as a message
+    let responseText: string;
+    
+    if (Array.isArray(response)) {
+      // For checkbox selections, send as comma-separated list
+      responseText = response.join(", ");
+    } else {
+      // For buttons and input, send as is
+      responseText = response;
+    }
+    
+    // Send the response as a new user message
+    if (responseText) {
+      sendMessage(responseText, []);
     }
   };
 
@@ -356,6 +376,7 @@ export function Chat({
                   activeTools={[...activeTools]}
                   onResendMessage={handleResendMessage}
                   onNewChatFromHere={handleNewChatFromHere}
+                  onAskUserSubmit={handleAskUserSubmit}
                 />
               </div>
             )}
@@ -363,6 +384,12 @@ export function Chat({
         </div>
         <div className="w-full absolute bottom-0 right-0">
           <div className="mx-auto max-w-2xl px-2 sm:px-4">
+            {/* Context usage indicator */}
+            {contextUsage && propConversationId !== 'new' && (
+              <div className="flex justify-end mb-2 px-2">
+                <ContextIndicator contextUsage={contextUsage} />
+              </div>
+            )}
             <MultimodalInput
               input={input}
               setInput={setInput}

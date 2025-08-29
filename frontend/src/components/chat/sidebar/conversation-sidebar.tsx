@@ -37,6 +37,7 @@ import { ClaudeMdModal } from "./claude-md-modal";
 import { store, cleanupDeletedConversation } from "@/store/chat-store";
 import { ConversationManager } from "@/store/chat/conversation-manager";
 import { conversationStore } from "@/store/chat/conversation-store";
+import { chatEventBus } from "@/services/chat/event-bus";
 
 interface Conversation {
   id: string;
@@ -329,6 +330,47 @@ export function ConversationSidebar({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, isAuthenticated, isSetupComplete]);
+
+  // Subscribe to title update events from chatEventBus
+  useEffect(() => {
+    const unsubscribe = chatEventBus.subscribe(
+      'CONVERSATION_TITLE_UPDATED',
+      async (event) => {
+        if (event.type === 'CONVERSATION_TITLE_UPDATED') {
+          logger.info('ConversationSidebar: Title updated for conversation', event.conversationId, 'to', event.title);
+          
+          // Update the conversation in the local state
+          setConversations((prev) => 
+            prev.map((conv) => 
+              conv.id === event.conversationId 
+                ? { ...conv, title: event.title }
+                : conv
+            )
+          );
+          
+          // Add to recently updated set for visual feedback
+          setRecentlyUpdatedConversations((prev) => {
+            const newSet = new Set(prev);
+            newSet.add(event.conversationId);
+            return newSet;
+          });
+          
+          // Remove from recently updated after a delay
+          setTimeout(() => {
+            setRecentlyUpdatedConversations((prev) => {
+              const newSet = new Set(prev);
+              newSet.delete(event.conversationId);
+              return newSet;
+            });
+          }, 2000);
+        }
+      }
+    );
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
 
   // Handle conversation click
   const handleConversationClick = (

@@ -11,6 +11,40 @@ use sqlx::{Row, PgPool};
 
 use crate::api::websocket::{broadcast_to_subscribers, ServerMessage};
 
+// Generate a concise title from the user's first message
+fn generate_conversation_title(content: &str) -> String {
+    let content = content.trim();
+    
+    // Remove file attachment mentions
+    let content = if let Some(idx) = content.find("\n\nAttached files:") {
+        &content[..idx]
+    } else {
+        content
+    };
+    
+    // Take first line or sentence
+    let title = content
+        .lines()
+        .next()
+        .unwrap_or(content)
+        .trim();
+    
+    // Truncate to reasonable length (50 chars)
+    if title.len() > 50 {
+        let truncated = &title[..47];
+        // Find last word boundary to avoid cutting mid-word
+        if let Some(last_space) = truncated.rfind(' ') {
+            format!("{}...", &title[..last_space])
+        } else {
+            format!("{}...", truncated)
+        }
+    } else if title.is_empty() {
+        "New Conversation".to_string()
+    } else {
+        title.to_string()
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct ChatRequest {
     pub messages: Vec<Message>,
@@ -35,12 +69,13 @@ async fn ensure_conversation(
 
     if !exists {
         sqlx::query(
-            "INSERT INTO conversations (id, project_id, title, created_at) VALUES ($1, $2, $3, $4)"
+            "INSERT INTO conversations (id, project_id, title, created_at, is_title_manually_set) VALUES ($1, $2, $3, $4, $5)"
         )
         .bind(conversation_id)
         .bind(project_id)
         .bind("New Conversation")
         .bind(Utc::now())
+        .bind(false) // Auto-generated title, not manually set
         .execute(pool)
         .await
         .map_err(|e| AppError::InternalServerError(format!("Failed to create conversation: {}", e)))?;
@@ -204,23 +239,119 @@ pub async fn handle_chat_stream_ws(
         tracing::error!("Failed to create assistant message stub: {}", e);
     }
 
-    // Prepare conversation string for Claude (same format as chat.rs)
+    // Prepare conversation string for Claude
+    // Claude Code SDK handles message compaction internally to stay within context limits
     let mut conversation_text = String::new();
     
-    // Add system message
-    conversation_text.push_str(&format!("System: You are Claude Code, Anthropic's CLI tool for developers. Project: {}\n", chat_request.project_id));
+    // System message (always included)
+    let system_message = format!("System: You are Claude Code, Anthropic's CLI tool for developers. Project: {}\n", chat_request.project_id);
+    conversation_text.push_str(&system_message);
     
-    // Add all messages to conversation
-    for msg in &chat_request.messages {
-        match msg.role {
-            MessageRole::User => conversation_text.push_str(&format!("User: {}\n", msg.content)),
-            MessageRole::Assistant => conversation_text.push_str(&format!("Assistant: {}\n", msg.content)),
-            MessageRole::System => conversation_text.push_str(&format!("System: {}\n", msg.content)),
+    // Track context usage
+    let mut total_chars = system_message.len();
+    let mut message_count = 0;
+    
+    // Load existing messages from database unless this is a brand new conversation
+    // We should load messages for all existing conversations
+    if conversation_id != "new" {
+        let existing_messages = sqlx::query_as::<_, (String, String, chrono::DateTime<Utc>)>(
+            "SELECT content, role, created_at FROM messages 
+             WHERE conversation_id = $1 
+             ORDER BY created_at ASC"
+        )
+        .bind(&conversation_id)
+        .fetch_all(&state.db_pool)
+        .await
+        .unwrap_or_else(|e| {
+            tracing::error!("Failed to load conversation history: {}", e);
+            Vec::new()
+        });
+        
+        message_count = existing_messages.len();
+        
+        tracing::info!(
+            "Found {} existing messages in database for conversation {}",
+            message_count,
+            conversation_id
+        );
+        
+        // Add all historical messages - Claude SDK will handle compaction
+        for (content, role, _created_at) in &existing_messages {
+            let formatted = match role.as_str() {
+                "user" => format!("User: {}\n", content),
+                "assistant" => format!("Assistant: {}\n", content),
+                "system" => format!("System: {}\n", content),
+                _ => continue,
+            };
+            total_chars += formatted.len();
+            conversation_text.push_str(&formatted);
+        }
+        
+        tracing::info!(
+            "Loaded {} messages for conversation {} ({} chars) - Claude SDK will handle compaction",
+            message_count,
+            conversation_id,
+            total_chars
+        );
+    }
+    
+    // Add new message from request (only the last user message if it's new)
+    if let Some(last_msg) = chat_request.messages.last() {
+        if last_msg.role == MessageRole::User {
+            // Check if this message is already in the database (avoid duplicates)
+            let is_duplicate = if conversation_id != "new" {
+                sqlx::query_scalar::<_, bool>(
+                    "SELECT EXISTS(
+                        SELECT 1 FROM messages 
+                        WHERE conversation_id = $1 
+                        AND role = 'user' 
+                        AND content = $2 
+                        AND created_at > NOW() - INTERVAL '5 seconds'
+                    )"
+                )
+                .bind(&conversation_id)
+                .bind(&last_msg.content)
+                .fetch_one(&state.db_pool)
+                .await
+                .unwrap_or(false)
+            } else {
+                false
+            };
+            
+            if !is_duplicate {
+                let new_msg = format!("User: {}\n", last_msg.content);
+                total_chars += new_msg.len();
+                message_count += 1;
+                conversation_text.push_str(&new_msg);
+            }
         }
     }
+    
+    // Calculate context usage (Claude has ~200k token limit, roughly 800k chars)
+    const MAX_CONTEXT_CHARS: usize = 800_000;
+    let context_percentage = ((total_chars as f64 / MAX_CONTEXT_CHARS as f64) * 100.0).min(100.0);
+    
+    // Estimate if compaction will be needed
+    let needs_compaction = total_chars > MAX_CONTEXT_CHARS / 2; // Over 50% means compaction likely
+    
+    tracing::info!(
+        "Context usage: {}% ({}/{} chars, {} messages){}",
+        context_percentage as u32,
+        total_chars,
+        MAX_CONTEXT_CHARS,
+        message_count,
+        if needs_compaction { " - compaction will be applied" } else { "" }
+    );
+    
+    // Log first 500 chars of conversation for debugging
+    let preview = if conversation_text.len() > 500 {
+        format!("{}...", &conversation_text[..500])
+    } else {
+        conversation_text.clone()
+    };
+    tracing::info!("Sending to Claude (first 500 chars): {}", preview);
 
     let options = QueryOptions {
-        system_prompt: Some("You are Clay Studio, an AI data analysis assistant.".to_string()),
         max_turns: Some(1),
         allowed_tools: None,
         permission_mode: None,
@@ -233,6 +364,7 @@ pub async fn handle_chat_stream_ws(
     let conversation_id_clone = conversation_id.clone();
     let db_pool = state.db_pool.clone();
     let active_claude_streams = state.active_claude_streams.clone();
+    let context_info = (total_chars, MAX_CONTEXT_CHARS, context_percentage, message_count, needs_compaction);
     
     // Register this stream as active
     {
@@ -252,6 +384,21 @@ pub async fn handle_chat_stream_ws(
         let mut tool_usages: Vec<crate::models::tool_usage::ToolUsage> = Vec::new();
         let mut pending_tools: std::collections::HashMap<String, (String, serde_json::Value, std::time::Instant)> = std::collections::HashMap::new();
         let mut assistant_content = String::new();
+        
+        // Send context usage info
+        let (total_chars, max_chars, percentage, message_count, needs_compaction) = context_info;
+        broadcast_to_subscribers(
+            &project_id,
+            &conversation_id_clone,
+            ServerMessage::ContextUsage {
+                conversation_id: conversation_id_clone.clone(),
+                total_chars,
+                max_chars,
+                percentage: percentage as f32,
+                message_count,
+                needs_compaction,
+            }
+        ).await;
         
         // Send start event via WebSocket
         broadcast_to_subscribers(
@@ -516,6 +663,38 @@ pub async fn handle_chat_stream_ws(
                             break;
                         }
                         
+                        ClaudeMessage::AskUser { 
+                            prompt_type, 
+                            title, 
+                            options, 
+                            input_type, 
+                            placeholder, 
+                            tool_use_id 
+                        } => {
+                            tracing::info!("Received AskUser message with prompt_type: {}", prompt_type);
+                            
+                            // Convert AskUserOption to serde_json::Value for the ServerMessage
+                            let options_value = options.map(|opts| {
+                                opts.into_iter()
+                                    .map(|opt| serde_json::to_value(opt).unwrap_or(serde_json::Value::Null))
+                                    .collect::<Vec<_>>()
+                            });
+                            
+                            broadcast_to_subscribers(
+                                &project_id,
+                                &conversation_id_clone,
+                                ServerMessage::AskUser {
+                                    prompt_type,
+                                    title,
+                                    options: options_value,
+                                    input_type,
+                                    placeholder,
+                                    tool_use_id,
+                                    conversation_id: conversation_id_clone.clone(),
+                                }
+                            ).await;
+                        }
+                        
                         _ => continue,
                     }
                 }
@@ -539,6 +718,61 @@ pub async fn handle_chat_stream_ws(
                     
                     if let Err(e) = save_message(&db_pool, &conversation_id_clone, &assistant_message).await {
                         tracing::error!("Failed to save assistant message: {}", e);
+                    }
+                }
+                
+                // Generate title if this is the first exchange and title is not manually set
+                if let Ok(is_first_exchange) = sqlx::query_scalar::<_, bool>(
+                    "SELECT (COUNT(*) = 2 AND is_title_manually_set = false) 
+                     FROM conversations c 
+                     JOIN messages m ON m.conversation_id = c.id 
+                     WHERE c.id = $1 
+                     GROUP BY c.is_title_manually_set"
+                )
+                .bind(&conversation_id_clone)
+                .fetch_optional(&db_pool)
+                .await {
+                    if is_first_exchange.unwrap_or(false) {
+                        // Get the first user message for title generation
+                        if let Ok(first_user_message) = sqlx::query_scalar::<_, String>(
+                            "SELECT content FROM messages 
+                             WHERE conversation_id = $1 AND role = 'user' 
+                             ORDER BY created_at ASC LIMIT 1"
+                        )
+                        .bind(&conversation_id_clone)
+                        .fetch_optional(&db_pool)
+                        .await {
+                            if let Some(user_content) = first_user_message {
+                                // Generate a concise title from the user's message
+                                let generated_title = generate_conversation_title(&user_content);
+                                
+                                // Update the conversation title
+                                if let Err(e) = sqlx::query(
+                                    "UPDATE conversations 
+                                     SET title = $1, updated_at = $2 
+                                     WHERE id = $3 AND is_title_manually_set = false"
+                                )
+                                .bind(&generated_title)
+                                .bind(Utc::now())
+                                .bind(&conversation_id_clone)
+                                .execute(&db_pool)
+                                .await {
+                                    tracing::error!("Failed to update conversation title: {}", e);
+                                } else {
+                                    tracing::info!("Auto-generated title for conversation {}: {}", conversation_id_clone, generated_title);
+                                    
+                                    // Broadcast title update via WebSocket
+                                    broadcast_to_subscribers(
+                                        &project_id,
+                                        &conversation_id_clone,
+                                        ServerMessage::TitleUpdated { 
+                                            conversation_id: conversation_id_clone.clone(),
+                                            title: generated_title
+                                        }
+                                    ).await;
+                                }
+                            }
+                        }
                     }
                 }
                 

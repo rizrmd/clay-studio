@@ -12,6 +12,8 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
     { className, onEnterSubmit, onKeyDown, placeholderSecondary, ...props },
     ref
   ) => {
+    const [hasContent, setHasContent] = React.useState(!!props.value || !!props.defaultValue);
+    
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (e.key === "Enter") {
         if (e.altKey || e.ctrlKey || e.metaKey) {
@@ -56,6 +58,11 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
       onKeyDown?.(e);
     };
 
+    const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+      setHasContent(!!e.target.value);
+      props.onChange?.(e);
+    };
+
     const main = (
       <textarea
         className={cn(
@@ -65,6 +72,7 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
         ref={ref}
         onKeyDown={handleKeyDown}
         {...props}
+        onChange={handleChange}
         placeholder=""
       />
     );
@@ -73,10 +81,17 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
       return main;
     }
 
+    // Update hasContent when value prop changes
+    React.useEffect(() => {
+      if (props.value !== undefined) {
+        setHasContent(!!props.value);
+      }
+    }, [props.value]);
+
     return (
       <div className="relative">
         {main}
-        {placeholderSecondary && !props.value && (
+        {placeholderSecondary && !hasContent && (
           <div className="absolute inset-0 px-3 -mt-1 pointer-events-none flex flex-col justify-center">
             <div className="text-muted-foreground text-base md:text-sm">
               {props.placeholder}

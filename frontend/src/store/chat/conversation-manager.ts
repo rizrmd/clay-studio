@@ -390,6 +390,15 @@ export class ConversationManager {
     chatEventBus.clear();
   }
 
+  // Update context usage information
+  async updateContextUsage(conversationId: string, usage: import('./types').ContextUsageInfo): Promise<void> {
+    return this.atomicOperation(conversationId, () => {
+      const state = getOrCreateConversationState(conversationId);
+      state.contextUsage = usage;
+      logger.info('ConversationManager: Updated context usage', { conversationId, usage });
+    });
+  }
+
   // Get snapshot of conversation state (for debugging)
   getConversationSnapshot(conversationId: string): ConversationState | null {
     const state = conversationStore.conversations[conversationId];

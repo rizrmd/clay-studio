@@ -420,6 +420,9 @@ export function useChat(projectId: string, conversationId?: string) {
 
     // Tool usage
     activeTools: effectiveState.activeTools,
+    
+    // Context usage
+    contextUsage: effectiveState.contextUsage,
 
     // Context
     conversationContext,

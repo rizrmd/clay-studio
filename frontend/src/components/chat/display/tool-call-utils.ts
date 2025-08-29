@@ -6,6 +6,7 @@ import {
   Code,
   Terminal,
   Globe,
+  ListTodo,
 } from "lucide-react";
 
 // Function to parse MCP tool names and convert to friendly display names
@@ -160,6 +161,7 @@ export function parseMcpToolName(toolName: string): {
     {
       name: string;
       description: string;
+      done?: string;
       icon: React.ElementType;
       color: string;
     }
@@ -194,6 +196,13 @@ export function parseMcpToolName(toolName: string): {
       icon: Globe,
       color: "text-sky-600 bg-sky-50 border-sky-200",
     },
+    TodoWrite: {
+      name: "Task List",
+      description: "Managing tasks",
+      done: "Tasks updated",
+      icon: ListTodo,
+      color: "text-purple-600 bg-purple-50 border-purple-200",
+    },
   };
 
   if (claudeCodeTools[toolName]) {
@@ -203,6 +212,7 @@ export function parseMcpToolName(toolName: string): {
       icon: tool.icon,
       color: tool.color,
       description: tool.description,
+      done: tool.done,
     };
   }
 
