@@ -85,6 +85,7 @@ pub async fn admin_required(depot: &mut Depot, res: &mut Response, ctrl: &mut Fl
     if let Some(session) = depot.session_mut() {
         let user_id: Option<String> = session.get("user_id");
         let role: Option<String> = session.get("role");
+        let client_id: Option<String> = session.get("client_id");
 
         if user_id.is_none() {
             let error = AppError::Unauthorized("Authentication required".to_string());
@@ -103,7 +104,12 @@ pub async fn admin_required(depot: &mut Depot, res: &mut Response, ctrl: &mut Fl
                 // Store user_id and role in depot for handlers to use
                 if let Some(user_id) = user_id {
                     depot.insert("current_user_id", user_id);
-                    depot.insert("current_user_role", r);
+                    depot.insert("current_user_role", r.clone());
+                    
+                    // Also store client_id for admin users (needed for user management)
+                    if let Some(client_id) = client_id {
+                        depot.insert("current_user_client_id", client_id);
+                    }
                 }
             }
             _ => {

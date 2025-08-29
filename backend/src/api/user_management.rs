@@ -60,17 +60,12 @@ pub async fn list_users_for_client(req: &mut Request, depot: &mut Depot, res: &m
     let rows = sqlx::query(
         r#"
         SELECT 
-            u.id, u.client_id, u.username, u.role, u.created_at, u.updated_at,
+            u.id, u.client_id, u.username, u.role,
             'active' as status,
-            l.last_login as last_active
+            NULL as last_active
         FROM users u
-        LEFT JOIN (
-            SELECT user_id, MAX(created_at) as last_login
-            FROM sessions 
-            GROUP BY user_id
-        ) l ON u.id = l.user_id
         WHERE u.client_id = $1
-        ORDER BY u.created_at DESC
+        ORDER BY u.id DESC
         "#
     )
     .bind(client_uuid)
@@ -94,8 +89,8 @@ pub async fn list_users_for_client(req: &mut Request, depot: &mut Depot, res: &m
             role,
             status: UserStatus::Active,
             last_active: row.get("last_active"),
-            created_at: row.get("created_at"),
-            updated_at: row.get("updated_at"),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
         }
     }).collect();
     
@@ -124,15 +119,10 @@ pub async fn get_user(req: &mut Request, depot: &mut Depot, res: &mut Response) 
     let row = sqlx::query(
         r#"
         SELECT 
-            u.id, u.client_id, u.username, u.role, u.created_at, u.updated_at,
+            u.id, u.client_id, u.username, u.role,
             'active' as status,
-            l.last_login as last_active
+            NULL as last_active
         FROM users u
-        LEFT JOIN (
-            SELECT user_id, MAX(created_at) as last_login
-            FROM sessions 
-            GROUP BY user_id
-        ) l ON u.id = l.user_id
         WHERE u.id = $1 AND u.client_id = $2
         "#
     )
@@ -159,8 +149,8 @@ pub async fn get_user(req: &mut Request, depot: &mut Depot, res: &mut Response) 
         role,
         status: UserStatus::Active,
         last_active: row.get("last_active"),
-        created_at: row.get("created_at"),
-        updated_at: row.get("updated_at"),
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
     };
     
     res.render(Json(user));
@@ -409,17 +399,12 @@ pub async fn list_users_admin(depot: &mut Depot, res: &mut Response) -> Result<(
     let rows = sqlx::query(
         r#"
         SELECT 
-            u.id, u.client_id, u.username, u.role, u.created_at, u.updated_at,
+            u.id, u.client_id, u.username, u.role,
             'active' as status,
-            l.last_login as last_active
+            NULL as last_active
         FROM users u
-        LEFT JOIN (
-            SELECT user_id, MAX(created_at) as last_login
-            FROM sessions 
-            GROUP BY user_id
-        ) l ON u.id = l.user_id
         WHERE u.client_id = $1
-        ORDER BY u.created_at DESC
+        ORDER BY u.id DESC
         "#
     )
     .bind(client_id)
@@ -443,8 +428,8 @@ pub async fn list_users_admin(depot: &mut Depot, res: &mut Response) -> Result<(
             role,
             status: UserStatus::Active,
             last_active: row.get("last_active"),
-            created_at: row.get("created_at"),
-            updated_at: row.get("updated_at"),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
         }
     }).collect();
     
