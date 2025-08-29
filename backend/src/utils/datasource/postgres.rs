@@ -3,12 +3,15 @@ use serde_json::{json, Value};
 use sqlx::{postgres::PgPool, Row as SqlxRow, Column};
 use std::error::Error;
 use async_trait::async_trait;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 pub struct PostgreSQLConnector {
     connection_string: String,
     original_connection_string: String,
     schema: String,
     ssl_mode_used: Option<String>,
+    pool: Arc<Mutex<Option<PgPool>>>,
 }
 
 impl PostgreSQLConnector {
@@ -96,8 +99,26 @@ impl PostgreSQLConnector {
             original_connection_string: connection_string.clone(),
             connection_string, 
             schema,
-            ssl_mode_used: ssl_mode.map(|s| s.to_string()).or(if disable_ssl { Some("disable".to_string()) } else { None })
+            ssl_mode_used: ssl_mode.map(|s| s.to_string()).or(if disable_ssl { Some("disable".to_string()) } else { None }),
+            pool: Arc::new(Mutex::new(None)),
         })
+    }
+
+    async fn get_pool(&self) -> Result<PgPool, Box<dyn Error>> {
+        let mut pool_guard = self.pool.lock().await;
+        
+        if let Some(ref pool) = *pool_guard {
+            // Test if the pool is still valid
+            if sqlx::query("SELECT 1").fetch_one(pool).await.is_ok() {
+                return Ok(pool.clone());
+            }
+            // Pool is invalid, will create a new one below
+        }
+        
+        // Create new pool
+        let pool = PgPool::connect(&self.connection_string).await?;
+        *pool_guard = Some(pool.clone());
+        Ok(pool)
     }
 }
 
@@ -271,7 +292,7 @@ impl DataSourceConnector for PostgreSQLConnector {
     }
     
     async fn execute_query(&self, query: &str, limit: i32) -> Result<Value, Box<dyn Error>> {
-        let pool = PgPool::connect(&self.connection_string).await?;
+        let pool = self.get_pool().await?;
         
         // Add LIMIT if not present
         let query_with_limit = if query.to_lowercase().contains("limit") {
@@ -329,7 +350,7 @@ impl DataSourceConnector for PostgreSQLConnector {
     }
     
     async fn fetch_schema(&self) -> Result<Value, Box<dyn Error>> {
-        let pool = PgPool::connect(&self.connection_string).await?;
+        let pool = self.get_pool().await?;
         
         // Fetch table and column information
         // Use json_agg instead of array_agg to return JSONB type
@@ -372,7 +393,7 @@ impl DataSourceConnector for PostgreSQLConnector {
     }
     
     async fn list_tables(&self) -> Result<Vec<String>, Box<dyn Error>> {
-        let pool = PgPool::connect(&self.connection_string).await?;
+        let pool = self.get_pool().await?;
         
         let tables = sqlx::query(
             "SELECT table_name 
@@ -395,7 +416,7 @@ impl DataSourceConnector for PostgreSQLConnector {
     }
     
     async fn analyze_database(&self) -> Result<Value, Box<dyn Error>> {
-        let pool = PgPool::connect(&self.connection_string).await?;
+        let pool = self.get_pool().await?;
         
         // Get basic statistics
         let stats = sqlx::query(
@@ -520,7 +541,7 @@ impl DataSourceConnector for PostgreSQLConnector {
     }
     
     async fn get_tables_schema(&self, tables: Vec<&str>) -> Result<Value, Box<dyn Error>> {
-        let pool = PgPool::connect(&self.connection_string).await?;
+        let pool = self.get_pool().await?;
         let mut result = json!({});
         
         for table_name in tables {
@@ -648,7 +669,7 @@ impl DataSourceConnector for PostgreSQLConnector {
     }
     
     async fn search_tables(&self, pattern: &str) -> Result<Value, Box<dyn Error>> {
-        let pool = PgPool::connect(&self.connection_string).await?;
+        let pool = self.get_pool().await?;
         
         let tables = sqlx::query(
             "SELECT 
@@ -704,7 +725,7 @@ impl DataSourceConnector for PostgreSQLConnector {
             return Err("Table not found".into());
         }
         
-        let pool = PgPool::connect(&self.connection_string).await?;
+        let pool = self.get_pool().await?;
         
         // Get tables that this table references (outgoing foreign keys)
         let references = sqlx::query(
@@ -765,7 +786,7 @@ impl DataSourceConnector for PostgreSQLConnector {
     }
     
     async fn get_database_stats(&self) -> Result<Value, Box<dyn Error>> {
-        let pool = PgPool::connect(&self.connection_string).await?;
+        let pool = self.get_pool().await?;
         
         // Get overall statistics
         let stats = sqlx::query(

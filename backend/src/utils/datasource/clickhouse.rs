@@ -79,26 +79,105 @@ impl DataSourceConnector for ClickHouseConnector {
 
         let start = std::time::Instant::now();
         
-        // Execute query and get raw results as strings for now
-        let result_rows: Vec<String> = self.client
-            .query(&query_with_limit)
-            .fetch_all()
-            .await?;
+        // Use ClickHouse's native HTTP interface with JSON format for better control
+        // We'll make a direct HTTP request to get proper column metadata
+        let query_with_format = format!("{} FORMAT JSON", query_with_limit);
+        
+        // For now, use a simpler approach that works with the current clickhouse crate
+        // The crate doesn't easily expose column metadata, so we'll use FORMAT JSON
+        let raw_result = self.client
+            .query(&query_with_format)
+            .fetch_one::<String>()
+            .await;
 
         let execution_time_ms = start.elapsed().as_millis() as i64;
 
-        // Convert string results to JSON structure
-        let rows: Vec<Value> = result_rows
-            .iter()
-            .map(|s| json!(s))
-            .collect();
-
-        Ok(json!({
-            "columns": [{"name": "result", "type": "String"}],
-            "rows": rows,
-            "row_count": rows.len(),
-            "execution_time_ms": execution_time_ms
-        }))
+        match raw_result {
+            Ok(json_str) => {
+                // Parse the JSON response from ClickHouse
+                if let Ok(json_response) = serde_json::from_str::<Value>(&json_str) {
+                    // Extract metadata and data from the JSON response
+                    let meta = json_response.get("meta").and_then(|m| m.as_array());
+                    let data = json_response.get("data").and_then(|d| d.as_array());
+                    
+                    if let (Some(meta_array), Some(data_array)) = (meta, data) {
+                        // Extract column names from metadata
+                        let columns: Vec<String> = meta_array.iter()
+                            .filter_map(|col| col.get("name").and_then(|n| n.as_str()))
+                            .map(|s| s.to_string())
+                            .collect();
+                        
+                        // Convert data rows to the expected format
+                        let mut formatted_rows = Vec::new();
+                        for row in data_array {
+                            if let Some(row_obj) = row.as_object() {
+                                let mut row_data = Vec::new();
+                                for col_name in &columns {
+                                    let value = row_obj.get(col_name).unwrap_or(&Value::Null);
+                                    row_data.push(match value {
+                                        Value::String(s) => s.clone(),
+                                        Value::Number(n) => n.to_string(),
+                                        Value::Bool(b) => b.to_string(),
+                                        Value::Null => "NULL".to_string(),
+                                        Value::Array(a) => serde_json::to_string(a).unwrap_or_else(|_| "[]".to_string()),
+                                        Value::Object(o) => serde_json::to_string(o).unwrap_or_else(|_| "{}".to_string()),
+                                    });
+                                }
+                                formatted_rows.push(row_data);
+                            }
+                        }
+                        
+                        return Ok(json!({
+                            "columns": columns,
+                            "rows": formatted_rows,
+                            "row_count": formatted_rows.len(),
+                            "execution_time_ms": execution_time_ms
+                        }));
+                    }
+                }
+                
+                // If JSON parsing failed, treat as a single string result
+                Ok(json!({
+                    "columns": ["result"],
+                    "rows": [[json_str]],
+                    "row_count": 1,
+                    "execution_time_ms": execution_time_ms
+                }))
+            }
+            Err(_) => {
+                // Try without FORMAT JSON as a fallback
+                let simple_result = self.client
+                    .query(&query_with_limit)
+                    .fetch_all::<String>()
+                    .await;
+                    
+                match simple_result {
+                    Ok(rows) => {
+                        if rows.is_empty() {
+                            Ok(json!({
+                                "columns": [],
+                                "rows": [],
+                                "row_count": 0,
+                                "execution_time_ms": execution_time_ms
+                            }))
+                        } else {
+                            // Convert string results to rows
+                            let formatted_rows: Vec<Vec<String>> = rows.into_iter()
+                                .map(|s| vec![s])
+                                .collect();
+                            
+                            Ok(json!({
+                                "columns": ["result"],
+                                "rows": formatted_rows,
+                                "row_count": formatted_rows.len(),
+                                "execution_time_ms": execution_time_ms
+                            }))
+                        }
+                    }
+                    Err(e) => Err(Box::new(e))
+                }
+            }
+        }
     }
 
     async fn fetch_schema(&self) -> Result<Value, Box<dyn Error>> {

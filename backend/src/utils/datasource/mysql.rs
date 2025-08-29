@@ -4,22 +4,38 @@ use sqlx::{mysql::{MySqlPool, MySqlPoolOptions}, Row as SqlxRow, Column};
 use std::error::Error;
 use async_trait::async_trait;
 use std::time::Duration;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 pub struct MySQLConnector {
     connection_string: String,
     original_connection_string: String,
     ssl_mode_used: Option<String>,
+    pool: Arc<Mutex<Option<MySqlPool>>>,
 }
 
 impl MySQLConnector {
-    async fn create_pool(&self) -> Result<MySqlPool, sqlx::Error> {
+    async fn get_pool(&self) -> Result<MySqlPool, sqlx::Error> {
+        let mut pool_guard = self.pool.lock().await;
+        
+        if let Some(ref pool) = *pool_guard {
+            // Test if the pool is still valid
+            if sqlx::query("SELECT 1 as test").fetch_one(pool).await.is_ok() {
+                return Ok(pool.clone());
+            }
+            // Pool is invalid, will create a new one below
+        }
+        
+        // Create new pool
         let pool_options = MySqlPoolOptions::new()
             .max_connections(5)
             .min_connections(1)
             .acquire_timeout(Duration::from_secs(10))
             .idle_timeout(Some(Duration::from_secs(30)));
         
-        pool_options.connect(&self.connection_string).await
+        let pool = pool_options.connect(&self.connection_string).await?;
+        *pool_guard = Some(pool.clone());
+        Ok(pool)
     }
     
     pub fn new(config: &Value) -> Result<Self, Box<dyn Error>> {
@@ -104,7 +120,8 @@ impl MySQLConnector {
         Ok(Self { 
             original_connection_string: connection_string.clone(),
             connection_string,
-            ssl_mode_used: ssl_mode.map(|s| s.to_string()).or(if disable_ssl { Some("disabled".to_string()) } else { None })
+            ssl_mode_used: ssl_mode.map(|s| s.to_string()).or(if disable_ssl { Some("disabled".to_string()) } else { None }),
+            pool: Arc::new(Mutex::new(None)),
         })
     }
 }
@@ -130,7 +147,7 @@ impl DataSourceConnector for MySQLConnector {
             }
         }
         
-        let mut last_error: Option<Box<dyn Error + Send + Sync>> = None;
+        let mut last_error: Option<String> = None;
         let mut attempt = 0;
         
         for conn_str in connection_strings_to_try {
@@ -148,10 +165,11 @@ impl DataSourceConnector for MySQLConnector {
                 connection_string: conn_str.clone(),
                 original_connection_string: self.original_connection_string.clone(),
                 ssl_mode_used: self.ssl_mode_used.clone(),
+                pool: Arc::new(Mutex::new(None)),
             };
             
             // Try to connect
-            match temp_self.create_pool().await {
+            match temp_self.get_pool().await {
             Ok(pool) => {
                 // Try a simple query
                 match sqlx::query("SELECT 1 as test").fetch_one(&pool).await {
@@ -167,17 +185,15 @@ impl DataSourceConnector for MySQLConnector {
                             eprintln!("[INFO] Saved working configuration with SSL enabled");
                         }
                         
-                        pool.close().await;
                         return Ok(true);
                     }
                     Err(e) => {
-                        pool.close().await;
-                        last_error = Some(Box::new(e) as Box<dyn Error + Send + Sync>);
+                        last_error = Some(e.to_string());
                     }
                 }
             }
             Err(e) => {
-                last_error = Some(Box::new(e) as Box<dyn Error + Send + Sync>);
+                last_error = Some(e.to_string());
             }
         }
     }
@@ -187,17 +203,6 @@ impl DataSourceConnector for MySQLConnector {
             eprintln!("[ERROR] ========== MySQL Connection Failed After All Attempts ==========");
             eprintln!("[ERROR] Failed to create MySQL connection pool");
             eprintln!("[ERROR] Error message: {}", e);
-            eprintln!("[ERROR] Error type: {:?}", e);
-            eprintln!("[ERROR] Error source chain:");
-            
-            // Print full error chain
-            let mut current_error = &*e as &dyn std::error::Error;
-            let mut level = 1;
-            while let Some(source) = current_error.source() {
-                eprintln!("[ERROR]   Level {}: {}", level, source);
-                current_error = source;
-                level += 1;
-            }
             
             // Log connection parameters (without password) for debugging
             let masked_conn_str = if self.connection_string.contains('@') {
@@ -270,14 +275,14 @@ impl DataSourceConnector for MySQLConnector {
             }
             
             eprintln!("[ERROR] ========== MySQL Connection Test Failed ==========");
-            Err(e)
+            Err(e.into())
         } else {
             Err("No connection attempts were made".into())
         }
     }
     
     async fn execute_query(&self, query: &str, limit: i32) -> Result<Value, Box<dyn Error>> {
-        let pool = self.create_pool().await.map_err(|e| Box::new(e) as Box<dyn Error>)?;
+        let pool = self.get_pool().await.map_err(|e| Box::new(e) as Box<dyn Error>)?;
         
         let query_with_limit = if query.to_lowercase().contains("limit") {
             query.to_string()
@@ -290,8 +295,7 @@ impl DataSourceConnector for MySQLConnector {
         let execution_time_ms = start.elapsed().as_millis() as i64;
         
         if rows.is_empty() {
-            pool.close().await;
-            return Ok(json!({
+                return Ok(json!({
                 "columns": [],
                 "rows": [],
                 "row_count": 0,
@@ -339,12 +343,11 @@ impl DataSourceConnector for MySQLConnector {
             "execution_time_ms": execution_time_ms
         });
         
-        pool.close().await;
         Ok(result)
     }
     
     async fn fetch_schema(&self) -> Result<Value, Box<dyn Error>> {
-        let pool = self.create_pool().await.map_err(|e| Box::new(e) as Box<dyn Error>)?;
+        let pool = self.get_pool().await.map_err(|e| Box::new(e) as Box<dyn Error>)?;
         
         let tables = sqlx::query(
             "SELECT 
@@ -378,24 +381,22 @@ impl DataSourceConnector for MySQLConnector {
             schema["tables"][&table_name].as_array_mut().unwrap().push(column_info);
         }
         
-        pool.close().await;
         Ok(schema)
     }
     
     async fn list_tables(&self) -> Result<Vec<String>, Box<dyn Error>> {
-        let pool = self.create_pool().await.map_err(|e| Box::new(e) as Box<dyn Error>)?;
+        let pool = self.get_pool().await.map_err(|e| Box::new(e) as Box<dyn Error>)?;
         
         let tables = sqlx::query("SHOW TABLES")
             .fetch_all(&pool)
             .await?;
         
         let table_names: Vec<String> = tables.iter().map(|row| row.get(0)).collect();
-        pool.close().await;
         Ok(table_names)
     }
     
     async fn analyze_database(&self) -> Result<Value, Box<dyn Error>> {
-        let pool = self.create_pool().await.map_err(|e| Box::new(e) as Box<dyn Error>)?;
+        let pool = self.get_pool().await.map_err(|e| Box::new(e) as Box<dyn Error>)?;
         
         // Get basic statistics
         let stats = sqlx::query(
@@ -500,12 +501,11 @@ impl DataSourceConnector for MySQLConnector {
             "analyzed_at": chrono::Utc::now().to_rfc3339(),
         });
         
-        pool.close().await;
         Ok(result)
     }
     
     async fn get_tables_schema(&self, tables: Vec<&str>) -> Result<Value, Box<dyn Error>> {
-        let pool = self.create_pool().await.map_err(|e| Box::new(e) as Box<dyn Error>)?;
+        let pool = self.get_pool().await.map_err(|e| Box::new(e) as Box<dyn Error>)?;
         let mut result = json!({});
         
         for table_name in tables {
@@ -622,12 +622,11 @@ impl DataSourceConnector for MySQLConnector {
             });
         }
         
-        pool.close().await;
         Ok(result)
     }
     
     async fn search_tables(&self, pattern: &str) -> Result<Value, Box<dyn Error>> {
-        let pool = self.create_pool().await.map_err(|e| Box::new(e) as Box<dyn Error>)?;
+        let pool = self.get_pool().await.map_err(|e| Box::new(e) as Box<dyn Error>)?;
         
         let tables = sqlx::query(
             "SELECT 
@@ -659,12 +658,11 @@ impl DataSourceConnector for MySQLConnector {
             "total_matches": results.len(),
         });
         
-        pool.close().await;
         Ok(result)
     }
     
     async fn get_related_tables(&self, table: &str) -> Result<Value, Box<dyn Error>> {
-        let pool = self.create_pool().await.map_err(|e| Box::new(e) as Box<dyn Error>)?;
+        let pool = self.get_pool().await.map_err(|e| Box::new(e) as Box<dyn Error>)?;
         
         // Get the main table schema
         let main_schema = self.get_tables_schema(vec![table]).await?;
@@ -723,12 +721,11 @@ impl DataSourceConnector for MySQLConnector {
             "relationship_count": related_tables.len(),
         });
         
-        pool.close().await;
         Ok(result)
     }
     
     async fn get_database_stats(&self) -> Result<Value, Box<dyn Error>> {
-        let pool = self.create_pool().await.map_err(|e| Box::new(e) as Box<dyn Error>)?;
+        let pool = self.get_pool().await.map_err(|e| Box::new(e) as Box<dyn Error>)?;
         
         // Get overall statistics
         let stats = sqlx::query(
@@ -814,7 +811,6 @@ impl DataSourceConnector for MySQLConnector {
             })).collect::<Vec<_>>(),
         });
         
-        pool.close().await;
         Ok(result)
     }
 }

@@ -1,38 +1,155 @@
-use super::base::DataSourceConnector;
+use super::base::{DataSourceConnector, format_bytes};
 use serde_json::{json, Value};
 use sqlx::{sqlite::SqlitePool, Row as SqlxRow, Column};
 use std::error::Error;
 use async_trait::async_trait;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 pub struct SQLiteConnector {
     connection_string: String,
+    original_connection_string: String,
+    pool: Arc<Mutex<Option<SqlitePool>>>,
 }
 
 impl SQLiteConnector {
     pub fn new(config: &Value) -> Result<Self, Box<dyn Error>> {
         // Prefer URL if provided, otherwise construct from path
         let connection_string = if let Some(url) = config.get("url").and_then(|v| v.as_str()) {
+            eprintln!("[DEBUG] Using provided SQLite URL directly");
             url.to_string()
         } else {
             // Fallback to path for backward compatibility
             let path = config.get("path").and_then(|v| v.as_str()).ok_or("Missing database path")?;
+            eprintln!("[DEBUG] Building SQLite URL from path: {}", path);
             format!("sqlite://{}", path)
         };
         
-        Ok(Self { connection_string })
+        // Log connection string (no need to mask for SQLite as it's just a file path)
+        eprintln!("[DEBUG] SQLite connection string: {}", connection_string);
+        
+        Ok(Self { 
+            original_connection_string: connection_string.clone(),
+            connection_string,
+            pool: Arc::new(Mutex::new(None)),
+        })
+    }
+
+    async fn get_pool(&self) -> Result<SqlitePool, sqlx::Error> {
+        let mut pool_guard = self.pool.lock().await;
+        
+        if let Some(ref pool) = *pool_guard {
+            // Test if the pool is still valid
+            if sqlx::query("SELECT 1").fetch_one(pool).await.is_ok() {
+                return Ok(pool.clone());
+            }
+            // Pool is invalid, will create a new one below
+        }
+        
+        // Create new pool
+        let pool = SqlitePool::connect(&self.connection_string).await?;
+        *pool_guard = Some(pool.clone());
+        Ok(pool)
+    }
+
+    async fn get_database_file_size(&self) -> Result<u64, Box<dyn Error>> {
+        // Extract file path from connection string
+        let path = if self.connection_string.starts_with("sqlite://") {
+            &self.connection_string[9..]
+        } else {
+            &self.connection_string
+        };
+        
+        // Get file metadata
+        match std::fs::metadata(path) {
+            Ok(metadata) => Ok(metadata.len()),
+            Err(_) => {
+                // If we can't get file size, try to query SQLite for page info
+                let pool = self.get_pool().await.map_err(|e| Box::new(e) as Box<dyn Error>)?;
+                let page_info: Result<(i64, i64), sqlx::Error> = sqlx::query("PRAGMA page_count; PRAGMA page_size;")
+                    .fetch_one(&pool)
+                    .await
+                    .and_then(|row| {
+                        let page_count: i64 = row.try_get(0)?;
+                        let page_size: i64 = row.try_get(1)?;
+                        Ok((page_count, page_size))
+                    });
+                
+                match page_info {
+                    Ok((page_count, page_size)) => Ok((page_count * page_size) as u64),
+                    Err(_) => Ok(0),
+                }
+            }
+        }
     }
 }
 
 #[async_trait]
 impl DataSourceConnector for SQLiteConnector {
     async fn test_connection(&mut self) -> Result<bool, Box<dyn Error>> {
-        let pool = SqlitePool::connect(&self.connection_string).await?;
-        sqlx::query("SELECT 1").fetch_one(&pool).await?;
-        Ok(true)
+        eprintln!("[INFO] SQLite connection attempt");
+        
+        match self.get_pool().await {
+            Ok(pool) => {
+                // Try a simple query
+                match sqlx::query("SELECT 1").fetch_one(&pool).await {
+                    Ok(_) => {
+                        eprintln!("[SUCCESS] SQLite connection successful");
+                        Ok(true)
+                    }
+                    Err(e) => {
+                        eprintln!("[ERROR] ========== SQLite Connection Failed ==========");
+                        eprintln!("[ERROR] Failed to execute test query on SQLite database");
+                        eprintln!("[ERROR] Error message: {}", e);
+                        eprintln!("[ERROR] Error type: {:?}", e);
+                        eprintln!("[DEBUG] Connection string: {}", self.connection_string);
+                        
+                        // Check if it's a specific type of error
+                        let error_string = e.to_string();
+                        eprintln!("[DEBUG] Analyzing error type...");
+                        
+                        if error_string.contains("no such file") || error_string.contains("cannot open") {
+                            eprintln!("[DIAGNOSIS] Database file does not exist or cannot be accessed");
+                            eprintln!("[HINT] Common causes:");
+                            eprintln!("  - Database file path is incorrect");
+                            eprintln!("  - File permissions prevent access");
+                            eprintln!("  - Directory doesn't exist");
+                            eprintln!("[SOLUTION] Ensure the database file exists and is accessible");
+                        } else if error_string.contains("database is locked") {
+                            eprintln!("[DIAGNOSIS] Database file is locked by another process");
+                            eprintln!("[HINT] Common causes:");
+                            eprintln!("  - Another application is using the database");
+                            eprintln!("  - Previous connection wasn't closed properly");
+                            eprintln!("[SOLUTION] Close other connections or wait for locks to release");
+                        } else if error_string.contains("disk I/O error") {
+                            eprintln!("[DIAGNOSIS] Disk I/O error accessing database file");
+                            eprintln!("[HINT] Common causes:");
+                            eprintln!("  - Disk is full");
+                            eprintln!("  - File system corruption");
+                            eprintln!("  - Hardware issues");
+                        } else if error_string.contains("not a database") || error_string.contains("file is not a database") {
+                            eprintln!("[DIAGNOSIS] File exists but is not a valid SQLite database");
+                            eprintln!("[HINT] The file may be corrupted or not a SQLite database");
+                            eprintln!("[SOLUTION] Verify the file is a valid SQLite database or create a new one");
+                        } else {
+                            eprintln!("[DIAGNOSIS] Unrecognized error type");
+                            eprintln!("[HINT] Check the full error message above for more details");
+                        }
+                        
+                        eprintln!("[ERROR] ========== SQLite Connection Test Failed ==========");
+                        Err(Box::new(e))
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("[ERROR] Failed to create SQLite connection pool: {}", e);
+                Err(Box::new(e))
+            }
+        }
     }
     
     async fn execute_query(&self, query: &str, limit: i32) -> Result<Value, Box<dyn Error>> {
-        let pool = SqlitePool::connect(&self.connection_string).await?;
+        let pool = self.get_pool().await.map_err(|e| Box::new(e) as Box<dyn Error>)?;
         
         let query_with_limit = if query.to_lowercase().contains("limit") {
             query.to_string()
@@ -91,7 +208,7 @@ impl DataSourceConnector for SQLiteConnector {
     }
     
     async fn fetch_schema(&self) -> Result<Value, Box<dyn Error>> {
-        let pool = SqlitePool::connect(&self.connection_string).await?;
+        let pool = self.get_pool().await.map_err(|e| Box::new(e) as Box<dyn Error>)?;
         
         let tables = sqlx::query("SELECT name FROM sqlite_master WHERE type='table'")
             .fetch_all(&pool)
@@ -123,7 +240,7 @@ impl DataSourceConnector for SQLiteConnector {
     }
     
     async fn list_tables(&self) -> Result<Vec<String>, Box<dyn Error>> {
-        let pool = SqlitePool::connect(&self.connection_string).await?;
+        let pool = self.get_pool().await.map_err(|e| Box::new(e) as Box<dyn Error>)?;
         
         let tables = sqlx::query("SELECT name FROM sqlite_master WHERE type='table'")
             .fetch_all(&pool)
@@ -134,7 +251,7 @@ impl DataSourceConnector for SQLiteConnector {
     }
     
     async fn analyze_database(&self) -> Result<Value, Box<dyn Error>> {
-        let pool = SqlitePool::connect(&self.connection_string).await?;
+        let pool = self.get_pool().await.map_err(|e| Box::new(e) as Box<dyn Error>)?;
         
         // Get all tables
         let tables = sqlx::query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
@@ -192,15 +309,21 @@ impl DataSourceConnector for SQLiteConnector {
             }
         }
         
-        // Sort tables by row count for largest_tables
+        // Sort tables by row count for largest_tables and add size info
         table_info.sort_by_key(|t| -t["row_count"].as_i64().unwrap_or(0));
         let largest_tables: Vec<Value> = table_info.iter()
             .take(10)
-            .map(|t| json!({
-                "name": t["name"],
-                "row_count": t["row_count"],
-                "size_human": format!("{} rows", t["row_count"]),
-            }))
+            .map(|t| {
+                let row_count = t["row_count"].as_i64().unwrap_or(0);
+                // Estimate size based on rows (rough approximation)
+                let estimated_size = row_count * 100; // Assume ~100 bytes per row average
+                json!({
+                    "name": t["name"],
+                    "row_count": row_count,
+                    "size_bytes": estimated_size,
+                    "size_human": format_bytes(estimated_size as u64),
+                })
+            })
             .collect();
         
         // Sort key tables by importance
@@ -210,11 +333,14 @@ impl DataSourceConnector for SQLiteConnector {
             -(connections * 1000 + rows)
         });
         
+        // Calculate database file size
+        let db_file_size = self.get_database_file_size().await.unwrap_or(0);
+        
         Ok(json!({
             "statistics": {
                 "table_count": table_count,
-                "total_size": 0,
-                "total_size_human": "N/A",
+                "total_size": db_file_size,
+                "total_size_human": format_bytes(db_file_size),
                 "total_rows": table_info.iter().map(|t| t["row_count"].as_i64().unwrap_or(0)).sum::<i64>(),
             },
             "table_names": table_names,
@@ -225,7 +351,7 @@ impl DataSourceConnector for SQLiteConnector {
     }
     
     async fn get_tables_schema(&self, tables: Vec<&str>) -> Result<Value, Box<dyn Error>> {
-        let pool = SqlitePool::connect(&self.connection_string).await?;
+        let pool = self.get_pool().await.map_err(|e| Box::new(e) as Box<dyn Error>)?;
         let mut result = json!({});
         
         for table_name in tables {
@@ -319,7 +445,7 @@ impl DataSourceConnector for SQLiteConnector {
     }
     
     async fn search_tables(&self, pattern: &str) -> Result<Value, Box<dyn Error>> {
-        let pool = SqlitePool::connect(&self.connection_string).await?;
+        let pool = self.get_pool().await.map_err(|e| Box::new(e) as Box<dyn Error>)?;
         
         // Use LIKE in the query directly for SQLite
         let query = "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name LIKE ?";
@@ -354,7 +480,7 @@ impl DataSourceConnector for SQLiteConnector {
     }
     
     async fn get_related_tables(&self, table: &str) -> Result<Value, Box<dyn Error>> {
-        let pool = SqlitePool::connect(&self.connection_string).await?;
+        let pool = self.get_pool().await.map_err(|e| Box::new(e) as Box<dyn Error>)?;
         
         // Get the main table schema
         let main_schema = self.get_tables_schema(vec![table]).await?;
@@ -413,7 +539,7 @@ impl DataSourceConnector for SQLiteConnector {
     }
     
     async fn get_database_stats(&self) -> Result<Value, Box<dyn Error>> {
-        let pool = SqlitePool::connect(&self.connection_string).await?;
+        let pool = self.get_pool().await.map_err(|e| Box::new(e) as Box<dyn Error>)?;
         
         // Get all tables
         let tables = sqlx::query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
@@ -455,11 +581,17 @@ impl DataSourceConnector for SQLiteConnector {
         table_stats.sort_by_key(|t| -t["row_count"].as_i64().unwrap_or(0));
         let largest_tables: Vec<Value> = table_stats.iter()
             .take(10)
-            .map(|t| json!({
-                "name": t["name"],
-                "row_count": t["row_count"],
-                "size_human": format!("{} rows", t["row_count"]),
-            }))
+            .map(|t| {
+                let row_count = t["row_count"].as_i64().unwrap_or(0);
+                // Estimate size based on rows (rough approximation)
+                let estimated_size = row_count * 100; // Assume ~100 bytes per row average
+                json!({
+                    "name": t["name"],
+                    "row_count": row_count,
+                    "size_bytes": estimated_size,
+                    "size_human": format_bytes(estimated_size as u64),
+                })
+            })
             .collect();
         
         // Sort by foreign key count for most connected
@@ -475,12 +607,15 @@ impl DataSourceConnector for SQLiteConnector {
             }))
             .collect();
         
+        // Calculate database file size
+        let db_file_size = self.get_database_file_size().await.unwrap_or(0);
+        
         Ok(json!({
             "summary": {
                 "total_tables": tables.len(),
                 "total_rows": total_rows,
-                "total_size_bytes": 0,
-                "total_size_human": "N/A",
+                "total_size_bytes": db_file_size,
+                "total_size_human": format_bytes(db_file_size),
             },
             "largest_tables": largest_tables,
             "most_connected_tables": most_connected,
