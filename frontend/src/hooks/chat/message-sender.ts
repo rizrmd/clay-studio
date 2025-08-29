@@ -40,6 +40,12 @@ export function useMessageSender({
 
       const state = getConversationState(currentConversationId);
       
+      // Clear forgotten state immediately when ANY message is sent
+      // This ensures the forgotten popup disappears as soon as user sends a new message
+      if (state.forgottenAfterMessageId) {
+        setConversationForgotten(currentConversationId, null, 0);
+      }
+      
       // Check if we should queue the message
       if (!isFromQueue && (state.isStreaming || state.isProcessingQueue)) {
         addMessageToQueue(content, files || []);
@@ -47,11 +53,6 @@ export function useMessageSender({
       }
 
       const targetConversationId = currentConversationId;
-
-      // Clear forgotten state if needed
-      if (forgottenAfterMessageId) {
-        setConversationForgotten(targetConversationId, null, 0);
-      }
 
       // Upload files first if any
       let uploadedFilePaths: string[] = [];

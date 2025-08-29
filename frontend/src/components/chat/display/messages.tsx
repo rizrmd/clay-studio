@@ -163,7 +163,7 @@ const MessageItem = memo(
         >
           <div
             className={cn(
-              "gap-3 flex flex-1 pr-[45px]",
+              "gap-3 flex flex-1 pr-[45px] min-w-0",
               message.role === "user" ? "justify-end" : "justify-start"
             )}
           >
@@ -174,7 +174,7 @@ const MessageItem = memo(
             )}
             <div
               className={cn(
-                "flex flex-col gap-1",
+                "flex flex-col gap-1 min-w-0",
                 message.role === "user" ? "max-w-[70%]" : "max-w-[70%]"
               )}
             >
@@ -187,10 +187,10 @@ const MessageItem = memo(
                   </Badge>
                 </div>
               )}
-              <div>
+              <div className="min-w-0">
                 <div
                   className={cn(
-                    "rounded-lg p-3 text-sm",
+                    "rounded-lg p-3 text-sm overflow-hidden",
                     message.role === "user" && !isQueued
                       ? "bg-primary text-primary-foreground"
                       : message.role === "user" && isQueued
@@ -232,36 +232,54 @@ const MessageItem = memo(
                   ) : (
                     <div
                       className={cn(
-                        "prose prose-sm max-w-none dark:prose-invert overflow-hidden",
+                        "prose prose-sm max-w-none dark:prose-invert overflow-hidden break-words",
                         css`
                           & {
                             margin-bottom: -5px;
                             margin-top: -5px;
+                            word-break: break-word;
+                            overflow-wrap: anywhere;
                           }
+
+                          * {
+                            max-width: 100%;
+                          }
+
                           code {
                             font-size: 13px;
                             background: white;
                             padding: 2px 6px;
                             border-radius: 4px;
+                            word-break: break-all;
+                            overflow-wrap: anywhere;
                           }
+
                           h1,
                           h2,
                           h3,
-                          h4 {
+                          h4,
+                          h5,
+                          h6 {
                             margin-top: 20px;
                             margin-bottom: 5px;
+                            word-break: break-word;
+                            overflow-wrap: break-word;
                           }
+
                           h1 {
                             font-size: 19px;
                             border-bottom: 1px solid #ccc;
                           }
+
                           h2 {
                             font-size: 18px;
                             border-bottom: 1px solid #ddd;
                           }
+
                           h3 {
                             font-size: 17px;
                           }
+
                           h4 {
                             font-size: 16px;
                           }
@@ -269,26 +287,65 @@ const MessageItem = memo(
                           p {
                             margin-top: 5px;
                             margin-bottom: 5px;
+                            word-break: break-word;
+                            overflow-wrap: anywhere;
+                            hyphens: auto;
                           }
+
                           ul,
                           ol {
                             margin-left: 10px;
                             margin-bottom: 10px;
+                            padding-left: 0;
                           }
 
                           li {
                             margin-left: 20px;
                             list-style-type: square;
+                            word-break: break-word;
+                            overflow-wrap: anywhere;
                           }
+
                           ol > li {
                             margin-left: 20px;
                             list-style-type: decimal;
                           }
+
                           pre {
                             background: white;
                             padding: 5px;
-                            overflow: auto;
+                            overflow-x: auto;
+                            overflow-y: auto;
                             margin-bottom: 10px;
+                            max-width: 100%;
+                            word-break: normal;
+                            max-width: 450px;
+                          }
+
+                          pre code {
+                            display: block;
+                            overflow-x: auto;
+                            white-space: pre;
+                            word-break: normal;
+                            word-wrap: normal;
+                            min-width: 0;
+                          }
+
+                          table {
+                            display: block;
+                            overflow-x: auto;
+                            max-width: 100%;
+                            width: max-content;
+                          }
+
+                          blockquote {
+                            word-break: break-word;
+                            overflow-wrap: break-word;
+                          }
+
+                          a {
+                            word-break: break-all;
+                            overflow-wrap: anywhere;
                           }
                         `
                       )}
@@ -339,7 +396,10 @@ const MessageItem = memo(
                       />
                     </div>
                     <div className="text-xs">
-                      {(message.createdAt instanceof Date ? message.createdAt : new Date(message.createdAt)).toLocaleTimeString([], {
+                      {(message.createdAt instanceof Date
+                        ? message.createdAt
+                        : new Date(message.createdAt)
+                      ).toLocaleTimeString([], {
                         hour: "2-digit",
                         minute: "2-digit",
                         hour12: false,
@@ -369,10 +429,11 @@ const MessageItem = memo(
                     )}
                   </div>
                 ) : !isQueued &&
-                  !(
-                    getToolNamesFromMessage(message as any).length > 0
-                  ) ? (
-                  (message.createdAt instanceof Date ? message.createdAt : new Date(message.createdAt)).toLocaleTimeString([], {
+                  !(getToolNamesFromMessage(message as any).length > 0) ? (
+                  (message.createdAt instanceof Date
+                    ? message.createdAt
+                    : new Date(message.createdAt)
+                  ).toLocaleTimeString([], {
                     hour: "2-digit",
                     minute: "2-digit",
                     hour12: false,
@@ -474,6 +535,7 @@ export function Messages({
   const [isAtBottom, setIsAtBottom] = useState(true);
   const previousMessageCount = useRef(messages.length);
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [isInitialized, setIsInitialized] = useState(false);
 
   // Handlers for queue editing
   const handleStartEdit = (messageId: string) => {
@@ -628,7 +690,14 @@ export function Messages({
     }
 
     return items;
-  }, [messages, isLoading, messageQueue, editingQueuedId, editingContent, activeTools.length]);
+  }, [
+    messages,
+    isLoading,
+    messageQueue,
+    editingQueuedId,
+    editingContent,
+    activeTools.length,
+  ]);
 
   // Find the last user message (excluding queued messages)
   const lastUserMessageId = useMemo(() => {
@@ -655,13 +724,28 @@ export function Messages({
     });
   };
 
+  // Initialize Virtuoso after a small delay to prevent initial flicker
+  useEffect(() => {
+    if (!isInitialized && messages.length > 0) {
+      // Use requestAnimationFrame to ensure DOM is ready
+      requestAnimationFrame(() => {
+        setIsInitialized(true);
+      });
+    }
+  }, [messages.length, isInitialized]);
+
   // Scroll to bottom on initial load only
   useEffect(() => {
     // Reset when conversation changes
     if (conversationId !== previousConversationId.current) {
       setShowNewMessageAlert(false);
+      setIsInitialized(false);
       previousConversationId.current = conversationId;
       previousMessageCount.current = messages.length;
+      // Re-initialize after conversation change
+      requestAnimationFrame(() => {
+        setIsInitialized(true);
+      });
     }
   }, [allItems.length, conversationId]);
 
@@ -712,7 +796,14 @@ export function Messages({
           </p>
         </div>
       ) : (
-        <div className={cn("flex-1 relative")} ref={containerRef}>
+        <div
+          className={cn("flex-1 relative")}
+          ref={containerRef}
+          style={{
+            transform: "translateZ(0)",
+            backfaceVisibility: "hidden",
+          }}
+        >
           {previousConversationId.current === "new" ? (
             <div className="flex absolute items-center justify-center inset-0">
               <Button
@@ -725,131 +816,178 @@ export function Messages({
             </div>
           ) : (
             <>
-              {previousConversationId.current === conversationId && (
-                <Virtuoso
-                  ref={virtuosoRef}
-                  data={allItems}
-                  initialTopMostItemIndex={allItems.length - 1}
-                  atBottomStateChange={(atBottom) => {
-                    setIsAtBottom(atBottom);
-                    if (atBottom) {
-                      setShowNewMessageAlert(false);
+              {!isInitialized && messages.length > 0 && (
+                <div className="flex-1 overflow-hidden">
+                  <div className="flex flex-col gap-4 p-4 animate-pulse">
+                    {messages.slice(-3).map((_, idx) => (
+                      <div
+                        key={idx}
+                        className="flex max-w-[45rem] mx-auto w-full"
+                      >
+                        <div className="flex gap-3 w-full">
+                          <div className="h-8 w-8 rounded-md bg-muted" />
+                          <div className="flex-1 space-y-2">
+                            <div className="h-4 bg-muted rounded w-3/4" />
+                            <div className="h-4 bg-muted rounded w-1/2" />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {previousConversationId.current === conversationId &&
+                isInitialized && (
+                  <Virtuoso
+                    ref={virtuosoRef}
+                    data={allItems}
+                    initialTopMostItemIndex={
+                      allItems.length > 0
+                        ? Math.max(0, allItems.length - 1)
+                        : undefined
                     }
-                  }}
-                  atBottomThreshold={50}
-                  overscan={200}
-                  itemContent={(index, item) => {
-                    // Add top padding for first item
-                    const topPadding =
-                      index === 0 ? <div style={{ height: "100px" }} /> : null;
-                    // Add bottom padding for last item
-                    const bottomPadding =
-                      index === allItems.length - 1 ? (
-                        <div style={{ height: "200px" }} />
-                      ) : null;
+                    defaultItemHeight={100}
+                    atBottomStateChange={(atBottom) => {
+                      setIsAtBottom(atBottom);
+                      if (atBottom) {
+                        setShowNewMessageAlert(false);
+                      }
+                    }}
+                    atBottomThreshold={50}
+                    overscan={{ main: 500, reverse: 500 }}
+                    increaseViewportBy={{ top: 200, bottom: 200 }}
+                    scrollSeekConfiguration={{
+                      enter: (velocity) => Math.abs(velocity) > 1000,
+                      exit: (velocity) => Math.abs(velocity) < 300,
+                      change: (_velocity) => {
+                        return (
+                          <div className="flex max-w-[45rem] mx-auto p-2">
+                            <div className="h-20 w-full bg-muted/30 rounded-lg animate-pulse" />
+                          </div>
+                        );
+                      },
+                    }}
+                    itemContent={(index, item) => {
+                      // Add top padding for first item
+                      const topPadding =
+                        index === 0 ? (
+                          <div style={{ height: "100px" }} />
+                        ) : null;
+                      // Add bottom padding for last item
+                      const bottomPadding =
+                        index === allItems.length - 1 ? (
+                          <div style={{ height: "200px" }} />
+                        ) : null;
 
-                    // Loading indicator
-                    if (item.id === "loading") {
-                      return (
-                        <>
-                          {topPadding}
-                          <div className="flex max-w-[45rem] mx-auto cursor-default">
-                            <div className="flex flex-1 relative p-2 rounded-lg">
-                              <div className="flex gap-3 justify-start flex-1 pr-[45px]">
-                                <div className="flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-md bg-muted">
-                                  <Bot className="h-4 w-4" />
-                                </div>
-                                <div className="flex flex-col gap-2 max-w-[70%]">
-                                  <div className="rounded-lg p-3 text-sm bg-muted">
-                                    <div className="flex items-center space-x-2">
-                                      {activeTools.length === 0 ? (
-                                        <div className="flex items-center space-x-2 flex-1">
-                                          <div className="flex items-center space-x-1">
-                                            <div className="h-1 w-1 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.3s]"></div>
-                                            <div className="h-1 w-1 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.15s]"></div>
-                                            <div className="h-1 w-1 animate-bounce rounded-full bg-muted-foreground"></div>
-                                          </div>
-
-                                          <span className="text-muted-foreground text-sm animate-pulse font-medium">
-                                            {thinkingWords[thinkingWordIndex]}
-                                            ...
-                                          </span>
-                                        </div>
-                                      ) : (
-                                        <>
-                                          <span
-                                            className={cn(
-                                              "text-muted-foreground text-sm animate-pulse font-medium",
-                                              (!canStop || !onStop) &&
-                                                "flex items-center justify-center flex-1"
-                                            )}
-                                          >
-                                            {thinkingWords[thinkingWordIndex]}{" "}
-                                            {activeTools.length > 1
-                                              ? "tools"
-                                              : "tool"}
-                                          </span>
-                                        </>
-                                      )}
-                                      {canStop && onStop && (
-                                        <div className="pl-6">
-                                          <Button
-                                            variant="outline"
-                                            size="sm"
-                                            onClick={onStop}
-                                            className="h-7 px-2"
-                                          >
-                                            <Square className="h-3 w-3 mr-1" />
-                                            Stop
-                                          </Button>
-                                        </div>
-                                      )}
-                                    </div>
+                      // Loading indicator
+                      if (item.id === "loading") {
+                        return (
+                          <>
+                            {topPadding}
+                            <div className="flex max-w-[45rem] mx-auto cursor-default">
+                              <div className="flex flex-1 relative p-2 rounded-lg">
+                                <div className="flex gap-3 justify-start flex-1 pr-[45px]">
+                                  <div className="flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-md bg-muted">
+                                    <Bot className="h-4 w-4" />
                                   </div>
-                                  {/* Show active tools if any are being used */}
-                                  {activeTools.length > 0 && (
-                                    <ToolCallIndicator
-                                      key={`active-tools-${activeTools.join('-')}`}
-                                      tools={activeTools}
-                                      variant="full"
-                                      isCompleted={false}
-                                      className="ml-3"
-                                    />
-                                  )}
+                                  <div className="flex flex-col gap-2 max-w-[70%]">
+                                    <div className="rounded-lg p-3 text-sm bg-muted">
+                                      <div className="flex items-center space-x-2">
+                                        {activeTools.length === 0 ? (
+                                          <div className="flex items-center space-x-2 flex-1">
+                                            <div className="flex items-center space-x-1">
+                                              <div className="h-1 w-1 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.3s]"></div>
+                                              <div className="h-1 w-1 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.15s]"></div>
+                                              <div className="h-1 w-1 animate-bounce rounded-full bg-muted-foreground"></div>
+                                            </div>
+
+                                            <span className="text-muted-foreground text-sm animate-pulse font-medium">
+                                              {thinkingWords[thinkingWordIndex]}
+                                              ...
+                                            </span>
+                                          </div>
+                                        ) : (
+                                          <>
+                                            <span
+                                              className={cn(
+                                                "text-muted-foreground text-sm animate-pulse font-medium",
+                                                (!canStop || !onStop) &&
+                                                  "flex items-center justify-center flex-1"
+                                              )}
+                                            >
+                                              {thinkingWords[thinkingWordIndex]}{" "}
+                                              {activeTools.length > 1
+                                                ? "tools"
+                                                : "tool"}
+                                            </span>
+                                          </>
+                                        )}
+                                        {canStop && onStop && (
+                                          <div className="pl-6">
+                                            <Button
+                                              variant="outline"
+                                              size="sm"
+                                              onClick={onStop}
+                                              className="h-7 px-2"
+                                            >
+                                              <Square className="h-3 w-3 mr-1" />
+                                              Stop
+                                            </Button>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                    {/* Show active tools if any are being used */}
+                                    {activeTools.length > 0 && (
+                                      <ToolCallIndicator
+                                        key={`active-tools-${activeTools.join(
+                                          "-"
+                                        )}`}
+                                        tools={activeTools}
+                                        variant="full"
+                                        isCompleted={false}
+                                        className="ml-3"
+                                      />
+                                    )}
+                                  </div>
                                 </div>
                               </div>
                             </div>
-                          </div>
+                            {bottomPadding}
+                          </>
+                        );
+                      }
+
+                      // Regular message
+                      return (
+                        <>
+                          {topPadding}
+                          <MessageItem
+                            message={item}
+                            onForgetFrom={onForgetFrom}
+                            onStartEdit={handleStartEdit}
+                            onSaveEdit={handleSaveEdit}
+                            onCancelEdit={handleCancelEdit}
+                            onCancelQueued={onCancelQueued}
+                            editingContent={editingContent}
+                            setEditingContent={setEditingContent}
+                            onResendMessage={onResendMessage}
+                            isLastUserMessage={item.id === lastUserMessageId}
+                            onNewChatFromHere={onNewChatFromHere}
+                          />
                           {bottomPadding}
                         </>
                       );
-                    }
-
-                    // Regular message
-                    return (
-                      <>
-                        {topPadding}
-                        <MessageItem
-                          message={item}
-                          onForgetFrom={onForgetFrom}
-                          onStartEdit={handleStartEdit}
-                          onSaveEdit={handleSaveEdit}
-                          onCancelEdit={handleCancelEdit}
-                          onCancelQueued={onCancelQueued}
-                          editingContent={editingContent}
-                          setEditingContent={setEditingContent}
-                          onResendMessage={onResendMessage}
-                          isLastUserMessage={item.id === lastUserMessageId}
-                          onNewChatFromHere={onNewChatFromHere}
-                        />
-                        {bottomPadding}
-                      </>
-                    );
-                  }}
-                  followOutput={false}
-                  className="flex-1"
-                />
-              )}
+                    }}
+                    followOutput={false}
+                    className="flex-1"
+                    style={{
+                      height: "100%",
+                      overscrollBehavior: "contain",
+                      WebkitOverflowScrolling: "touch",
+                    }}
+                  />
+                )}
 
               {/* New message indicator */}
               {showNewMessageAlert && (

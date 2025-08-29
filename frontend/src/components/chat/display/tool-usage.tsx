@@ -19,7 +19,7 @@ interface ToolUsagePopoverProps {
 }
 
 export function ToolUsagePopover({
-  messageId: _messageId,
+  messageId,
   toolName,
   children,
   toolUsages,
@@ -27,19 +27,27 @@ export function ToolUsagePopover({
   const [toolUsage, setToolUsage] = useState<ToolUsage | null>(null);
   const [isOpen, setIsOpen] = useState(false);
   const [hasFetched, setHasFetched] = useState(false);
-  const { loading, error } = useToolUsage();
+  const { fetchToolUsage, loading, error } = useToolUsage();
 
   useEffect(() => {
     if (isOpen && !hasFetched) {
       // Check if we have tool_usages passed as props
       // This is more efficient than making an API call
-      if (toolUsages) {
+      if (toolUsages && toolUsages.length > 0) {
         const usage = toolUsages.find((tu: ToolUsage) => tu.tool_name === toolName);
         setToolUsage(usage || null);
+        setHasFetched(true);
+      } else if (messageId) {
+        // If no tool usages in props, fetch from API
+        fetchToolUsage(messageId, toolName).then(usage => {
+          setToolUsage(usage);
+          setHasFetched(true);
+        });
+      } else {
+        setHasFetched(true);
       }
-      setHasFetched(true);
     }
-  }, [isOpen, hasFetched, toolUsages, toolName]);
+  }, [isOpen, hasFetched, toolUsages, toolName, messageId, fetchToolUsage]);
 
   const renderComplexValue = (value: any): React.ReactNode => {
     if (value === null || value === undefined) {
@@ -212,7 +220,7 @@ export function ToolUsagePopover({
 
   const renderOutput = (output: any) => {
     if (!output)
-      return <span className="text-muted-foreground">No output</span>;
+      return <span className="text-muted-foreground">No output captured</span>;
 
     try {
       // Handle new status-wrapped format
@@ -230,13 +238,46 @@ export function ToolUsagePopover({
         }
 
         if (status === "success" && result) {
+          // Check if result has meaningful content
+          if (typeof result === "string" && result.trim()) {
+            // For multiline strings, use pre formatting
+            if (result.includes('\n') || result.length > 100) {
+              return (
+                <pre className="text-xs overflow-x-auto whitespace-pre-wrap break-words font-mono max-h-[300px] overflow-y-auto">
+                  {result}
+                </pre>
+              );
+            }
+            return <span className="text-sm">{result}</span>;
+          }
           return renderJsonAsTable(result);
         }
 
         if (status === "completed") {
+          if (result && typeof result === "string" && result.trim()) {
+            return (
+              <pre className="text-xs overflow-x-auto whitespace-pre-wrap break-words font-mono">
+                {result}
+              </pre>
+            );
+          }
           return (
-            <div className="text-muted-foreground text-[10px] font-mono overflow-auto">
-              {typeof result === "string" ? result : "Tool execution completed"}
+            <div className="text-muted-foreground text-sm">
+              Tool execution completed successfully
+            </div>
+          );
+        }
+
+        if (status === "error" && result) {
+          return (
+            <div className="text-destructive text-sm">
+              <div className="flex items-center gap-2 mb-2">
+                <AlertCircle className="h-4 w-4" />
+                <span className="font-medium">Error</span>
+              </div>
+              <pre className="text-xs overflow-x-auto whitespace-pre-wrap break-words font-mono">
+                {typeof result === "string" ? result : JSON.stringify(result, null, 2)}
+              </pre>
             </div>
           );
         }
@@ -246,17 +287,26 @@ export function ToolUsagePopover({
       }
 
       if (typeof output === "string") {
+        // Check for empty strings
+        if (!output.trim()) {
+          return <span className="text-muted-foreground text-sm">No output produced</span>;
+        }
+        
         // Try to parse as JSON first
         try {
           const parsed = JSON.parse(output);
           return renderJsonAsTable(parsed);
         } catch {
           // Return as string if not JSON
-          return (
-            <pre className="text-xs overflow-x-auto whitespace-pre-wrap break-words font-mono">
-              {output}
-            </pre>
-          );
+          // For multiline or long strings, use pre formatting
+          if (output.includes('\n') || output.length > 100) {
+            return (
+              <pre className="text-xs overflow-x-auto whitespace-pre-wrap break-words font-mono max-h-[300px] overflow-y-auto">
+                {output}
+              </pre>
+            );
+          }
+          return <span className="text-sm">{output}</span>;
         }
       }
 
@@ -270,7 +320,8 @@ export function ToolUsagePopover({
           {String(output)}
         </pre>
       );
-    } catch {
+    } catch (err) {
+      console.error('Error rendering output:', err);
       return (
         <pre className="text-xs overflow-x-auto whitespace-pre-wrap break-words font-mono">
           {String(output)}
@@ -312,9 +363,10 @@ export function ToolUsagePopover({
 
         <ScrollArea className="max-h-[500px]">
           <div className="p-4 space-y-4">
-            {loading && !hasFetched && (
-              <div className="flex items-center justify-center py-8">
+            {loading && (
+              <div className="flex flex-col items-center justify-center py-8 space-y-2">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                <span className="text-sm text-muted-foreground">Loading tool details...</span>
               </div>
             )}
 
@@ -326,8 +378,20 @@ export function ToolUsagePopover({
             )}
 
             {!loading && !error && !toolUsage && hasFetched && (
-              <div className="text-sm text-muted-foreground text-center py-4">
-                Tool was executed successfully.
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 text-sm">
+                  <CheckCircle className="h-4 w-4 text-green-600" />
+                  <span>Tool executed successfully</span>
+                </div>
+                <div className="text-xs text-muted-foreground bg-muted/50 rounded-lg p-3">
+                  <p className="mb-2">No detailed output captured for this tool execution.</p>
+                  <p>This could mean:</p>
+                  <ul className="list-disc list-inside mt-1 space-y-1 ml-2">
+                    <li>The tool completed without producing output</li>
+                    <li>The output was processed internally</li>
+                    <li>The tool execution details were not stored</li>
+                  </ul>
+                </div>
               </div>
             )}
 
