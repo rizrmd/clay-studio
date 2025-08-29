@@ -82,9 +82,13 @@ export function ConversationSidebar({
   const navigate = useNavigate();
   const fetchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastFetchTimeRef = useRef<number>(0);
+  const lastMessageCountRef = useRef<Record<string, number>>({});
 
   // Track loading state for conversations
   const snapshot = useSnapshot(store.conversations);
+  
+  // Track loading state from conversationStore for proper streaming detection
+  const conversationStoreSnapshot = useSnapshot(conversationStore.conversations);
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -94,6 +98,32 @@ export function ConversationSidebar({
       }
     };
   }, []);
+  
+  // Track new messages in non-active conversations
+  useEffect(() => {
+    // Check all conversations for new messages
+    Object.keys(conversationStoreSnapshot).forEach(conversationId => {
+      const state = conversationStoreSnapshot[conversationId];
+      if (!state) return;
+      
+      // Count messages in this conversation
+      const currentMessageCount = state.messages?.length || 0;
+      const previousMessageCount = lastMessageCountRef.current[conversationId] || 0;
+      
+      // If this is not the active conversation and has new messages
+      if (conversationId !== actualConversationId && currentMessageCount > previousMessageCount) {
+        logger.info('New message detected in conversation', conversationId);
+        setRecentlyUpdatedConversations(prev => {
+          const newSet = new Set(prev);
+          newSet.add(conversationId);
+          return newSet;
+        });
+      }
+      
+      // Update the count
+      lastMessageCountRef.current[conversationId] = currentMessageCount;
+    });
+  }, [conversationStoreSnapshot, actualConversationId]);
 
   // Auto-close mobile menu on larger screens
   useEffect(() => {
@@ -584,22 +614,27 @@ export function ConversationSidebar({
                       )}
                     >
                       <div className="relative flex flex-col items-center pt-1">
-                        {snapshot[conversation.id]?.isLoading ||
+                        {/* Check streaming state from conversationStore */}
+                        {conversationStoreSnapshot[conversation.id]?.status === 'streaming' ? (
+                          <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />
+                        ) : snapshot[conversation.id]?.isLoading ||
                         snapshot[conversation.id]?.isStreaming ? (
                           <Loader2 className="h-4 w-4 text-muted-foreground animate-spin" />
                         ) : (
                           <MessageSquare
                             className={cn(
                               "h-4 w-4",
-                              recentlyUpdatedConversations.has(conversation.id)
+                              recentlyUpdatedConversations.has(conversation.id) && 
+                              actualConversationId !== conversation.id
                                 ? "text-green-500"
-                                : " text-muted-foreground"
+                                : "text-muted-foreground"
                             )}
                           />
                         )}
-                        {/* Green notification dot below icon */}
-                        {recentlyUpdatedConversations.has(conversation.id) && (
-                          <div className="h-[6px] w-[6px] rounded-full bg-green-500 mt-1" />
+                        {/* Green notification dot for new messages in non-active conversations */}
+                        {recentlyUpdatedConversations.has(conversation.id) && 
+                         actualConversationId !== conversation.id && (
+                          <div className="h-[6px] w-[6px] rounded-full bg-green-500 mt-1 animate-pulse" />
                         )}
                       </div>
                       <div className="flex-1 min-w-0">
@@ -607,7 +642,8 @@ export function ConversationSidebar({
                           className={cn(
                             "text-sm font-medium truncate",
                             recentlyUpdatedConversations.has(conversation.id) &&
-                              "text-green-500"
+                            actualConversationId !== conversation.id &&
+                              "text-green-500 font-semibold"
                           )}
                         >
                           {conversation.title || "New Conversation"}

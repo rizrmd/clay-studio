@@ -16,6 +16,7 @@ interface ToolCallIndicatorProps {
   variant?: "compact" | "full";
   isCompleted?: boolean; // Whether these are completed tools vs active ones
   messageId?: string; // Message ID for fetching tool usage details
+  toolUsages?: any[]; // Tool usage data for the message
 }
 
 export function ToolCallIndicator({
@@ -24,6 +25,7 @@ export function ToolCallIndicator({
   variant = "full",
   isCompleted = false,
   messageId,
+  toolUsages,
 }: ToolCallIndicatorProps) {
   
   if (!tools || tools.length === 0) return null;
@@ -49,7 +51,7 @@ export function ToolCallIndicator({
             {tools.length === 1 ? (
               <>
                 {firstTool && messageId ? (
-                  <ToolUsagePopover messageId={messageId} toolName={tools[0]}>
+                  <ToolUsagePopover messageId={messageId} toolName={tools[0]} toolUsages={toolUsages}>
                     <div
                       className={cn(
                         "flex gap-1 items-center cursor-pointer hover:opacity-80 transition-opacity"
@@ -106,6 +108,7 @@ export function ToolCallIndicator({
                             key={`${tool}-${index}`}
                             messageId={messageId}
                             toolName={tool}
+                            toolUsages={toolUsages}
                           >
                             <div className="cursor-pointer hover:bg-accent rounded px-1 -mx-1 transition-colors">
                               {content}

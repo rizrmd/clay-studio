@@ -662,7 +662,6 @@ pub struct MessageResponse {
     pub role: String,
     #[serde(rename = "createdAt")]
     pub created_at: String,
-    pub clay_tools_used: Option<Vec<String>>,
     pub processing_time_ms: Option<i64>,
 }
 
@@ -676,50 +675,78 @@ pub async fn get_conversation_messages(
     let conversation_id = req.param::<String>("conversation_id")
         .ok_or(AppError::BadRequest("Missing conversation_id".to_string()))?;
     
-    // Fetch messages from database, filtering out forgotten ones
+    // Fetch messages from database first, filtering out forgotten ones
+    // Order by created_at and then by id to ensure stable ordering
     let messages = sqlx::query(
-        "SELECT id, content, role, clay_tools_used, processing_time_ms, created_at 
+        "SELECT id, content, role, processing_time_ms, created_at 
          FROM messages 
          WHERE conversation_id = $1 
          AND (is_forgotten = false OR is_forgotten IS NULL)
-         ORDER BY created_at ASC"
+         ORDER BY created_at ASC, id ASC"
     )
     .bind(&conversation_id)
     .fetch_all(&state.db_pool)
     .await
     .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
     
+    tracing::debug!("Found {} messages for conversation {}", messages.len(), conversation_id);
+    
     let mut message_responses = Vec::new();
     for row in messages {
-        let tools_json: Option<serde_json::Value> = row.try_get("clay_tools_used").ok();
-        let tools = tools_json.and_then(|v| {
-            if v.is_array() {
-                v.as_array().map(|arr| {
-                    arr.iter()
-                        .filter_map(|item| item.as_str().map(String::from))
-                        .collect()
-                })
-            } else {
-                None
-            }
-        });
+        let msg_id: String = row.try_get("id")
+            .map_err(|e| AppError::InternalServerError(format!("Failed to get id: {}", e)))?;
+        
+        // clay_tools_used field has been deprecated in favor of tool_usages
+        
+        let msg_role: String = row.try_get("role")
+            .map_err(|e| AppError::InternalServerError(format!("Failed to get role: {}", e)))?;
+        let msg_created_at = row.try_get::<chrono::DateTime<Utc>, _>("created_at")
+            .map_err(|e| AppError::InternalServerError(format!("Failed to get created_at: {}", e)))?;
+        
+        tracing::trace!("Message order: {} - {} at {}", &msg_id[..8], msg_role, msg_created_at);
         
         message_responses.push(MessageResponse {
-            id: row.try_get("id")
-                .map_err(|e| AppError::InternalServerError(format!("Failed to get id: {}", e)))?,
+            id: msg_id,
             content: row.try_get("content")
                 .map_err(|e| AppError::InternalServerError(format!("Failed to get content: {}", e)))?,
-            role: row.try_get("role")
-                .map_err(|e| AppError::InternalServerError(format!("Failed to get role: {}", e)))?,
-            created_at: row.try_get::<chrono::DateTime<Utc>, _>("created_at")
-                .map_err(|e| AppError::InternalServerError(format!("Failed to get created_at: {}", e)))?
-                .to_rfc3339(),
-            clay_tools_used: tools,
+            role: msg_role,
+            created_at: msg_created_at.to_rfc3339(),
             processing_time_ms: row.try_get("processing_time_ms").ok(),
         });
     }
     
-    res.render(Json(message_responses));
+    // Check if there's really an active stream that needs resuming
+    // Only mark as active if:
+    // 1. Last message is from user OR last assistant message is empty AND
+    // 2. Stream exists in active_streams (for real-time streaming detection)
+    let has_active_stream = {
+        // First check the message state
+        let needs_streaming = if let Some(last_msg) = message_responses.last() {
+            match last_msg.role.as_str() {
+                "user" => true, // Last message is user, assistant hasn't responded
+                "assistant" => last_msg.content.is_empty(), // Assistant message is empty (stub)
+                _ => false,
+            }
+        } else {
+            false // No messages
+        };
+        
+        // Only check active_streams if we actually need streaming
+        if needs_streaming {
+            let streams = state.active_claude_streams.read().await;
+            streams.contains_key(&conversation_id)
+        } else {
+            false // Assistant already has content, no need to stream
+        }
+    };
+    
+    // Include streaming state in response
+    let response = serde_json::json!({
+        "messages": message_responses,
+        "has_active_stream": has_active_stream,
+    });
+    
+    res.render(Json(response));
     Ok(())
 }
 

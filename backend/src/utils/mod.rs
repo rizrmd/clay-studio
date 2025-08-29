@@ -7,6 +7,7 @@ pub mod auth;
 pub mod middleware;
 pub mod claude_md_template;
 pub mod domain;
+pub mod mcp_tools;
 
 pub use config::*;
 pub use error::*;

@@ -237,7 +237,7 @@ impl McpHandlers {
                         },
                         "source_type": {
                             "type": "string",
-                            "description": "Type of data source (postgres, mysql, sqlite, mongodb, etc.)"
+                            "description": "Type of data source (postgres, mysql, sqlite, clickhouse, mongodb, etc.)"
                         },
                         "connection_config": {
                             "type": "object",
@@ -293,6 +293,20 @@ impl McpHandlers {
                         "datasource_id": {
                             "type": "string",
                             "description": "ID of the data source to test"
+                        }
+                    },
+                    "required": ["datasource_id"]
+                }),
+            },
+            Tool {
+                name: "datasource_detail".to_string(),
+                description: "Get detailed information about a specific data source (lightweight alternative to inspect)".to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "datasource_id": {
+                            "type": "string",
+                            "description": "ID of the data source to get details for"
                         }
                     },
                     "required": ["datasource_id"]
@@ -450,6 +464,9 @@ impl McpHandlers {
             }
             "datasource_test" => {
                 self.test_connection(arguments).await
+            }
+            "datasource_detail" => {
+                self.get_datasource_detail(arguments).await
             }
             "datasource_inspect" => {
                 self.inspect_datasource(arguments).await
@@ -911,6 +928,126 @@ impl McpHandlers {
             }
         }
     }
+    
+    async fn get_datasource_detail(&self, args: &serde_json::Map<String, Value>) -> Result<String, JsonRpcError> {
+        let datasource_id = args.get("datasource_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| JsonRpcError {
+                code: INVALID_PARAMS,
+                message: "Missing datasource_id".to_string(),
+                data: None,
+            })?;
+        
+        // Query data source details including connection config
+        let source = sqlx::query(
+            "SELECT id, name, source_type, connection_config, is_active, last_tested_at, created_at 
+             FROM data_sources 
+             WHERE id = $1 AND project_id = $2"
+        )
+        .bind(datasource_id)
+        .bind(&self.project_id)
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(|e| JsonRpcError {
+            code: INTERNAL_ERROR,
+            message: format!("Database error: {}", e),
+            data: None,
+        })?;
+        
+        match source {
+            Some(row) => {
+                let id: String = row.get("id");
+                let name: String = row.get("name");
+                let source_type: String = row.get("source_type");
+                let connection_config: serde_json::Value = row.get("connection_config");
+                let is_active: bool = row.get("is_active");
+                let last_tested: Option<DateTime<Utc>> = row.get("last_tested_at");
+                let created_at: DateTime<Utc> = row.get("created_at");
+                
+                // Parse connection config to extract basic info (hiding sensitive data)
+                let config_info = match source_type.as_str() {
+                    "postgres" | "mysql" => {
+                        let host = connection_config.get("host")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown");
+                        let port = connection_config.get("port")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0);
+                        let database = connection_config.get("database")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown");
+                        let user = connection_config.get("user")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown");
+                        format!(
+                            "  Host: {}\n  Port: {}\n  Database: {}\n  User: {}",
+                            host, port, database, user
+                        )
+                    }
+                    "clickhouse" => {
+                        let host = connection_config.get("host")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown");
+                        let port = connection_config.get("port")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0);
+                        let database = connection_config.get("database")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("default");
+                        let user = connection_config.get("user")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("default");
+                        format!(
+                            "  Host: {}\n  Port: {}\n  Database: {}\n  User: {}",
+                            host, port, database, user
+                        )
+                    }
+                    "bigquery" => {
+                        let project_id = connection_config.get("project_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown");
+                        let dataset = connection_config.get("dataset")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown");
+                        format!(
+                            "  Project ID: {}\n  Dataset: {}",
+                            project_id, dataset
+                        )
+                    }
+                    _ => "  Connection details available".to_string()
+                };
+                
+                let result = format!(
+                    "📊 Data Source Details\n\n\
+                    Name: {}\n\
+                    ID: {}\n\
+                    Type: {}\n\
+                    Status: {}\n\
+                    Created: {}\n\
+                    Last Tested: {}\n\n\
+                    Connection Configuration:\n{}",
+                    name,
+                    id,
+                    source_type,
+                    if is_active { "✅ Active" } else { "❌ Inactive" },
+                    created_at.format("%Y-%m-%d %H:%M:%S UTC"),
+                    last_tested.map(|dt| dt.format("%Y-%m-%d %H:%M:%S UTC").to_string())
+                        .unwrap_or_else(|| "Never tested".to_string()),
+                    config_info
+                );
+                
+                Ok(result)
+            }
+            None => {
+                Err(JsonRpcError {
+                    code: INVALID_PARAMS,
+                    message: "Data source not found. The datasource_id does not exist or has been deleted. Use datasource_list to see available data sources.".to_string(),
+                    data: None,
+                })
+            }
+        }
+    }
+    
     async fn query_datasource(&self, args: &serde_json::Map<String, Value>) -> Result<String, JsonRpcError> {
         eprintln!(
             "[{}] [INFO] Executing query for project: {}", 
@@ -1748,6 +1885,17 @@ impl McpHandlers {
             "sqlite" => {
                 components.insert("path".to_string(), json!(url.replace("sqlite://", "")));
             }
+            "clickhouse" | "ch" => {
+                if let Some(parsed) = self.parse_clickhouse_url(url) {
+                    components.extend(parsed);
+                } else {
+                    return Err(JsonRpcError {
+                        code: INVALID_PARAMS,
+                        message: "Invalid ClickHouse connection URL format".to_string(),
+                        data: None,
+                    });
+                }
+            }
             _ => {
                 // For unknown types, try generic URL parsing
                 if let Some(parsed) = self.parse_generic_url(url) {
@@ -1859,6 +2007,56 @@ impl McpHandlers {
         Some(components)
     }
     
+    // Parse ClickHouse URL format: http://user:pass@host:port/database
+    fn parse_clickhouse_url(&self, url: &str) -> Option<serde_json::Map<String, Value>> {
+        let url = url.strip_prefix("http://").or_else(|| url.strip_prefix("https://"))?;
+        
+        let mut components = serde_json::Map::new();
+        
+        // Split by @ to separate auth and host parts
+        let parts: Vec<&str> = url.splitn(2, '@').collect();
+        if parts.len() != 2 {
+            return None;
+        }
+        
+        // Parse auth part (user:pass)
+        let auth_parts: Vec<&str> = parts[0].splitn(2, ':').collect();
+        if !auth_parts.is_empty() {
+            // URL decode the username
+            let username = urlencoding::decode(auth_parts[0]).unwrap_or_else(|_| auth_parts[0].into());
+            components.insert("username".to_string(), json!(username.to_string()));
+        }
+        if auth_parts.len() >= 2 {
+            // URL decode the password to handle special characters
+            let password = urlencoding::decode(auth_parts[1]).unwrap_or_else(|_| auth_parts[1].into());
+            components.insert("password".to_string(), json!(password.to_string()));
+        }
+        
+        // Parse host part (host:port/database)
+        let host_part = parts[1];
+        let host_db_parts: Vec<&str> = host_part.splitn(2, '/').collect();
+        
+        if host_db_parts.len() >= 2 {
+            components.insert("database".to_string(), json!(host_db_parts[1]));
+        }
+        
+        // Parse host:port
+        if let Some(host_port) = host_db_parts.first() {
+            let host_port_parts: Vec<&str> = host_port.splitn(2, ':').collect();
+            components.insert("host".to_string(), json!(host_port_parts[0]));
+            
+            if host_port_parts.len() >= 2 {
+                if let Ok(port) = host_port_parts[1].parse::<i32>() {
+                    components.insert("port".to_string(), json!(port));
+                }
+            } else {
+                components.insert("port".to_string(), json!(8123)); // Default ClickHouse HTTP port
+            }
+        }
+        
+        Some(components)
+    }
+    
     // Generic URL parser for unknown database types
     fn parse_generic_url(&self, url: &str) -> Option<serde_json::Map<String, Value>> {
         // Try to parse as a generic URL format: scheme://user:pass@host:port/path
@@ -1958,6 +2156,27 @@ impl McpHandlers {
             "sqlite" => {
                 let path = config.get("path")?.as_str()?;
                 Some(format!("sqlite://{}", path))
+            }
+            "clickhouse" | "ch" => {
+                let host = config.get("host")?.as_str()?;
+                let port = config.get("port").and_then(|v| v.as_i64()).unwrap_or(8123);
+                let database = config.get("database")?.as_str().unwrap_or("default");
+                let username = config.get("username")?.as_str().unwrap_or("default");
+                let password = config.get("password").and_then(|v| v.as_str()).unwrap_or("");
+
+                // URL encode username and password to handle special characters
+                let encoded_username = urlencoding::encode(username);
+                let encoded_password = if password.is_empty() {
+                    String::new()
+                } else {
+                    urlencoding::encode(password).to_string()
+                };
+
+                if encoded_password.is_empty() {
+                    Some(format!("http://{}@{}:{}/{}", encoded_username, host, port, database))
+                } else {
+                    Some(format!("http://{}:{}@{}:{}/{}", encoded_username, encoded_password, host, port, database))
+                }
             }
             _ => None
         }

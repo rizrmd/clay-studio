@@ -14,6 +14,11 @@ export default defineConfig({
   server: {
     port: 7690,
     proxy: {
+      '/api/ws': {
+        target: 'ws://127.0.0.1:7680',
+        ws: true,
+        changeOrigin: true,
+      },
       '/api': {
         target: 'http://127.0.0.1:7680',
         changeOrigin: true,
@@ -27,11 +32,6 @@ export default defineConfig({
           proxy.on('proxyRes', (proxyRes, req, _res) => {
           });
         },
-      },
-      '/ws': {
-        target: 'ws://127.0.0.1:7680',
-        ws: true,
-        changeOrigin: true,
       },
     },
   },

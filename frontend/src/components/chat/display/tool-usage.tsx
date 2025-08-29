@@ -15,26 +15,31 @@ interface ToolUsagePopoverProps {
   messageId: string;
   toolName: string;
   children: React.ReactNode;
+  toolUsages?: ToolUsage[];
 }
 
 export function ToolUsagePopover({
-  messageId,
+  messageId: _messageId,
   toolName,
   children,
+  toolUsages,
 }: ToolUsagePopoverProps) {
   const [toolUsage, setToolUsage] = useState<ToolUsage | null>(null);
   const [isOpen, setIsOpen] = useState(false);
   const [hasFetched, setHasFetched] = useState(false);
-  const { fetchToolUsage, loading, error } = useToolUsage();
+  const { loading, error } = useToolUsage();
 
   useEffect(() => {
     if (isOpen && !hasFetched) {
-      fetchToolUsage(messageId, toolName).then((data) => {
-        setToolUsage(data);
-        setHasFetched(true);
-      });
+      // Check if we have tool_usages passed as props
+      // This is more efficient than making an API call
+      if (toolUsages) {
+        const usage = toolUsages.find((tu: ToolUsage) => tu.tool_name === toolName);
+        setToolUsage(usage || null);
+      }
+      setHasFetched(true);
     }
-  }, [isOpen, hasFetched, messageId, toolName, fetchToolUsage]);
+  }, [isOpen, hasFetched, toolUsages, toolName]);
 
   const renderComplexValue = (value: any): React.ReactNode => {
     if (value === null || value === undefined) {
@@ -322,7 +327,7 @@ export function ToolUsagePopover({
 
             {!loading && !error && !toolUsage && hasFetched && (
               <div className="text-sm text-muted-foreground text-center py-4">
-                No detailed information available for this tool usage.
+                Tool was executed successfully.
               </div>
             )}
 

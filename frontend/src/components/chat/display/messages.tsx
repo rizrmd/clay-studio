@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge";
+import { getToolNamesFromMessage } from "@/types/chat";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ToolCallIndicator } from "./tool-call-indicator";
@@ -46,9 +47,10 @@ interface Message {
   id: string;
   content: string;
   role: "user" | "assistant" | "system";
-  createdAt: Date;
+  createdAt: string | Date;
   file_attachments?: FileAttachment[];
   clay_tools_used?: string[];
+  tool_usages?: any[]; // Added for compatibility
 }
 
 interface QueuedMessage {
@@ -324,20 +326,20 @@ const MessageItem = memo(
                   </div>
                 )}
               {/* Show tools used for completed messages */}
-              {message.clay_tools_used &&
-                message.clay_tools_used.length > 0 &&
+              {getToolNamesFromMessage(message as any).length > 0 &&
                 !message.isQueued && (
                   <div className=" flex items-center gap-2">
                     <div className="border px-1 py-[2px] rounded-sm">
                       <ToolCallIndicator
-                        tools={message.clay_tools_used}
+                        tools={getToolNamesFromMessage(message as any)}
                         variant="compact"
                         isCompleted={true}
                         messageId={message.id}
+                        toolUsages={message.tool_usages}
                       />
                     </div>
                     <div className="text-xs">
-                      {message.createdAt.toLocaleTimeString([], {
+                      {(message.createdAt instanceof Date ? message.createdAt : new Date(message.createdAt)).toLocaleTimeString([], {
                         hour: "2-digit",
                         minute: "2-digit",
                         hour12: false,
@@ -368,10 +370,9 @@ const MessageItem = memo(
                   </div>
                 ) : !isQueued &&
                   !(
-                    message.clay_tools_used &&
-                    message.clay_tools_used.length > 0
+                    getToolNamesFromMessage(message as any).length > 0
                   ) ? (
-                  message.createdAt.toLocaleTimeString([], {
+                  (message.createdAt instanceof Date ? message.createdAt : new Date(message.createdAt)).toLocaleTimeString([], {
                     hour: "2-digit",
                     minute: "2-digit",
                     hour12: false,

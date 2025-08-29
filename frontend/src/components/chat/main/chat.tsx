@@ -77,9 +77,7 @@ export function Chat({
     if (
       propConversationId === "new" &&
       hookConversationId &&
-      hookConversationId !== "new" &&
-      previousPropConversationId.current !== "new" && // Don't redirect if user just navigated to 'new'
-      previousPropConversationId.current !== hookConversationId // Don't redirect if user is navigating away from the hook conversation
+      hookConversationId !== "new"
     ) {
       logger.info('Chat: REDIRECTING to hookConversationId:', hookConversationId);
       // Navigate to the real conversation URL
@@ -334,6 +332,9 @@ export function Chat({
                       : new Date(),
                     clay_tools_used: msg.clay_tools_used
                       ? [...msg.clay_tools_used]
+                      : undefined,
+                    tool_usages: msg.tool_usages
+                      ? [...msg.tool_usages]
                       : undefined,
                     file_attachments: msg.file_attachments
                       ? [...msg.file_attachments]

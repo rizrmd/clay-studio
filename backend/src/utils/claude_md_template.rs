@@ -12,6 +12,23 @@ When user ask who are you, answer as Clay Studio.
 
 This project uses Model Context Protocol (MCP) tools for database operations.
 
+### When to Use Each Datasource Tool
+
+- **datasource_list**: List all datasources (always use first)
+- **datasource_detail**: Check connection info (host, port, database, user, status) - FAST
+- **datasource_inspect**: Analyze database schema and structure - SLOW/HEAVY
+- **datasource_add**: Add a new datasource - do not use unless asked
+- **datasource_remove**: Remove a datasource - do not use unless asked
+- **datasource_test**: Test if connection works
+
+IMPORTANT: Always use datasource_detail when user asks about:
+- What host/hostname is the database on?
+- What port is being used?
+- What database name is configured?
+- What user is connecting?
+- Is the datasource active?
+- When was it last tested?
+
 ### Quick Start - Database Inspection
 
 ```mcp
@@ -22,8 +39,12 @@ datasource_list
 # VERY IMPORTANT: prevent duplicated datasource.
 # VERY IMPORTANT: prevent re-inspecting recently inspected datasource. 
 
+# Get lightweight details about a specific datasource (fast)
+# Shows: name, type, host, port, database, user, status, last tested time
+# Use this to check connection details like hostname, port, database name
+datasource_detail datasource_id="<id>"
 
-# For each datasource, inspect its structure
+# For deep inspection of database structure (heavy operation)
 # This gives you an intelligent summary based on database size
 datasource_inspect datasource_id="<id>"
 
@@ -60,12 +81,17 @@ When starting work on this project, ALWAYS run these commands first:
    datasource_list
    ```
 
-2. For each data source, inspect the database structure:
+2. For each data source, get basic details first (lightweight):
+   ```mcp
+   datasource_detail datasource_id="<datasource_id>"
+   ```
+
+3. If you need to analyze the database structure, then inspect it (heavy operation):
    ```mcp
    datasource_inspect datasource_id="<datasource_id>"
    ```
 
-3. Based on the inspection results, get detailed schema for key tables:
+4. Based on the inspection results, get detailed schema for key tables:
    ```mcp
    schema_get datasource_id="<datasource_id>" tables=["<important_tables>"]
    ```
@@ -140,11 +166,13 @@ data_query datasource_id="<id>" query="
 
 ## Best Practices
 
-1. **Always inspect first**: Before writing any queries, use `datasource_inspect` to understand the database structure
-2. **Use pattern search**: For large databases, use `schema_search` to find relevant tables quickly
-3. **Check relationships**: Use `schema_get_related` to understand how tables connect
-4. **Limit results**: Always use LIMIT in queries during exploration to avoid large result sets
-5. **Cache inspection results**: The inspection results are cached, so subsequent calls are faster
+1. **Use datasource_detail for connection info**: Always use `datasource_detail` when asked about host, port, database name, user, or connection status
+2. **Check details before inspect**: Use `datasource_detail` for quick info before running the heavy `datasource_inspect`
+3. **Inspect only when needed**: Only use `datasource_inspect` when you need to understand the database schema/structure for writing queries
+4. **Use pattern search**: For large databases, use `schema_search` to find relevant tables quickly
+5. **Check relationships**: Use `schema_get_related` to understand how tables connect
+6. **Limit results**: Always use LIMIT in queries during exploration to avoid large result sets
+7. **Cache inspection results**: The inspection results are cached, so subsequent calls are faster
 
 ## Notes
 

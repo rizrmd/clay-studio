@@ -132,14 +132,17 @@ export class StreamingHandler {
     projectId: string,
     assistantContent: string
   ): Promise<void> {
-    // Determine which conversation to update
+    // For start events, handle them first as they may change the conversation ID
+    if (event.type === "start") {
+      await this.handleStartEvent(event, targetConversationId, projectId);
+      return; // Don't process other logic for start events
+    }
+    
+    // After start event processing, get the current update ID
+    // This will be consistent for all subsequent events in this stream
     const updateId = this.getUpdateConversationId(targetConversationId);
-
+    
     switch (event.type) {
-      case "start":
-        await this.handleStartEvent(event, targetConversationId, projectId);
-        break;
-        
       case "progress":
         await this.handleProgressEvent(event, updateId, assistantContent);
         break;
@@ -217,8 +220,9 @@ export class StreamingHandler {
           if (lastMessage && lastMessage.role === "assistant") {
             updateLastMessage(updateId, { content: newContent });
           } else {
+            // Use a stable ID for the streaming message
             addMessage(updateId, {
-              id: `streaming-${Date.now()}`,
+              id: `streaming-assistant-${updateId}`,
               role: "assistant",
               content: newContent,
               createdAt: new Date().toISOString(),
@@ -239,8 +243,9 @@ export class StreamingHandler {
       if (lastMessage && lastMessage.role === "assistant") {
         updateLastMessage(updateId, { content: event.content });
       } else if (!assistantContent) {
+        // Use a stable ID for the streaming message
         addMessage(updateId, {
-          id: `streaming-${Date.now()}`,
+          id: `streaming-assistant-${updateId}`,
           role: "assistant",
           content: event.content,
           createdAt: new Date().toISOString(),
@@ -252,7 +257,8 @@ export class StreamingHandler {
   private static async handleCompleteEvent(event: any, updateId: string, projectId: string): Promise<void> {
     updateLastMessage(updateId, {
       id: event.id,
-      clay_tools_used: event.tools_used.length > 0 ? event.tools_used : undefined,
+      clay_tools_used: event.tools_used.length > 0 ? event.tools_used : undefined, // For backward compatibility
+      // TODO: Backend should send full tool_usages in complete event
       processing_time_ms: event.processing_time_ms,
     });
     

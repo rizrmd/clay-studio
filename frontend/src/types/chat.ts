@@ -26,9 +26,19 @@ export interface Message {
   content: string;
   role: "user" | "assistant" | "system";
   createdAt?: string;
-  clay_tools_used?: string[];
+  clay_tools_used?: string[]; // Deprecated - kept for backward compatibility
   processing_time_ms?: number;
   file_attachments?: FileAttachment[];
+  tool_usages?: ToolUsage[];
+}
+
+// Helper to get tool names from a message
+export function getToolNamesFromMessage(message: Message): string[] {
+  // Prefer tool_usages if available, fallback to clay_tools_used for backward compatibility
+  if (message.tool_usages && message.tool_usages.length > 0) {
+    return message.tool_usages.map(tu => tu.tool_name);
+  }
+  return message.clay_tools_used || [];
 }
 
 export interface ConversationContext {

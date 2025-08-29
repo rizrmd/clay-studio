@@ -11,7 +11,6 @@ pub struct Message {
     pub role: MessageRole,
     #[serde(rename = "createdAt")]
     pub created_at: Option<String>,
-    pub clay_tools_used: Option<Vec<String>>,
     pub processing_time_ms: Option<i64>,
     pub file_attachments: Option<Vec<FileUploadResponse>>,
     pub tool_usages: Option<Vec<ToolUsage>>,
@@ -32,7 +31,6 @@ impl Message {
             content,
             role: MessageRole::User,
             created_at: Some(Utc::now().to_rfc3339()),
-            clay_tools_used: None,
             processing_time_ms: None,
             file_attachments: None,
             tool_usages: None,
@@ -45,7 +43,6 @@ impl Message {
             content,
             role: MessageRole::Assistant,
             created_at: Some(Utc::now().to_rfc3339()),
-            clay_tools_used: None,
             processing_time_ms: None,
             file_attachments: None,
             tool_usages: None,

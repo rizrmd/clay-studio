@@ -156,8 +156,11 @@ impl ClaudeSDK {
     ) -> Result<mpsc::Receiver<ClaudeMessage>, Box<dyn std::error::Error + Send + Sync>> {
         let (tx, rx) = mpsc::channel(100);
         
+        // Clone tx for ensure_requirements_met
+        let tx_ensure = tx.clone();
+        
         // Ensure all requirements are met before proceeding
-        self.ensure_requirements_met(&tx).await?;
+        self.ensure_requirements_met(&tx_ensure).await?;
         
         let oauth_token = self.oauth_token.lock().await.clone()
             .ok_or("No OAuth token available")?;
@@ -182,7 +185,10 @@ impl ClaudeSDK {
         let claude_cli_path_clone = claude_cli_path.clone();
         let claude_cli_path_clone2 = claude_cli_path.clone();
         
+        // Move tx into the spawned task to keep the channel alive
         tokio::spawn(async move {
+            // Take ownership of tx
+            let tx = tx;
             // Check if we're running as root AND in production
             let is_root = unsafe { libc::getuid() } == 0;
             let is_production = std::env::var("RUST_ENV").unwrap_or_default() == "production";
@@ -290,23 +296,27 @@ impl ClaudeSDK {
                 });
             }
             
-            if let Some(stdout) = cmd.stdout.take() {
+            let stdout_handle = if let Some(stdout) = cmd.stdout.take() {
                 let tx_clone = tx.clone();
-                tokio::spawn(async move {
+                Some(tokio::spawn(async move {
                     use tokio::io::{BufReader, AsyncBufReadExt};
                     let reader = BufReader::new(stdout);
                     let mut lines = reader.lines();
                     
                     let mut line_count = 0;
-                    while let Ok(Some(line)) = lines.next_line().await {
-                        line_count += 1;
-                        tracing::info!("[CLAUDE_STDOUT] Line {}: {}", line_count, line);
+                    loop {
+                        match lines.next_line().await {
+                            Ok(Some(line)) => {
+                                line_count += 1;
                         
                         if !line.trim().is_empty() {
                             // Always send raw line as Progress for debugging
-                            let _ = tx_clone.send(ClaudeMessage::Progress {
+                            if let Err(e) = tx_clone.send(ClaudeMessage::Progress {
                                 content: line.clone()
-                            }).await;
+                            }).await {
+                                tracing::error!("Failed to send Progress message: {}. Breaking stdout loop.", e);
+                                break;
+                            }
                             
                             // Try to parse the line as JSON to determine message type
                             if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
@@ -342,11 +352,15 @@ impl ClaudeSDK {
                                                                         tracing::info!("Detected tool usage: {} with id: {:?}", name, tool_use_id);
                                                                         let args = block.get("input").cloned().unwrap_or(json!({}));
                                                                         tracing::info!("Sending ToolUse event: {}", name);
-                                                                        let _ = tx_clone.send(ClaudeMessage::ToolUse {
+                                                                        if let Err(e) = tx_clone.send(ClaudeMessage::ToolUse {
                                                                             tool: name.to_string(),
                                                                             args,
                                                                             tool_use_id,
-                                                                        }).await;
+                                                                        }).await {
+                                                                            tracing::error!("Failed to send ToolUse event: {}", e);
+                                                                        } else {
+                                                                            tracing::info!("Successfully sent ToolUse event for: {}", name);
+                                                                        }
                                                                     }
                                                                 }
                                                             }
@@ -396,42 +410,24 @@ impl ClaudeSDK {
                                                                             // Extract tool name from the content if possible
                                                                             if let Some(first_content) = content_array.first() {
                                                                                 if let Some(text) = first_content.get("text").and_then(|t| t.as_str()) {
-                                                                                    // Try to infer tool name from the content
-                                                                                    if text.contains("Query executed on") {
-                                                                                        "mcp__data-analysis__data_query"
-                                                                                    } else if text.contains("Data sources") {
-                                                                                        "mcp__data-analysis__datasource_list"
-                                                                                    } else if text.contains("Database statistics") {
-                                                                                        "mcp__data-analysis__schema_stats"
-                                                                                    } else if text.contains("Database compatibility") || text.contains("MCP Server Error") {
-                                                                                        "mcp__data-analysis__datasource_inspect"
-                                                                                    } else if text.contains("Connection successful") {
-                                                                                        "mcp__data-analysis__datasource_test"
-                                                                                    } else if text.contains("Data source") && text.contains("added successfully") {
-                                                                                        "mcp__data-analysis__datasource_add"
-                                                                                    } else if text.contains("Tables matching") || text.contains("Schema for table") {
-                                                                                        "mcp__data-analysis__schema_search"
-                                                                                    } else if text.contains("columns matching") {
-                                                                                        "mcp__data-analysis__schema_get"
-                                                                                    } else {
-                                                                                        // Use tool_use_id as fallback
-                                                                                        tool_use_id
-                                                                                    }
+                                                                                    // Use the modular tool registry to identify the tool
+                                                                                    crate::utils::mcp_tools::identify_tool_from_result(text)
+                                                                                        .unwrap_or_else(|| tool_use_id.to_string())
                                                                                 } else {
-                                                                                    tool_use_id
+                                                                                    tool_use_id.to_string()
                                                                                 }
                                                                             } else {
-                                                                                tool_use_id
+                                                                                tool_use_id.to_string()
                                                                             }
                                                                         } else {
-                                                                            tool_use_id
+                                                                            tool_use_id.to_string()
                                                                         };
                                                                         
                                                                         tracing::info!("Detected tool result in user message with tool_use_id: {} -> mapped to tool: {}", tool_use_id, tool_name);
                                                                         
-                                                                        // Send both the tool_use_id and the inferred tool name
+                                                                        // Send the mapped tool name, not the tool_use_id
                                                                         let _ = tx_clone.send(ClaudeMessage::ToolResult {
-                                                                            tool: tool_use_id.to_string(), // Use the tool_use_id as the tool identifier
+                                                                            tool: tool_name.to_string(), // Use the mapped tool name
                                                                             result: block.get("content").cloned().unwrap_or(json!([])),
                                                                         }).await;
                                                                     }
@@ -458,11 +454,15 @@ impl ClaudeSDK {
                                             tracing::info!("Detected standalone tool call: {} with id: {:?}", tool_name, tool_use_id);
                                             let args = json.get("arguments").cloned().unwrap_or(json!({}));
                                             tracing::info!("Sending standalone ToolUse event: {}", tool_name);
-                                            let _ = tx_clone.send(ClaudeMessage::ToolUse {
+                                            if let Err(e) = tx_clone.send(ClaudeMessage::ToolUse {
                                                 tool: tool_name.to_string(),
                                                 args,
                                                 tool_use_id,
-                                            }).await;
+                                            }).await {
+                                                tracing::error!("Failed to send standalone ToolUse event: {}", e);
+                                            } else {
+                                                tracing::info!("Successfully sent standalone ToolUse event for: {}", tool_name);
+                                            }
                                         }
                                     }
                                 }
@@ -510,9 +510,18 @@ impl ClaudeSDK {
                                 content: line
                             }).await;
                         }
+                            }
+                            Ok(None) => {
+                                // End of stream
+                                tracing::debug!("Stdout stream ended after {} lines", line_count);
+                                break;
+                            }
+                            Err(e) => {
+                                tracing::error!("Error reading stdout line: {}", e);
+                                break;
+                            }
+                        }
                     }
-                    
-                    tracing::info!("[CLAUDE_STDOUT] Stream ended after {} lines", line_count);
                     
                     // Debug information when no output is received
                     if line_count == 0 {
@@ -529,8 +538,10 @@ impl ClaudeSDK {
                             tracing::info!("Claude CLI exists at: {:?}", claude_cli_path_clone2);
                         }
                     }
-                });
-            }
+                }))
+            } else {
+                None
+            };
             
             if let Some(stderr) = cmd.stderr.take() {
                 tokio::spawn(async move {
@@ -575,7 +586,20 @@ impl ClaudeSDK {
                 }
             }
             
-            tracing::debug!("Query completed for client {}", client_id);
+            // Wait for stdout processing to complete before dropping tx
+            if let Some(handle) = stdout_handle {
+                tracing::debug!("Waiting for stdout processing to complete...");
+                if let Err(e) = handle.await {
+                    tracing::error!("Error waiting for stdout processing: {}", e);
+                } else {
+                    tracing::debug!("Stdout processing completed successfully");
+                }
+            }
+            
+            // Keep tx alive a bit longer to ensure all messages are processed
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            
+            tracing::debug!("Query completed for client {}, dropping tx now", client_id);
         });
         
         Ok(rx)

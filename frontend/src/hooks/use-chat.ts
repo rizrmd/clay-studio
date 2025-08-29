@@ -10,6 +10,7 @@ import { ConversationManager } from "../store/chat/conversation-manager";
 import { MessageService } from "../services/chat/message-service";
 import { chatEventBus } from "../services/chat/event-bus";
 import { abortControllerManager } from "../utils/chat/abort-controller-manager";
+import { WebSocketService } from "../services/chat/websocket-service";
 import { useConversationContext, useProjectContext } from "./chat/use-context";
 import type { Message } from "../types/chat";
 
@@ -59,9 +60,18 @@ export function useChat(projectId: string, conversationId?: string) {
   );
   const { projectContext } = useProjectContext(projectId);
 
-  // Set project ID
+  // Set project ID and subscribe to WebSocket
   useEffect(() => {
     conversationStore.currentProjectId = projectId;
+    
+    // Subscribe to WebSocket for this project only
+    const wsService = WebSocketService.getInstance();
+    wsService.subscribe(projectId);
+    
+    return () => {
+      // Note: Don't unsubscribe on cleanup as other components might still need it
+      // The WebSocket will handle reconnection and resubscription automatically
+    };
   }, [projectId]);
 
 
@@ -82,6 +92,10 @@ export function useChat(projectId: string, conversationId?: string) {
       // First, ensure the active conversation is properly set
       // This is critical for preventing message bleeding
       conversationStore.activeConversationId = currentConversationId;
+      
+      // Update WebSocket service's current conversation
+      const wsService = WebSocketService.getInstance();
+      wsService.setCurrentConversation(currentConversationId);
       
       // Switch conversation atomically
       conversationManager.switchConversation(currentConversationId);
@@ -120,12 +134,9 @@ export function useChat(projectId: string, conversationId?: string) {
           );
         }
       } else {
-        // For new conversations, ensure we start with a clean state
-        const state = conversationStore.conversations[currentConversationId];
-        if (state && state.messages.length > 0) {
-          logger.warn("useChat: Clearing stale messages from new conversation");
-          conversationManager.clearConversation(currentConversationId);
-        }
+        // For new conversations, always ensure we start with a clean state
+        logger.debug("useChat: Clearing state for new conversation");
+        conversationManager.clearConversation(currentConversationId);
       }
 
       previousConversationId.current = currentConversationId;

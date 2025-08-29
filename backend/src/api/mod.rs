@@ -1,11 +1,14 @@
 pub mod admin;
 pub mod auth;
-pub mod chat;
+pub mod chat_ws;
 pub mod clients;
 pub mod client_management;
 pub mod conversations;
 pub mod conversations_forget;
+pub mod debug;
 pub mod projects;
+pub mod prompt;
 pub mod tool_usage;
 pub mod upload;
 pub mod user_management;
+pub mod websocket;

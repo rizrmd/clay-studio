@@ -34,12 +34,20 @@ export function parseMcpToolName(toolName: string): {
           color: string;
         }
       > = {
+        // Data source management
         datasource_list: {
           name: "List Data Sources",
           description: "Listing data sources",
           done: "Data sources listed",
           icon: Database,
           color: "text-blue-600 bg-blue-50 border-blue-200",
+        },
+        datasource_detail: {
+          name: "Data Source Details",
+          description: "Getting datasource details",
+          done: "Details retrieved",
+          icon: FileSearch,
+          color: "text-indigo-600 bg-indigo-50 border-indigo-200",
         },
         datasource_add: {
           name: "Add Data Source",
@@ -69,6 +77,8 @@ export function parseMcpToolName(toolName: string): {
           icon: FileSearch,
           color: "text-purple-600 bg-purple-50 border-purple-200",
         },
+        
+        // Data operations
         data_query: {
           name: "Query Data",
           description: "Querying data",
@@ -89,6 +99,29 @@ export function parseMcpToolName(toolName: string): {
           done: "Data previewed",
           icon: FileSearch,
           color: "text-cyan-600 bg-cyan-50 border-cyan-200",
+        },
+        
+        // Schema operations
+        schema_stats: {
+          name: "Schema Statistics",
+          description: "Getting schema statistics",
+          done: "Statistics retrieved",
+          icon: BarChart3,
+          color: "text-purple-600 bg-purple-50 border-purple-200",
+        },
+        schema_search: {
+          name: "Search Schema",
+          description: "Searching schema",
+          done: "Schema searched",
+          icon: FileSearch,
+          color: "text-teal-600 bg-teal-50 border-teal-200",
+        },
+        schema_get: {
+          name: "Get Schema",
+          description: "Getting table schema",
+          done: "Schema retrieved",
+          icon: Database,
+          color: "text-orange-600 bg-orange-50 border-orange-200",
         },
       };
 

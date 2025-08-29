@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use chrono::Utc;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16,18 +15,6 @@ pub struct ToolUsage {
 }
 
 impl ToolUsage {
-    pub fn new(message_id: String, tool_name: String, parameters: Option<Value>) -> Self {
-        ToolUsage {
-            id: Uuid::new_v4(),
-            message_id,
-            tool_name,
-            parameters,
-            output: None,
-            execution_time_ms: None,
-            created_at: Some(Utc::now().to_rfc3339()),
-        }
-    }
-
     #[allow(dead_code)]
     pub fn with_output(mut self, output: Value) -> Self {
         self.output = Some(output);

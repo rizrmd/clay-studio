@@ -4,9 +4,20 @@ use sea_orm::DatabaseConnection;
 use sqlx::PgPool;
 use tokio::sync::RwLock;
 use uuid::Uuid;
+use chrono::{DateTime, Utc};
 use crate::utils::Config;
 use crate::utils::db;
 use crate::models::client::Client;
+
+
+
+#[derive(Clone, Debug)]
+pub struct StreamingState {
+    pub message_id: String,
+    pub partial_content: String,
+    pub last_updated: DateTime<Utc>,
+    pub active_tools: Vec<String>,
+}
 
 #[derive(Clone)]
 pub struct AppState {
@@ -17,6 +28,7 @@ pub struct AppState {
     pub config: Arc<Config>,
     #[allow(dead_code)]
     pub clients: Arc<RwLock<HashMap<Uuid, Client>>>,
+    pub active_claude_streams: Arc<RwLock<HashMap<String, StreamingState>>>,
 }
 
 impl AppState {
@@ -29,6 +41,8 @@ impl AppState {
             db_pool,
             config: Arc::new(config.clone()),
             clients: Arc::new(RwLock::new(HashMap::new())),
+            active_claude_streams: Arc::new(RwLock::new(HashMap::new())),
         })
     }
+    
 }

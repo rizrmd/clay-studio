@@ -13,8 +13,8 @@ use tokio::signal;
 
 use crate::utils::{Config, AppState};
 use crate::api::{
-    admin, auth, chat, clients, client_management,
-    conversations, conversations_forget, projects, tool_usage, upload, user_management
+    admin, auth, chat_ws, clients, client_management,
+    conversations, conversations_forget, projects, prompt, tool_usage, upload, user_management, websocket
 };
 use crate::utils::middleware::{inject_state, client_scoped, auth::{auth_required, admin_required, root_required}};
 use crate::core::sessions::PostgresSessionStore;
@@ -208,13 +208,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let public_router = Router::new()
         .push(Router::with_path("/health").get(health_check))
         .push(Router::with_path("/auth").push(auth::auth_routes()))
-        .push(Router::new().push(clients::client_routes())); // Allow client creation during initial setup
+        .push(Router::new().push(clients::client_routes())) // Allow client creation during initial setup
+        .push(Router::with_path("/debug/connections").get(api::debug::get_active_connections));
 
+    // WebSocket route (auth checked after connection)
+    let ws_router = Router::new()
+        .push(Router::with_path("/ws").get(websocket::handle_websocket));
+    
     // Protected routes (auth required + client scoped)
     let protected_router = Router::new()
         .hoop(auth_required)
         .hoop(client_scoped)
-        .push(Router::with_path("/chat/stream").post(chat::handle_chat_stream))
+        .push(Router::with_path("/chat/stream").post(chat_ws::handle_chat_stream_ws))
+        .push(Router::with_path("/prompt/stream").post(prompt::handle_prompt_stream))
         .push(
             Router::with_path("/projects")
                 .get(projects::list_projects)
@@ -305,6 +311,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .hoop(session_handler)
         .hoop(inject_state(state))
         .push(public_router)
+        .push(ws_router)
         .push(protected_router)
         .push(admin_router)
         .push(root_router);
