@@ -61,7 +61,7 @@ impl ClickHouseConnector {
 
 #[async_trait]
 impl DataSourceConnector for ClickHouseConnector {
-    async fn test_connection(&self) -> Result<bool, Box<dyn Error>> {
+    async fn test_connection(&mut self) -> Result<bool, Box<dyn Error>> {
         let _result: u8 = self.client
             .query("SELECT 1")
             .fetch_one()

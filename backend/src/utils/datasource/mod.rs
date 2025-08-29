@@ -3,6 +3,7 @@ pub mod postgres;
 pub mod mysql;
 pub mod sqlite;
 pub mod clickhouse;
+pub mod sqlserver;
 pub mod factory;
 
 pub use factory::*;

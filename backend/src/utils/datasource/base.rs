@@ -5,7 +5,7 @@ use async_trait::async_trait;
 #[async_trait]
 pub trait DataSourceConnector: Send + Sync {
     // Core connection methods
-    async fn test_connection(&self) -> Result<bool, Box<dyn Error>>;
+    async fn test_connection(&mut self) -> Result<bool, Box<dyn Error>>;
     async fn execute_query(&self, query: &str, limit: i32) -> Result<Value, Box<dyn Error>>;
     
     // Schema inspection methods

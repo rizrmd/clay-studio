@@ -322,7 +322,6 @@ impl ClaudeSDK {
                             if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
                                 // Log ALL message types to understand what Claude sends
                                 if let Some(msg_type) = json.get("type").and_then(|v| v.as_str()) {
-                                    tracing::info!("[CLAUDE_MSG] Received message type '{}'", msg_type);
                                     
                                     // Handle tool_result messages
                                     if msg_type == "tool_result" {

@@ -371,12 +371,4 @@ pub async fn broadcast_to_subscribers(
         }
     }
     
-    if sent_count > 0 {
-        tracing::info!("Broadcasted message to {} connections for project={}, conversation={}", 
-            sent_count, project_id, conversation_id);
-    } else {
-        tracing::debug!("No active connections found for project={}, conversation={}", 
-            project_id, conversation_id);
-        // That's fine - Claude stream continues and saves to database
-    }
 }

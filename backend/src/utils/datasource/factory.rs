@@ -3,6 +3,7 @@ use super::postgres::PostgreSQLConnector;
 use super::mysql::MySQLConnector;
 use super::sqlite::SQLiteConnector;
 use super::clickhouse::ClickHouseConnector;
+use super::sqlserver::SqlServerConnector;
 use serde_json::Value;
 use std::error::Error;
 
@@ -12,6 +13,7 @@ pub enum DataSourceType {
     MySQL,
     SQLite,
     ClickHouse,
+    SqlServer,
     Csv,
 }
 
@@ -22,6 +24,7 @@ impl From<&str> for DataSourceType {
             "mysql" => DataSourceType::MySQL,
             "sqlite" => DataSourceType::SQLite,
             "clickhouse" | "ch" => DataSourceType::ClickHouse,
+            "sqlserver" | "mssql" | "sql_server" => DataSourceType::SqlServer,
             "csv" => DataSourceType::Csv,
             _ => DataSourceType::PostgreSQL, // default
         }
@@ -41,6 +44,9 @@ pub async fn create_connector(source_type: &str, config: &Value) -> Result<Box<d
         },
         DataSourceType::ClickHouse => {
             Ok(Box::new(ClickHouseConnector::new(config)?))
+        },
+        DataSourceType::SqlServer => {
+            Ok(Box::new(SqlServerConnector::new(config)?))
         },
         DataSourceType::Csv => {
             // CSV connector can be added later if needed

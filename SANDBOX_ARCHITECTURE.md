@@ -91,6 +91,58 @@ ctx.datasource.sqlite_local.query(sql, params?)
 ctx.datasource.sqlite_local.execute(sql, params?)
 ```
 
+### File-Based Datasources (CSV, Parquet, Excel)
+Query files directly with SQL using DuckDB as the engine:
+```javascript
+// Local files
+ctx.datasource.sales_csv.query(sql)              // Query CSV with SQL
+ctx.datasource.analytics_parquet.query(sql)      // Query Parquet files
+ctx.datasource.reports_excel.query(sql)          // Query Excel sheets
+ctx.datasource.sales_csv.getSchema()             // Get column names and types
+ctx.datasource.sales_csv.getRowCount()           // Get total row count
+ctx.datasource.sales_csv.getSampleData(limit?)  // Get sample rows
+ctx.datasource.sales_csv.refresh()               // Re-read file (useful if file is updated)
+
+// Remote files (S3, HTTP) - with auto-refresh
+ctx.datasource.s3_data_lake.query(sql)           // Query S3 CSV/Parquet directly
+ctx.datasource.s3_data_lake.refresh()            // Force re-download from S3
+ctx.datasource.s3_data_lake.setCacheTTL(600)    // Cache for 10 minutes
+ctx.datasource.http_dataset.query(sql)           // Query remote files via HTTP
+ctx.datasource.http_dataset.refresh()            // Force re-download
+ctx.datasource.http_dataset.getLastModified()    // Check when file was last updated
+
+// Advanced operations
+ctx.datasource.sales_csv.query(
+    "SELECT * FROM data WHERE amount > 1000"
+)  // 'data' is the automatic table name
+
+// Join multiple file datasources
+ctx.datasource.sales_csv.query(`
+    SELECT s.*, p.price 
+    FROM data s
+    JOIN read_parquet('${ctx.datasource.products_parquet.path}') p
+    ON s.product_id = p.id
+`)
+```
+
+### Cloud Spreadsheets (Google Sheets, Excel Online)
+Query and sync with cloud-based spreadsheets:
+```javascript
+// Google Sheets
+ctx.datasource.budget_sheet.query(sql)           // Query with SQL
+ctx.datasource.budget_sheet.refresh()            // Force refresh from Google
+ctx.datasource.budget_sheet.getRange("A1:Z100") // Get specific range
+ctx.datasource.budget_sheet.getSheet("Q1")      // Get specific sheet
+
+// Excel Online (Microsoft 365)
+ctx.datasource.forecast_excel.query(sql)         // Query with SQL
+ctx.datasource.forecast_excel.refresh()          // Sync from cloud
+ctx.datasource.forecast_excel.getWorksheet(name) // Get specific worksheet
+
+// Automatic caching with TTL
+ctx.datasource.budget_sheet.setCacheTTL(300)     // Cache for 5 minutes
+```
+
 ### Object Storage (S3, GCS, Azure Blob)
 ```javascript
 // S3
@@ -436,6 +488,14 @@ MCP has full control over analyses, including all user operations plus creation/
 - `get_analysis(analysis_id)`
 - `list_analyses()`
 
+#### File Datasource Operations
+- `add_file_datasource(name, file_path, file_type)` - Add CSV/Parquet/Excel file as datasource
+- `add_google_sheets_datasource(name, sheet_id, credentials)` - Connect Google Sheets
+- `add_excel_online_datasource(name, file_url, auth_token)` - Connect Excel Online
+- `refresh_cloud_datasource(datasource_id)` - Force refresh cloud spreadsheet data
+- `update_file_datasource(datasource_id, new_path)` - Update file location
+- `get_file_schema(datasource_id)` - Get column names and types for file
+
 #### Scheduling Operations
 - `set_schedule(analysis_id, cron_expression, timezone, enabled)` - Configure schedule
 - `get_schedule(analysis_id)` - Get current schedule configuration
@@ -748,6 +808,239 @@ export default {
             statistics: stats[0],
             stored_table: tableName,
             message: "Customer scores calculated with Polars and stored in DuckDB"
+        };
+    }
+}
+```
+
+### File-Based Data Analysis Pattern
+Query CSV, Parquet, and Excel files directly with SQL:
+
+```javascript
+export default {
+    title: "Analyze sales data from CSV and Parquet files",
+    dependencies: {
+        datasources: ["sales_csv", "customers_parquet", "products_excel"]
+    },
+    
+    run: async function(ctx, params) {
+        // Refresh if files might have been updated (e.g., daily exports)
+        if (params.force_refresh) {
+            await ctx.datasource.sales_csv.refresh();
+            await ctx.datasource.products_excel.refresh();
+        }
+        
+        // Query CSV file directly with SQL
+        const salesSummary = await ctx.datasource.sales_csv.query(
+            `SELECT 
+                product_category,
+                SUM(amount) as total_sales,
+                COUNT(*) as transaction_count,
+                AVG(amount) as avg_sale
+             FROM data 
+             WHERE sale_date >= '${params.start_date}'
+             GROUP BY product_category
+             ORDER BY total_sales DESC`
+        );
+        
+        // Join CSV with Parquet file using DuckDB
+        const enrichedSales = await ctx.datasource.sales_csv.query(`
+            SELECT 
+                s.*,
+                c.customer_name,
+                c.customer_segment
+            FROM data s
+            JOIN read_parquet('${ctx.datasource.customers_parquet.path}') c
+            ON s.customer_id = c.id
+            WHERE s.amount > 1000
+        `);
+        
+        // Query Excel file for product data
+        const productPrices = await ctx.datasource.products_excel.query(
+            "SELECT product_id, list_price, cost FROM data"
+        );
+        
+        // Process with Polars for complex calculations
+        const salesDf = ctx.DataFrame(enrichedSales);
+        const productDf = ctx.DataFrame(productPrices);
+        
+        const profitAnalysis = salesDf
+            .join(productDf, "product_id")
+            .withColumn("profit", 
+                col("amount") - col("cost")
+            )
+            .groupBy("customer_segment")
+            .agg({
+                total_profit: col("profit").sum(),
+                avg_profit_margin: col("profit").mean()
+            });
+        
+        // Store results in DuckDB for future analysis
+        await ctx.duckdb.saveDataFrame(profitAnalysis, "profit_analysis_" + params.start_date);
+        
+        return {
+            sales_summary: salesSummary,
+            top_customers: enrichedSales.slice(0, 10),
+            profit_by_segment: profitAnalysis.collect()
+        };
+    }
+}
+```
+
+### Auto-Refresh Pattern for Regularly Updated Files
+Handle CSV/Excel files that are updated by external processes:
+
+```javascript
+export default {
+    title: "Monitor daily export files with auto-refresh",
+    schedule: {
+        cron: "*/30 * * * *",  // Every 30 minutes
+        timezone: "UTC"
+    },
+    dependencies: {
+        datasources: ["daily_sales_csv", "inventory_excel", "s3_transactions"]
+    },
+    
+    run: async function(ctx) {
+        // Check if files have been updated
+        const salesLastModified = await ctx.datasource.daily_sales_csv.getLastModified();
+        const inventoryLastModified = await ctx.datasource.inventory_excel.getLastModified();
+        
+        // Refresh if files are newer than last check
+        const lastCheck = ctx.metadata.get('last_check_time') || new Date(0);
+        
+        if (salesLastModified > lastCheck) {
+            ctx.log("Sales CSV updated, refreshing...");
+            await ctx.datasource.daily_sales_csv.refresh();
+        }
+        
+        if (inventoryLastModified > lastCheck) {
+            ctx.log("Inventory Excel updated, refreshing...");
+            await ctx.datasource.inventory_excel.refresh();
+        }
+        
+        // For S3 files, always refresh (or use cache TTL)
+        ctx.datasource.s3_transactions.setCacheTTL(1800); // 30 min cache
+        
+        // Query refreshed data
+        const dailySales = await ctx.datasource.daily_sales_csv.query(
+            "SELECT SUM(amount) as total, COUNT(*) as transactions FROM data WHERE date = CURRENT_DATE"
+        );
+        
+        const lowStock = await ctx.datasource.inventory_excel.query(
+            "SELECT product_id, product_name, quantity FROM data WHERE quantity < reorder_point"
+        );
+        
+        const hourlyTransactions = await ctx.datasource.s3_transactions.query(
+            "SELECT DATE_TRUNC('hour', timestamp) as hour, COUNT(*) as count FROM data GROUP BY hour ORDER BY hour"
+        );
+        
+        // Save checkpoint
+        ctx.metadata.set('last_check_time', new Date());
+        
+        // Alert if significant changes
+        const previousTotal = ctx.metadata.get('previous_sales_total') || 0;
+        if (dailySales[0].total > previousTotal * 1.5) {
+            await ctx.createAlert('high', 'Sales spike detected', {
+                current: dailySales[0].total,
+                previous: previousTotal
+            });
+        }
+        
+        ctx.metadata.set('previous_sales_total', dailySales[0].total);
+        
+        return {
+            sales: dailySales[0],
+            low_stock_items: lowStock.length,
+            hourly_pattern: hourlyTransactions
+        };
+    }
+}
+```
+
+### Google Sheets Integration Pattern
+Sync and analyze data from Google Sheets:
+
+```javascript
+export default {
+    title: "Process budget data from Google Sheets",
+    schedule: {
+        cron: "0 9 * * MON",  // Every Monday at 9 AM
+        timezone: "America/New_York"
+    },
+    dependencies: {
+        datasources: ["budget_sheet", "actuals_sheet", "postgres_main"]
+    },
+    
+    run: async function(ctx) {
+        // Force refresh to get latest data from Google Sheets
+        await ctx.datasource.budget_sheet.refresh();
+        await ctx.datasource.actuals_sheet.refresh();
+        
+        // Query budget data with SQL
+        const budgetByDept = await ctx.datasource.budget_sheet.query(
+            `SELECT 
+                department,
+                fiscal_quarter,
+                SUM(budget_amount) as total_budget
+             FROM data
+             WHERE fiscal_year = 2024
+             GROUP BY department, fiscal_quarter`
+        );
+        
+        // Get specific range for detailed analysis
+        const q1Details = await ctx.datasource.budget_sheet.getRange("Q1!A1:Z500");
+        
+        // Query actuals from another sheet
+        const actualSpending = await ctx.datasource.actuals_sheet.query(
+            `SELECT 
+                department,
+                SUM(amount) as total_spent
+             FROM data
+             WHERE date >= '2024-01-01' AND date < '2024-04-01'
+             GROUP BY department`
+        );
+        
+        // Compare budget vs actuals
+        const comparison = await ctx.duckdb.query(`
+            WITH budget AS (
+                SELECT * FROM (${JSON.stringify(budgetByDept)})
+            ),
+            actuals AS (
+                SELECT * FROM (${JSON.stringify(actualSpending)})
+            )
+            SELECT 
+                b.department,
+                b.total_budget,
+                COALESCE(a.total_spent, 0) as total_spent,
+                b.total_budget - COALESCE(a.total_spent, 0) as remaining,
+                ROUND(COALESCE(a.total_spent, 0) * 100.0 / b.total_budget, 2) as pct_used
+            FROM budget b
+            LEFT JOIN actuals a ON b.department = a.department
+            ORDER BY pct_used DESC
+        `);
+        
+        // Write results back to PostgreSQL
+        for (const row of comparison) {
+            await ctx.datasource.postgres_main.query(
+                `INSERT INTO budget_tracking 
+                 (department, budget, spent, remaining, pct_used, updated_at)
+                 VALUES ($1, $2, $3, $4, $5, NOW())
+                 ON CONFLICT (department) DO UPDATE SET
+                     budget = EXCLUDED.budget,
+                     spent = EXCLUDED.spent,
+                     remaining = EXCLUDED.remaining,
+                     pct_used = EXCLUDED.pct_used,
+                     updated_at = NOW()`,
+                [row.department, row.total_budget, row.total_spent, 
+                 row.remaining, row.pct_used]
+            );
+        }
+        
+        return {
+            departments_analyzed: comparison.length,
+            top_spenders: comparison.slice(0, 5),
+            sync_timestamp: new Date().toISOString()
         };
     }
 }
@@ -2034,6 +2327,264 @@ impl AnalysisContext {
 }
 ```
 
+### File-Based DataSource Implementation
+
+File datasources use DuckDB as the SQL query engine for all file types:
+
+```rust
+use duckdb::{Connection, params};
+use reqwest::Client;
+use std::path::PathBuf;
+
+pub enum FileType {
+    CSV,
+    Parquet,
+    Excel,
+    GoogleSheets,
+    ExcelOnline,
+}
+
+pub enum FileSource {
+    Local(PathBuf),
+    S3 { bucket: String, key: String },
+    HTTP(String),
+    GoogleSheets { sheet_id: String, credentials: GoogleCredentials },
+    ExcelOnline { file_url: String, auth_token: String },
+}
+
+pub struct FileDataSource {
+    name: String,
+    file_type: FileType,
+    source: FileSource,
+    duckdb_conn: Connection,
+    cache_ttl: Option<Duration>,
+    last_refreshed: Option<Instant>,
+}
+
+impl FileDataSource {
+    pub fn new(name: &str, file_type: FileType, source: FileSource) -> Result<Self> {
+        let conn = Connection::open_in_memory()?;
+        
+        // Configure DuckDB for file operations
+        conn.execute("INSTALL httpfs", [])?;  // For S3/HTTP
+        conn.execute("LOAD httpfs", [])?;
+        conn.execute("INSTALL excel", [])?;   // For Excel files
+        conn.execute("LOAD excel", [])?;
+        
+        Ok(Self {
+            name: name.to_string(),
+            file_type,
+            source,
+            duckdb_conn: conn,
+            cache_ttl: Some(Duration::from_secs(300)), // 5 min default
+            last_refreshed: None,
+        })
+    }
+    
+    pub async fn query(&self, sql: &str) -> Result<Value> {
+        // Check if refresh needed for any source (local files might change too)
+        if self.needs_refresh() {
+            self.refresh().await?;
+        }
+        
+        let query = match &self.file_type {
+            FileType::CSV => {
+                let path = self.get_path().await?;
+                format!(
+                    "WITH data AS (SELECT * FROM read_csv('{}', AUTO_DETECT=TRUE)) {}",
+                    path, sql
+                )
+            },
+            FileType::Parquet => {
+                let path = self.get_path().await?;
+                format!(
+                    "WITH data AS (SELECT * FROM read_parquet('{}')) {}",
+                    path, sql
+                )
+            },
+            FileType::Excel => {
+                let path = self.get_path().await?;
+                format!(
+                    "WITH data AS (SELECT * FROM st_read('{}')) {}",
+                    path, sql
+                )
+            },
+            FileType::GoogleSheets => {
+                // Fetch as CSV and query
+                let csv_data = self.fetch_google_sheets_as_csv().await?;
+                self.load_csv_to_temp_table(&csv_data)?;
+                format!("WITH data AS (SELECT * FROM temp_sheet) {}", sql)
+            },
+            FileType::ExcelOnline => {
+                // Similar to Google Sheets
+                let data = self.fetch_excel_online().await?;
+                self.load_to_temp_table(&data)?;
+                format!("WITH data AS (SELECT * FROM temp_excel) {}", sql)
+            }
+        };
+        
+        // Execute query
+        let mut stmt = self.duckdb_conn.prepare(&query)?;
+        let rows = stmt.query_map([], |row| {
+            // Convert row to JSON
+            Ok(row_to_json(row))
+        })?;
+        
+        let results: Vec<Value> = rows.collect::<Result<Vec<_>, _>>()?;
+        Ok(json!({ "rows": results }))
+    }
+    
+    pub async fn get_schema(&self) -> Result<Schema> {
+        let schema_query = match &self.file_type {
+            FileType::CSV => {
+                let path = self.get_path().await?;
+                format!("DESCRIBE SELECT * FROM read_csv('{}', SAMPLE_SIZE=1000)", path)
+            },
+            FileType::Parquet => {
+                let path = self.get_path().await?;
+                format!("DESCRIBE SELECT * FROM read_parquet('{}')", path)
+            },
+            // ... other types
+        };
+        
+        let schema = self.duckdb_conn.query(&schema_query)?;
+        Ok(parse_schema(schema))
+    }
+    
+    async fn fetch_google_sheets_as_csv(&self) -> Result<String> {
+        if let FileSource::GoogleSheets { sheet_id, .. } = &self.source {
+            // Export Google Sheets as CSV
+            let export_url = format!(
+                "https://docs.google.com/spreadsheets/d/{}/export?format=csv",
+                sheet_id
+            );
+            
+            let client = Client::new();
+            let csv = client.get(&export_url)
+                .bearer_auth(&self.get_google_token().await?)
+                .send()
+                .await?
+                .text()
+                .await?;
+            
+            Ok(csv)
+        } else {
+            Err("Not a Google Sheets datasource".into())
+        }
+    }
+    
+    pub async fn refresh(&mut self) -> Result<()> {
+        // Force refresh for all sources
+        match &self.source {
+            FileSource::Local(path) => {
+                // For local files, clear DuckDB's internal cache
+                self.duckdb_conn.execute("PRAGMA disable_object_cache", [])?;
+                self.last_refreshed = Some(Instant::now());
+                eprintln!("Refreshed local file: {:?}", path);
+            },
+            FileSource::S3 { bucket, key } => {
+                // Clear S3 cache and force re-download
+                self.duckdb_conn.execute("SET s3_force_download = true", [])?;
+                self.last_refreshed = Some(Instant::now());
+                eprintln!("Refreshed S3 file: s3://{}/{}", bucket, key);
+            },
+            FileSource::HTTP(url) => {
+                // Clear HTTP cache
+                self.duckdb_conn.execute("PRAGMA http_cache_clear", [])?;
+                self.last_refreshed = Some(Instant::now());
+                eprintln!("Refreshed HTTP file: {}", url);
+            },
+            FileSource::GoogleSheets { .. } | FileSource::ExcelOnline { .. } => {
+                self.last_refreshed = Some(Instant::now());
+                // Clear any cached data
+                self.duckdb_conn.execute("DROP TABLE IF EXISTS temp_sheet", [])?;
+                self.duckdb_conn.execute("DROP TABLE IF EXISTS temp_excel", [])?;
+            },
+        }
+        Ok(())
+    }
+    
+    pub async fn get_last_modified(&self) -> Result<DateTime<Utc>> {
+        match &self.source {
+            FileSource::Local(path) => {
+                let metadata = std::fs::metadata(path)?;
+                let modified = metadata.modified()?;
+                Ok(DateTime::<Utc>::from(modified))
+            },
+            FileSource::S3 { bucket, key } => {
+                // Use S3 HEAD request to get last modified
+                let query = format!(
+                    "SELECT last_modified FROM s3_object_info('s3://{}/{}')",
+                    bucket, key
+                );
+                let result = self.duckdb_conn.query_row(&query, [], |row| {
+                    Ok(row.get(0)?)
+                })?;
+                Ok(result)
+            },
+            FileSource::HTTP(url) => {
+                // Use HTTP HEAD request
+                let client = Client::new();
+                let response = client.head(url).send().await?;
+                if let Some(last_modified) = response.headers().get("last-modified") {
+                    let date = httpdate::parse_http_date(last_modified.to_str()?)?;
+                    Ok(DateTime::<Utc>::from(date))
+                } else {
+                    Ok(Utc::now())
+                }
+            },
+            _ => Ok(self.last_refreshed.map(|_| Utc::now()).unwrap_or_else(Utc::now))
+        }
+    }
+    
+    fn needs_refresh(&self) -> bool {
+        if let Some(ttl) = self.cache_ttl {
+            if let Some(last) = self.last_refreshed {
+                return last.elapsed() > ttl;
+            }
+        }
+        false
+    }
+}
+
+// Make FileDataSource compatible with DataSourceConnector trait
+#[async_trait]
+impl DataSourceConnector for FileDataSource {
+    async fn test_connection(&mut self) -> Result<bool, Box<dyn Error>> {
+        // Test if file is accessible
+        match &self.source {
+            FileSource::Local(path) => Ok(path.exists()),
+            FileSource::S3 { .. } => {
+                // Test S3 access
+                self.query("SELECT COUNT(*) FROM data LIMIT 1").await.is_ok()
+            },
+            FileSource::GoogleSheets { .. } => {
+                // Test Google Sheets API
+                self.fetch_google_sheets_as_csv().await.is_ok()
+            },
+            _ => Ok(true)
+        }
+    }
+    
+    async fn execute_query(&self, query: &str, limit: i32) -> Result<Value, Box<dyn Error>> {
+        let limited_query = format!("{} LIMIT {}", query, limit);
+        self.query(&limited_query).await
+    }
+    
+    async fn fetch_schema(&self) -> Result<Value, Box<dyn Error>> {
+        let schema = self.get_schema().await?;
+        Ok(serde_json::to_value(schema)?)
+    }
+    
+    async fn list_tables(&self) -> Result<Vec<String>, Box<dyn Error>> {
+        // File datasources have a single "table" named "data"
+        Ok(vec!["data".to_string()])
+    }
+    
+    // Other trait methods...
+}
+```
+
 ### QuickJS Integration
 
 ```rust
@@ -2382,6 +2933,27 @@ interface SQLDataSource {
     insert?: (table: string, data: any[]) => Promise<void>;
 }
 
+interface FileDataSource extends SQLDataSource {
+    query: (sql: string) => Promise<any[]>;  // SQL query via DuckDB
+    getSchema: () => Promise<Schema>;         // Get column info
+    getRowCount: () => Promise<number>;       // Total row count
+    getSampleData: (limit?: number) => Promise<any[]>; // Sample rows
+    refresh: () => Promise<void>;             // Re-read file (local) or re-download (remote)
+    setCacheTTL?: (seconds: number) => void;  // Set cache duration for remote files
+    getLastModified?: () => Promise<Date>;    // When file was last modified
+    getFileSize?: () => Promise<number>;      // File size in bytes
+    path?: string;  // File path for local files
+    isStale?: () => boolean;  // Check if cache is stale
+}
+
+interface CloudSpreadsheetDataSource extends FileDataSource {
+    refresh: () => Promise<void>;             // Force refresh from cloud
+    getRange: (range: string) => Promise<any[][]>; // Get specific range
+    getSheet: (name: string) => Promise<any[]>;    // Get specific sheet
+    setCacheTTL: (seconds: number) => void;   // Set cache duration
+    lastRefreshed: () => Date;                // When last synced
+}
+
 interface S3DataSource {
     list: (prefix: string, options?: S3ListOptions) => Promise<S3Object[]>;
     get: (key: string) => Promise<Buffer>;
@@ -2523,6 +3095,18 @@ interface AggregateExpr {
     // Aggregate expressions for group operations
 }
 
-type DataSource = SQLDataSource | S3DataSource | RESTDataSource | 
-                   OpenAPIDataSource | SOAPDataSource | GraphQLDataSource;
+type DataSource = SQLDataSource | FileDataSource | CloudSpreadsheetDataSource |
+                   S3DataSource | RESTDataSource | OpenAPIDataSource | 
+                   SOAPDataSource | GraphQLDataSource;
+
+// Schema type for file datasources
+interface Schema {
+    columns: Array<{
+        name: string;
+        type: string;  // 'INTEGER', 'VARCHAR', 'DOUBLE', 'DATE', etc.
+        nullable: boolean;
+    }>;
+    rowCount?: number;
+    sizeBytes?: number;
+}
 ```

@@ -509,7 +509,6 @@ pub async fn handle_chat_stream_ws(
                                                                 }
                                                                 
                                                                 // Send as progress (full content)
-                                                                tracing::info!("Broadcasting assistant content: {} chars", accumulated_text.len());
                                                                 broadcast_to_subscribers(
                                                                     &project_id,
                                                                     &conversation_id_clone,

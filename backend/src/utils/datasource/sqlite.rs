@@ -25,7 +25,7 @@ impl SQLiteConnector {
 
 #[async_trait]
 impl DataSourceConnector for SQLiteConnector {
-    async fn test_connection(&self) -> Result<bool, Box<dyn Error>> {
+    async fn test_connection(&mut self) -> Result<bool, Box<dyn Error>> {
         let pool = SqlitePool::connect(&self.connection_string).await?;
         sqlx::query("SELECT 1").fetch_one(&pool).await?;
         Ok(true)

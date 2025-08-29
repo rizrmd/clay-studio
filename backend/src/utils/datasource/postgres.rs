@@ -6,7 +6,9 @@ use async_trait::async_trait;
 
 pub struct PostgreSQLConnector {
     connection_string: String,
+    original_connection_string: String,
     schema: String,
+    ssl_mode_used: Option<String>,
 }
 
 impl PostgreSQLConnector {
@@ -19,8 +21,12 @@ impl PostgreSQLConnector {
         
         eprintln!("[DEBUG] PostgreSQL connector using schema: '{}'", schema);
         
+        // Check for SSL/TLS settings
+        let disable_ssl = config.get("disable_ssl").and_then(|v| v.as_bool()).unwrap_or(false);
+        let ssl_mode = config.get("ssl_mode").and_then(|v| v.as_str());
+        
         // Prefer URL if provided, otherwise construct from individual components
-        let connection_string = if let Some(url) = config.get("url").and_then(|v| v.as_str()) {
+        let mut connection_string = if let Some(url) = config.get("url").and_then(|v| v.as_str()) {
             url.to_string()
         } else {
             // Fallback to individual components for backward compatibility
@@ -42,6 +48,23 @@ impl PostgreSQLConnector {
                 format!("postgres://{}@{}:{}/{}", encoded_username, host, port, database)
             } else {
                 format!("postgres://{}:{}@{}:{}/{}", encoded_username, encoded_password, host, port, database)
+            }
+        };
+        
+        // Handle SSL/TLS configuration for PostgreSQL
+        if disable_ssl || ssl_mode == Some("disable") {
+            // Add SSL disabled parameter if not already present
+            if !connection_string.contains("sslmode=") {
+                let separator = if connection_string.contains('?') { "&" } else { "?" };
+                connection_string.push_str(&format!("{}sslmode=disable", separator));
+                eprintln!("[DEBUG] SSL disabled for PostgreSQL connection");
+            }
+        } else if let Some(mode) = ssl_mode {
+            // Add specific SSL mode if provided (PostgreSQL modes: disable, allow, prefer, require, verify-ca, verify-full)
+            if !connection_string.contains("sslmode=") {
+                let separator = if connection_string.contains('?') { "&" } else { "?" };
+                connection_string.push_str(&format!("{}sslmode={}", separator, mode));
+                eprintln!("[DEBUG] PostgreSQL SSL mode set to: {}", mode);
             }
         };
         
@@ -69,16 +92,182 @@ impl PostgreSQLConnector {
         eprintln!("[DEBUG] PostgreSQL connection string (masked): {}", masked_string);
         eprintln!("[DEBUG] Raw connection string length: {} chars", connection_string.len());
         
-        Ok(Self { connection_string, schema })
+        Ok(Self { 
+            original_connection_string: connection_string.clone(),
+            connection_string, 
+            schema,
+            ssl_mode_used: ssl_mode.map(|s| s.to_string()).or(if disable_ssl { Some("disable".to_string()) } else { None })
+        })
     }
 }
 
 #[async_trait]
 impl DataSourceConnector for PostgreSQLConnector {
-    async fn test_connection(&self) -> Result<bool, Box<dyn Error>> {
-        let pool = PgPool::connect(&self.connection_string).await?;
-        sqlx::query("SELECT 1").fetch_one(&pool).await?;
-        Ok(true)
+    async fn test_connection(&mut self) -> Result<bool, Box<dyn Error>> {
+        // Try connection with current settings first
+        let mut connection_strings_to_try = vec![self.connection_string.clone()];
+        
+        // If SSL mode is not explicitly set, prepare fallback options
+        if self.ssl_mode_used.is_none() {
+            // Try with SSL disabled as fallback
+            let with_ssl_disabled = if self.original_connection_string.contains("sslmode=") {
+                self.original_connection_string.clone()
+            } else {
+                let separator = if self.original_connection_string.contains('?') { "&" } else { "?" };
+                format!("{}{}sslmode=disable", self.original_connection_string, separator)
+            };
+            
+            if with_ssl_disabled != self.connection_string {
+                connection_strings_to_try.push(with_ssl_disabled);
+            }
+        }
+        
+        let mut last_error: Option<Box<dyn Error + Send + Sync>> = None;
+        let mut attempt = 0;
+        
+        for conn_str in connection_strings_to_try {
+            attempt += 1;
+            let ssl_status = if conn_str.contains("sslmode=disable") {
+                "with SSL disabled"
+            } else {
+                "with SSL enabled (default)"
+            };
+            
+            eprintln!("[INFO] PostgreSQL connection attempt {} {}", attempt, ssl_status);
+            
+            // Try to connect
+            match PgPool::connect(&conn_str).await {
+                Ok(pool) => {
+                    // Try a simple query
+                    match sqlx::query("SELECT 1").fetch_one(&pool).await {
+                        Ok(_) => {
+                            eprintln!("[SUCCESS] PostgreSQL connection successful {}", ssl_status);
+                            
+                            // Save the working connection string
+                            self.connection_string = conn_str.clone();
+                            if conn_str.contains("sslmode=disable") {
+                                self.ssl_mode_used = Some("disable".to_string());
+                                eprintln!("[INFO] Saved working configuration with SSL disabled");
+                            } else {
+                                eprintln!("[INFO] Saved working configuration with SSL enabled");
+                            }
+                            
+                            pool.close().await;
+                            return Ok(true);
+                        }
+                        Err(e) => {
+                            pool.close().await;
+                            last_error = Some(Box::new(e) as Box<dyn Error + Send + Sync>);
+                        }
+                    }
+                }
+                Err(e) => {
+                    last_error = Some(Box::new(e) as Box<dyn Error + Send + Sync>);
+                }
+            }
+        }
+        
+        // All attempts failed, show detailed error diagnostics
+        if let Some(e) = last_error {
+            eprintln!("[ERROR] ========== PostgreSQL Connection Failed After All Attempts ==========");
+            eprintln!("[ERROR] Failed to create PostgreSQL connection pool");
+            eprintln!("[ERROR] Error message: {}", e);
+            eprintln!("[ERROR] Error type: {:?}", e);
+            eprintln!("[ERROR] Error source chain:");
+            
+            // Print full error chain
+            let mut current_error = &*e as &dyn std::error::Error;
+            let mut level = 1;
+            while let Some(source) = current_error.source() {
+                eprintln!("[ERROR]   Level {}: {}", level, source);
+                current_error = source;
+                level += 1;
+            }
+            
+            // Log connection parameters (without password) for debugging
+            let masked_conn_str = if self.connection_string.contains('@') {
+                let parts: Vec<&str> = self.connection_string.splitn(2, '@').collect();
+                if parts.len() == 2 {
+                    if let Some(protocol_end) = parts[0].find("://") {
+                        let protocol = &parts[0][..protocol_end+3];
+                        let auth = &parts[0][protocol_end+3..];
+                        if auth.contains(':') {
+                            let user_parts: Vec<&str> = auth.splitn(2, ':').collect();
+                            format!("{}{}:****@{}", protocol, user_parts[0], parts[1])
+                        } else {
+                            self.connection_string.clone()
+                        }
+                    } else {
+                        "postgres://****".to_string()
+                    }
+                } else {
+                    self.connection_string.clone()
+                }
+            } else {
+                self.connection_string.clone()
+            };
+            eprintln!("[DEBUG] Connection string (masked): {}", masked_conn_str);
+            
+            // Extract host and port for better diagnostics
+            if let Some(at_pos) = self.connection_string.find('@') {
+                if let Some(host_start) = self.connection_string.get(at_pos + 1..) {
+                    let host_part = host_start.split('/').next().unwrap_or("");
+                    eprintln!("[DEBUG] Target host/port: {}", host_part);
+                }
+            }
+            
+            // Check if it's a specific type of error
+            let error_string = e.to_string();
+            eprintln!("[DEBUG] Analyzing error type...");
+            
+            if error_string.contains("password authentication failed") || error_string.contains("FATAL: password") {
+                eprintln!("[DIAGNOSIS] Authentication failed - check username and password");
+                eprintln!("[HINT] Common causes:");
+                eprintln!("  - Incorrect password");
+                eprintln!("  - User doesn't exist");
+                eprintln!("  - pg_hba.conf not configured for password authentication");
+            } else if error_string.contains("database") && error_string.contains("does not exist") {
+                eprintln!("[DIAGNOSIS] Database does not exist");
+                eprintln!("[HINT] Create the database first with: CREATE DATABASE <dbname>");
+            } else if error_string.contains("Connection refused") || error_string.contains("could not connect") {
+                eprintln!("[DIAGNOSIS] Cannot reach PostgreSQL server - check host and port");
+                eprintln!("[HINT] Common causes:");
+                eprintln!("  - PostgreSQL server is not running");
+                eprintln!("  - Incorrect host or port");
+                eprintln!("  - PostgreSQL not configured to accept network connections");
+                eprintln!("  - Check postgresql.conf for listen_addresses setting");
+            } else if error_string.contains("timeout") {
+                eprintln!("[DIAGNOSIS] Connection timeout - server may be unreachable or slow");
+                eprintln!("[HINT] Common causes:");
+                eprintln!("  - Network issues");
+                eprintln!("  - Server is overloaded");
+                eprintln!("  - Firewall blocking the connection");
+            } else if error_string.contains("SSL") || error_string.contains("TLS") || error_string.contains("SSLMODE") {
+                eprintln!("[DIAGNOSIS] SSL/TLS connection issue");
+                eprintln!("[HINT] The server may require or reject SSL connections");
+                eprintln!("[SOLUTION] Add one of these to your datasource config:");
+                eprintln!("  - \"disable_ssl\": true (to disable SSL)");
+                eprintln!("  - \"ssl_mode\": \"disable\" (to disable SSL)");
+                eprintln!("  - \"ssl_mode\": \"require\" (to require SSL)");
+                eprintln!("  - Or append ?sslmode=disable to your connection URL");
+                eprintln!("[EXAMPLE] postgres://user:pass@host:port/db?sslmode=disable");
+            } else if error_string.contains("pg_hba.conf") || error_string.contains("no pg_hba.conf entry") {
+                eprintln!("[DIAGNOSIS] Host-based authentication configuration issue");
+                eprintln!("[HINT] The server's pg_hba.conf doesn't allow connections from your host");
+                eprintln!("[SOLUTION] Update pg_hba.conf to allow connections from your IP/network");
+            } else if error_string.contains("too many connections") {
+                eprintln!("[DIAGNOSIS] Server has reached maximum connection limit");
+                eprintln!("[HINT] Wait and retry, or increase max_connections in postgresql.conf");
+            } else {
+                eprintln!("[DIAGNOSIS] Unrecognized error type");
+                eprintln!("[HINT] Check the full error message above for more details");
+            }
+            
+            eprintln!("[DEBUG] ========== PostgreSQL Connection Test Failed ==========");
+            Err(e)
+        } else {
+            Err("No connection attempts were made".into())
+        }
     }
     
     async fn execute_query(&self, query: &str, limit: i32) -> Result<Value, Box<dyn Error>> {

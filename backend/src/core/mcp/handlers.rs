@@ -768,7 +768,7 @@ impl McpHandlers {
         // Actually test the connection using the appropriate connector
         let connector_start = std::time::Instant::now();
         match create_connector(&source_type, &connection_config).await {
-            Ok(connector) => {
+            Ok(mut connector) => {
                 let connector_duration = connector_start.elapsed();
                 eprintln!(
                     "[{}] [DEBUG] Connector created in {}ms, testing connection...", 
