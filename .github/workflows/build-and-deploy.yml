@@ -28,6 +28,8 @@ jobs:
     
     - name: Build backend
       working-directory: ./backend
+      env:
+        DATABASE_URL: ${{ secrets.DATABASE_URL }}
       run: |
         cargo build --release
         cp target/release/clay-studio-backend ../clay-studio-backend
