@@ -1,2 +1,5 @@
 - VERY IMPORTANT: always use /frontend/src/lib/api to do api calls. DO NOT use fetch or axios manually!
-- IMPORTANT: Before committing backend changes, run `npm run sqlx:prepare` to update SQLx query cache for CI/CD compatibility
+- IMPORTANT: Backend development requires DATABASE_URL environment variable
+  - Set up: `export DATABASE_URL=postgres://user:pass@localhost:5432/clay_studio`  
+  - Before committing backend changes: `npm run sqlx:prepare` to update query cache
+  - Check compilation: `npm run check` (works without DATABASE_URL using existing cache)

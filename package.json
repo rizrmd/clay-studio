@@ -8,7 +8,8 @@
     "build": "bun run scripts/build.ts",
     "deploy": "bun run scripts/deploy.ts",
     "sqlx:prepare": "cd backend && cargo sqlx prepare",
-    "check": "cd backend && cargo sqlx prepare && cd ../frontend && npm run typecheck"
+    "sqlx:check": "cd backend && cargo sqlx prepare --check",
+    "check": "cd backend && cargo check && cd ../frontend && npm run typecheck"
   },
   "devDependencies": {
     "@types/bun": "latest"
