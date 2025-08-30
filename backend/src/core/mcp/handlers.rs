@@ -542,7 +542,16 @@ impl McpHandlers {
             }
             // Data Query
             "data_query" => {
-                self.query_datasource(arguments).await
+                // Pass _meta field along with arguments if present
+                let mut args_with_meta = serde_json::Map::new();
+                args_with_meta.extend(arguments.clone());
+                
+                // Add _meta field if it exists at params level
+                if let Some(meta) = params.get("_meta") {
+                    args_with_meta.insert("_meta".to_string(), meta.clone());
+                }
+                
+                self.query_datasource(&args_with_meta).await
             }
             // Interaction Tool
             "ask_user" => {
@@ -1153,6 +1162,15 @@ impl McpHandlers {
             .and_then(|meta| meta.get("claudecode/toolUseId"))
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
+        
+        // Debug log to see what _meta contains
+        if let Some(meta) = args.get("_meta") {
+            eprintln!(
+                "[{}] [DEBUG] _meta field contents: {}", 
+                Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+                serde_json::to_string_pretty(meta).unwrap_or_else(|_| "<error>".to_string())
+            );
+        }
         
         eprintln!(
             "[{}] [DEBUG] Tool context - conversation_id: {:?}, message_id: {:?}, tool_use_id: {:?}", 

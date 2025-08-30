@@ -554,7 +554,8 @@ pub async fn handle_chat_stream_ws(
                             if let Err(e) = insert_result {
                                 tracing::error!("Failed to insert pending tool usage: {}", e);
                             } else {
-                                tracing::debug!("Inserted pending tool usage {} for tool {}", tool_usage_id, tool);
+                                tracing::info!("Inserted pending tool usage {} for tool {} with parameters: {:?}", 
+                                    tool_usage_id, tool, args);
                             }
                             
                             // Update active tools in streaming state
