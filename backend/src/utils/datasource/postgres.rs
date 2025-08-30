@@ -645,22 +645,39 @@ impl DataSourceConnector for PostgreSQLConnector {
                 sample_data.push(row_data);
             }
             
+            let column_details: Result<Vec<_>, Box<dyn Error>> = columns.iter().map(|c| {
+                Ok(json!({
+                    "name": c.try_get::<String, _>("column_name")
+                        .map_err(|e| format!("Failed to get column_name: {}", e))?,
+                    "type": c.try_get::<String, _>("data_type")
+                        .map_err(|e| format!("Failed to get data_type: {}", e))?,
+                    "nullable": c.try_get::<String, _>("is_nullable")
+                        .map_err(|e| format!("Failed to get is_nullable: {}", e))? == "YES",
+                    "default": c.try_get::<Option<String>, _>("column_default").ok().flatten(),
+                    "max_length": c.try_get::<Option<i32>, _>("character_maximum_length").ok().flatten(),
+                }))
+            }).collect();
+            
+            let pk_list: Result<Vec<_>, Box<dyn Error>> = primary_keys.iter().map(|pk| {
+                pk.try_get::<String, _>("column_name")
+                    .map_err(|e| Box::new(e) as Box<dyn Error>)
+            }).collect();
+            
+            let fk_list: Result<Vec<_>, Box<dyn Error>> = foreign_keys.iter().map(|fk| {
+                Ok(json!({
+                    "column": fk.try_get::<String, _>("column_name")
+                        .map_err(|e| format!("Failed to get column_name: {}", e))?,
+                    "references_table": fk.try_get::<String, _>("foreign_table_name")
+                        .map_err(|e| format!("Failed to get foreign_table_name: {}", e))?,
+                    "references_column": fk.try_get::<String, _>("foreign_column_name")
+                        .map_err(|e| format!("Failed to get foreign_column_name: {}", e))?,
+                }))
+            }).collect();
+            
             result[table_name] = json!({
-                "columns": columns.iter().map(|c| json!({
-                    "name": c.get::<String, _>("column_name"),
-                    "type": c.get::<String, _>("data_type"),
-                    "nullable": c.get::<String, _>("is_nullable") == "YES",
-                    "default": c.get::<Option<String>, _>("column_default"),
-                    "max_length": c.get::<Option<i32>, _>("character_maximum_length"),
-                })).collect::<Vec<_>>(),
-                "primary_keys": primary_keys.iter().map(|pk| 
-                    pk.get::<String, _>("column_name")
-                ).collect::<Vec<_>>(),
-                "foreign_keys": foreign_keys.iter().map(|fk| json!({
-                    "column": fk.get::<String, _>("column_name"),
-                    "references_table": fk.get::<String, _>("foreign_table_name"),
-                    "references_column": fk.get::<String, _>("foreign_column_name"),
-                })).collect::<Vec<_>>(),
+                "columns": column_details?,
+                "primary_keys": pk_list?,
+                "foreign_keys": fk_list?,
                 "row_count": row_count,
                 "sample_data": sample_data,
             });
@@ -765,10 +782,14 @@ impl DataSourceConnector for PostgreSQLConnector {
         // Collect all related table names
         let mut related_tables = Vec::new();
         for row in references {
-            related_tables.push(row.get::<String, _>("foreign_table_name"));
+            if let Ok(table_name) = row.try_get::<String, _>("foreign_table_name") {
+                related_tables.push(table_name);
+            }
         }
         for row in referenced_by {
-            related_tables.push(row.get::<String, _>("table_name"));
+            if let Ok(table_name) = row.try_get::<String, _>("table_name") {
+                related_tables.push(table_name);
+            }
         }
         
         // Get schemas for related tables

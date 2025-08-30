@@ -393,37 +393,46 @@ impl DataSourceConnector for SQLiteConnector {
                 .unwrap_or_default();
             
             // Build column info
-            let column_info: Vec<Value> = columns.iter().map(|col| {
-                json!({
-                    "name": col.get::<String, _>("name"),
-                    "type": col.get::<String, _>("type"),
-                    "nullable": col.get::<i32, _>("notnull") == 0,
-                    "default": col.get::<Option<String>, _>("dflt_value"),
-                    "primary_key": col.get::<i32, _>("pk") > 0,
-                })
+            let column_info: Result<Vec<Value>, Box<dyn Error>> = columns.iter().map(|col| {
+                Ok(json!({
+                    "name": col.try_get::<String, _>("name")
+                        .map_err(|e| format!("Failed to get column name: {}", e))?,
+                    "type": col.try_get::<String, _>("type")
+                        .map_err(|e| format!("Failed to get column type: {}", e))?,
+                    "nullable": col.try_get::<i32, _>("notnull")
+                        .map_err(|e| format!("Failed to get notnull: {}", e))? == 0,
+                    "default": col.try_get::<Option<String>, _>("dflt_value").ok().flatten(),
+                    "primary_key": col.try_get::<i32, _>("pk").unwrap_or(0) > 0,
+                }))
             }).collect();
+            let column_info = column_info?;
             
             // Get primary keys
             let primary_keys: Vec<String> = columns.iter()
-                .filter(|col| col.get::<i32, _>("pk") > 0)
-                .map(|col| col.get::<String, _>("name"))
+                .filter(|col| col.try_get::<i32, _>("pk").unwrap_or(0) > 0)
+                .filter_map(|col| col.try_get::<String, _>("name").ok())
                 .collect();
             
             // Build foreign key info
-            let fk_info: Vec<Value> = foreign_keys.iter().map(|fk| {
-                json!({
-                    "column": fk.get::<String, _>("from"),
-                    "references_table": fk.get::<String, _>("table"),
-                    "references_column": fk.get::<String, _>("to"),
-                })
+            let fk_info: Result<Vec<Value>, Box<dyn Error>> = foreign_keys.iter().map(|fk| {
+                Ok(json!({
+                    "column": fk.try_get::<String, _>("from")
+                        .map_err(|e| format!("Failed to get from column: {}", e))?,
+                    "references_table": fk.try_get::<String, _>("table")
+                        .map_err(|e| format!("Failed to get table: {}", e))?,
+                    "references_column": fk.try_get::<String, _>("to")
+                        .map_err(|e| format!("Failed to get to column: {}", e))?,
+                }))
             }).collect();
+            let fk_info = fk_info?;
             
             // Build sample data
             let mut sample_data = Vec::new();
             for row in sample_rows {
                 let mut row_data = json!({});
                 for (i, col) in columns.iter().enumerate() {
-                    let col_name: String = col.get("name");
+                    let col_name: String = col.try_get("name")
+                        .unwrap_or_else(|_| format!("column_{}", i));
                     // SQLite is more flexible with types
                     if let Ok(val) = row.try_get::<Option<String>, _>(i) {
                         row_data[&col_name] = json!(val);
