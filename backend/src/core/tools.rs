@@ -329,20 +329,4 @@ impl ToolApplicabilityChecker {
         
         tools
     }
-    
-    #[allow(dead_code)]
-    pub fn filter_tools_by_query(tools: &[ToolContext], query: &str) -> Vec<ToolContext> {
-        let query_lower = query.to_lowercase();
-        
-        tools.iter()
-            .filter(|tool| {
-                // Check if tool name, category, or description matches the query
-                tool.name.to_lowercase().contains(&query_lower) ||
-                tool.category.to_lowercase().contains(&query_lower) ||
-                tool.description.to_lowercase().contains(&query_lower) ||
-                tool.usage_examples.iter().any(|ex| ex.to_lowercase().contains(&query_lower))
-            })
-            .cloned()
-            .collect()
-    }
 }

@@ -349,14 +349,14 @@ pub async fn broadcast_to_subscribers(
     message: ServerMessage,
 ) {
     let connections = WS_CONNECTIONS.read().await;
-    let mut sent_count = 0;
+    let mut _sent_count = 0;
     
     for (connection_id, conn) in connections.iter() {
         // Check if connection is subscribed to this project/conversation
         if let (Some(user_project), Some(user_conversation)) = (&conn.project_id, &conn.conversation_id) {
             if user_project == project_id && user_conversation == conversation_id {
                 if conn.sender.send(message.clone()).is_ok() {
-                    sent_count += 1;
+                    _sent_count += 1;
                 } else {
                     tracing::warn!("Failed to send message to connection {} (user {})", connection_id, conn.user_id);
                 }
@@ -365,7 +365,7 @@ pub async fn broadcast_to_subscribers(
             // Connection is subscribed to project but not specific conversation - still send
             if user_project == project_id {
                 if conn.sender.send(message.clone()).is_ok() {
-                    sent_count += 1;
+                    _sent_count += 1;
                 }
             }
         }

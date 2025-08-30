@@ -8,6 +8,7 @@ use tokio::sync::Mutex;
 
 pub struct SQLiteConnector {
     connection_string: String,
+    #[allow(dead_code)]
     original_connection_string: String,
     pool: Arc<Mutex<Option<SqlitePool>>>,
 }

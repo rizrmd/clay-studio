@@ -120,6 +120,7 @@ impl ConnectionPool {
         // If connection is expired, it will be dropped
     }
 
+    #[allow(dead_code)]
     async fn cleanup_expired_connections(&self) {
         let mut pool = self.connections.lock().await;
         let mut valid_connections = VecDeque::new();
@@ -138,6 +139,7 @@ impl ConnectionPool {
 pub struct OracleConnector {
     connection_string: String,
     username: String,
+    #[allow(dead_code)]
     password: String,
     schema: String,
     pool: Arc<ConnectionPool>,
@@ -228,6 +230,7 @@ impl OracleConnector {
         })
     }
     
+    #[allow(dead_code)]
     async fn with_connection<F, R>(&self, operation: F) -> Result<R, Box<dyn Error + Send + Sync>>
     where
         F: FnOnce(&Connection) -> Result<R, Box<dyn Error + Send + Sync>> + Send,
@@ -246,6 +249,7 @@ impl OracleConnector {
     }
 
     // Background task to cleanup expired connections
+    #[allow(dead_code)]
     pub async fn start_maintenance_task(&self) {
         let pool = Arc::clone(&self.pool);
         tokio::spawn(async move {

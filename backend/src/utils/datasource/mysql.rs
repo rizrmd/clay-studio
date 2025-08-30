@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use std::time::Duration;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tracing::{info, warn, error, debug};
 
 pub struct MySQLConnector {
     connection_string: String,
@@ -45,7 +46,7 @@ impl MySQLConnector {
         
         // Prefer URL if provided, otherwise construct from individual components
         let mut connection_string = if let Some(url) = config.get("url").and_then(|v| v.as_str()) {
-            eprintln!("[DEBUG] Using provided MySQL URL directly");
+            debug!("🔗 Using provided MySQL URL directly");
             url.to_string()
         } else {
             // Fallback to individual components for backward compatibility
@@ -55,7 +56,7 @@ impl MySQLConnector {
             let username = config.get("username").and_then(|v| v.as_str()).unwrap_or("root");
             let password = config.get("password").and_then(|v| v.as_str()).unwrap_or("");
             
-            eprintln!("[DEBUG] Building MySQL URL from components: host={}, port={}, database={}, username={}", 
+            info!("🔧 Building MySQL URL from components: host={}, port={}, database={}, username={}", 
                 host, port, database, username);
             
             // URL encode username and password to handle special characters
@@ -79,14 +80,14 @@ impl MySQLConnector {
             if !connection_string.contains("sslmode=") && !connection_string.contains("ssl-mode=") {
                 let separator = if connection_string.contains('?') { "&" } else { "?" };
                 connection_string.push_str(&format!("{}sslmode=disabled", separator));
-                eprintln!("[DEBUG] SSL disabled for MySQL connection");
+                debug!("🔒 SSL disabled for MySQL connection");
             }
         } else if let Some(mode) = ssl_mode {
             // Add specific SSL mode if provided
             if !connection_string.contains("sslmode=") && !connection_string.contains("ssl-mode=") {
                 let separator = if connection_string.contains('?') { "&" } else { "?" };
                 connection_string.push_str(&format!("{}sslmode={}", separator, mode));
-                eprintln!("[DEBUG] SSL mode set to: {}", mode);
+                info!("🔒 SSL mode set to: {}", mode);
             }
         };
         
@@ -115,7 +116,7 @@ impl MySQLConnector {
         } else {
             connection_string.clone()
         };
-        eprintln!("[DEBUG] MySQL connection string (masked): {}", masked_conn_str);
+        info!("🔗 MySQL connection string (masked): {}", masked_conn_str);
         
         Ok(Self { 
             original_connection_string: connection_string.clone(),
@@ -158,7 +159,7 @@ impl DataSourceConnector for MySQLConnector {
                 "with SSL enabled (default)"
             };
             
-            eprintln!("[INFO] MySQL connection attempt {} {}", attempt, ssl_status);
+            info!("🔄 MySQL connection attempt {} {}", attempt, ssl_status);
             
             // Create a temporary connector with this connection string
             let temp_self = Self {
@@ -174,15 +175,15 @@ impl DataSourceConnector for MySQLConnector {
                 // Try a simple query
                 match sqlx::query("SELECT 1 as test").fetch_one(&pool).await {
                     Ok(_) => {
-                        eprintln!("[SUCCESS] MySQL connection successful {}", ssl_status);
+                        info!("✅ MySQL connection successful {}", ssl_status);
                         
                         // Save the working connection string
                         self.connection_string = conn_str.clone();
                         if conn_str.contains("sslmode=disabled") {
                             self.ssl_mode_used = Some("disabled".to_string());
-                            eprintln!("[INFO] Saved working configuration with SSL disabled");
+                            info!("💾 Saved working configuration with SSL disabled");
                         } else {
-                            eprintln!("[INFO] Saved working configuration with SSL enabled");
+                            info!("💾 Saved working configuration with SSL enabled");
                         }
                         
                         return Ok(true);
@@ -200,9 +201,9 @@ impl DataSourceConnector for MySQLConnector {
         
         // All attempts failed, show detailed error diagnostics
         if let Some(e) = last_error {
-            eprintln!("[ERROR] ========== MySQL Connection Failed After All Attempts ==========");
-            eprintln!("[ERROR] Failed to create MySQL connection pool");
-            eprintln!("[ERROR] Error message: {}", e);
+            error!("💥 ========== MySQL Connection Failed After All Attempts ==========");
+            error!("❌ Failed to create MySQL connection pool");
+            error!("📄 Error message: {}", e);
             
             // Log connection parameters (without password) for debugging
             let masked_conn_str = if self.connection_string.contains('@') {
@@ -226,55 +227,55 @@ impl DataSourceConnector for MySQLConnector {
             } else {
                 self.connection_string.clone()
             };
-            eprintln!("[DEBUG] Connection string (masked): {}", masked_conn_str);
+            debug!("🔗 Connection string (masked): {}", masked_conn_str);
             
             // Extract host and port for better diagnostics
             if let Some(at_pos) = self.connection_string.find('@') {
                 if let Some(host_start) = self.connection_string.get(at_pos + 1..) {
                     let host_part = host_start.split('/').next().unwrap_or("");
-                    eprintln!("[DEBUG] Target host/port: {}", host_part);
+                    debug!("🎯 Target host/port: {}", host_part);
                 }
             }
             
             // Check if it's a specific type of error
             let error_string = e.to_string();
-            eprintln!("[DEBUG] Analyzing error type...");
+            debug!("🔍 Analyzing error type...");
             
             if error_string.contains("Access denied") {
-                eprintln!("[DIAGNOSIS] Authentication failed - check username and password");
-                eprintln!("[HINT] Common causes:");
-                eprintln!("  - Incorrect password");
-                eprintln!("  - User doesn't exist");
-                eprintln!("  - User exists but lacks privileges for the database");
+                error!("🚨 Authentication failed - check username and password");
+                warn!("💡 Common causes:");
+                warn!("  - Incorrect password");
+                warn!("  - User doesn't exist");
+                warn!("  - User exists but lacks privileges for the database");
             } else if error_string.contains("Unknown database") {
-                eprintln!("[DIAGNOSIS] Database does not exist");
-                eprintln!("[HINT] Create the database first with: CREATE DATABASE <dbname>");
+                error!("🚨 Database does not exist");
+                warn!("💡 Create the database first with: CREATE DATABASE <dbname>");
             } else if error_string.contains("Can't connect") || error_string.contains("Connection refused") {
-                eprintln!("[DIAGNOSIS] Cannot reach MySQL server - check host and port");
-                eprintln!("[HINT] Common causes:");
-                eprintln!("  - MySQL server is not running");
-                eprintln!("  - Incorrect host or port");
-                eprintln!("  - Firewall blocking the connection");
-                eprintln!("  - MySQL not configured to accept network connections");
+                error!("🚨 Cannot reach MySQL server - check host and port");
+                warn!("💡 Common causes:");
+                warn!("  - MySQL server is not running");
+                warn!("  - Incorrect host or port");
+                warn!("  - Firewall blocking the connection");
+                warn!("  - MySQL not configured to accept network connections");
             } else if error_string.contains("timeout") {
-                eprintln!("[DIAGNOSIS] Connection timeout - server may be unreachable or slow");
-                eprintln!("[HINT] Common causes:");
-                eprintln!("  - Network issues");
-                eprintln!("  - Server is overloaded");
-                eprintln!("  - Incorrect host/port causing connection to hang");
+                error!("🚨 Connection timeout - server may be unreachable or slow");
+                warn!("💡 Common causes:");
+                warn!("  - Network issues");
+                warn!("  - Server is overloaded");
+                warn!("  - Incorrect host/port causing connection to hang");
             } else if error_string.contains("SSL") || error_string.contains("TLS") || error_string.contains("2026") {
-                eprintln!("[DIAGNOSIS] SSL/TLS connection issue");
-                eprintln!("[HINT] The server requires SSL but may not support it properly");
-                eprintln!("[NOTE] Already tried connecting with and without SSL");
+                error!("🚨 SSL/TLS connection issue");
+                warn!("💡 The server requires SSL but may not support it properly");
+                info!("📝 Already tried connecting with and without SSL");
             } else if error_string.contains("Host") && error_string.contains("is not allowed") {
-                eprintln!("[DIAGNOSIS] Host not allowed to connect");
-                eprintln!("[HINT] Grant access from your host: GRANT ALL ON *.* TO 'user'@'your-host'");
+                error!("🚨 Host not allowed to connect");
+                warn!("💡 Grant access from your host: GRANT ALL ON *.* TO 'user'@'your-host'");
             } else {
-                eprintln!("[DIAGNOSIS] Unrecognized error type");
-                eprintln!("[HINT] Check the full error message above for more details");
+                error!("🚨 Unrecognized error type");
+                warn!("💡 Check the full error message above for more details");
             }
             
-            eprintln!("[ERROR] ========== MySQL Connection Test Failed ==========");
+            error!("💥 ========== MySQL Connection Test Failed ==========");
             Err(e.into())
         } else {
             Err("No connection attempts were made".into())

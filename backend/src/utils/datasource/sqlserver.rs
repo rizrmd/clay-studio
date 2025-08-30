@@ -8,11 +8,13 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use std::time::{Duration, Instant};
+use tracing::{info, error, debug};
 
 pub struct SqlServerConnector {
     config: Config,
     server: String,
     schema: String,
+    #[allow(dead_code)]
     original_connection_string: Option<String>,
     ssl_mode_used: Option<String>,
     connection_cache: Arc<Mutex<Option<CachedConnection>>>,
@@ -51,7 +53,7 @@ impl SqlServerConnector {
             .unwrap_or("dbo")
             .to_string();
         
-        eprintln!("[DEBUG] SQL Server connector using schema: '{}'", schema);
+        debug!("SQL Server connector using schema: '{}'", schema);
         
         // Check if URL is provided first
         let (host, port, database, username, password) = if let Some(url) = config.get("url").and_then(|v| v.as_str()) {
@@ -92,7 +94,7 @@ impl SqlServerConnector {
         let encrypt = config.get("encrypt").and_then(|v| v.as_bool()).unwrap_or(false);
         let ssl_mode_used = if disable_ssl || ssl_mode == Some("disable") {
             tiberius_config.encryption(EncryptionLevel::Off);
-            eprintln!("[DEBUG] SSL disabled for SQL Server connection");
+            debug!("SSL disabled for SQL Server connection");
             Some("disable".to_string())
         } else if !encrypt {
             tiberius_config.encryption(EncryptionLevel::Off);
@@ -110,12 +112,12 @@ impl SqlServerConnector {
             format!("sqlserver://{}:***@{}:{}/{:?}", username, host, port, database)
         };
         
-        eprintln!("[DEBUG] SQL Server connector configured for: {}", server);
-        eprintln!("[DEBUG] Connection string (masked): {}", connection_string);
-        eprintln!("[DEBUG] Using database: {:?}", database);
-        eprintln!("[DEBUG] Using schema: {}", schema);
-        eprintln!("[DEBUG] Trust Server Certificate: {}", trust_cert);
-        eprintln!("[DEBUG] Encryption: {}", encrypt);
+        debug!("SQL Server connector configured for: {}", server);
+        debug!("Connection string (masked): {}", connection_string);
+        debug!("Using database: {:?}", database);
+        debug!("Using schema: {}", schema);
+        debug!("Trust Server Certificate: {}", trust_cert);
+        debug!("Encryption: {}", encrypt);
         
         Ok(Self {
             config: tiberius_config,
@@ -226,8 +228,8 @@ impl SqlServerConnector {
 #[async_trait]
 impl DataSourceConnector for SqlServerConnector {
     async fn test_connection(&mut self) -> Result<bool, Box<dyn Error>> {
-        eprintln!("[DEBUG] ========== SQL Server Connection Test Started ==========");
-        eprintln!("[DEBUG] Attempting SQL Server connection to: {}", self.server);
+        debug!("SQL Server Connection Test Started");
+        debug!("Attempting SQL Server connection to: {}", self.server);
         
         // Try connection with current settings first
         let mut attempts = vec![(self.config.clone(), self.ssl_mode_used.clone())];
@@ -252,7 +254,7 @@ impl DataSourceConnector for SqlServerConnector {
                 "with SSL enabled (default)"
             };
             
-            eprintln!("[INFO] SQL Server connection attempt {} {}", attempt_num, ssl_status);
+            info!("SQL Server connection attempt {} {}", attempt_num, ssl_status);
             
             // Try to connect
             match TcpStream::connect(&self.server).await {
@@ -267,23 +269,23 @@ impl DataSourceConnector for SqlServerConnector {
                             }
                             
                             // Try a simple query
-                            eprintln!("[DEBUG] Executing test query: SELECT 1 as test");
+                            debug!("Executing test query: SELECT 1 as test");
                             match client.query("SELECT 1 as test", &[]).await {
                                 Ok(stream) => {
                                     match stream.into_results().await {
                                         Ok(_) => {
-                                            eprintln!("[SUCCESS] SQL Server connection successful {}", ssl_status);
+                                            info!("SQL Server connection successful {}", ssl_status);
                                             
                                             // Save the working configuration
                                             self.config = config;
                                             self.ssl_mode_used = ssl_mode.clone();
                                             if ssl_mode == Some("disable".to_string()) {
-                                                eprintln!("[INFO] Saved working configuration with SSL disabled");
+                                                info!("Saved working configuration with SSL disabled");
                                             } else {
-                                                eprintln!("[INFO] Saved working configuration with SSL enabled");
+                                                info!("Saved working configuration with SSL enabled");
                                             }
                                             
-                                            eprintln!("[DEBUG] ========== SQL Server Connection Test Completed Successfully ==========");
+                                            debug!("SQL Server Connection Test Completed Successfully");
                                             return Ok(true);
                                         }
                                         Err(e) => {
@@ -309,56 +311,56 @@ impl DataSourceConnector for SqlServerConnector {
         
         // All attempts failed, show detailed error diagnostics
         if let Some(e) = last_error {
-            eprintln!("[ERROR] ========== SQL Server Connection Failed After All Attempts ==========");
-            eprintln!("[ERROR] Failed to connect to SQL Server");
-            eprintln!("[ERROR] Error message: {}", e);
-            eprintln!("[ERROR] Error type: {:?}", e);
-            eprintln!("[ERROR] Error source chain:");
+            error!("SQL Server Connection Failed After All Attempts");
+            error!("Failed to connect to SQL Server");
+            error!("Error message: {}", e);
+            error!("Error type: {:?}", e);
+            error!("Error source chain:");
             
             // Print full error chain
             let mut current_error = &*e as &dyn std::error::Error;
             let mut level = 1;
             while let Some(source) = current_error.source() {
-                eprintln!("[ERROR]   Level {}: {}", level, source);
+                error!("  Level {}: {}", level, source);
                 current_error = source;
                 level += 1;
             }
             
             let error_string = e.to_string();
-            eprintln!("[DEBUG] Analyzing error type...");
+            debug!("Analyzing error type...");
             
             if error_string.contains("Login failed") {
-                eprintln!("[DIAGNOSIS] Authentication failed - check username and password");
-                eprintln!("[HINT] Common causes:");
-                eprintln!("  - Incorrect password");
-                eprintln!("  - User doesn't exist");
-                eprintln!("  - SQL Server authentication not enabled");
+                error!("Authentication failed - check username and password");
+                info!("Common causes:");
+                info!("  - Incorrect password");
+                info!("  - User doesn't exist");
+                info!("  - SQL Server authentication not enabled");
             } else if error_string.contains("Cannot open database") {
-                eprintln!("[DIAGNOSIS] Database does not exist or user lacks permission");
-                eprintln!("[HINT] Create the database first or check user permissions");
+                error!("Database does not exist or user lacks permission");
+                info!("Create the database first or check user permissions");
             } else if error_string.contains("Connection refused") || error_string.contains("No connection") {
-                eprintln!("[DIAGNOSIS] Cannot reach SQL Server - check host and port");
-                eprintln!("[HINT] Common causes:");
-                eprintln!("  - SQL Server is not running");
-                eprintln!("  - Incorrect host or port");
-                eprintln!("  - Firewall blocking the connection");
-                eprintln!("  - SQL Server not configured for TCP/IP connections");
+                error!("Cannot reach SQL Server - check host and port");
+                info!("Common causes:");
+                info!("  - SQL Server is not running");
+                info!("  - Incorrect host or port");
+                info!("  - Firewall blocking the connection");
+                info!("  - SQL Server not configured for TCP/IP connections");
             } else if error_string.contains("timeout") {
-                eprintln!("[DIAGNOSIS] Connection timeout - server may be unreachable");
-                eprintln!("[HINT] Check network connectivity and server status");
+                error!("Connection timeout - server may be unreachable");
+                info!("Check network connectivity and server status");
             } else if error_string.contains("certificate") || error_string.contains("TLS") || error_string.contains("SSL") {
-                eprintln!("[DIAGNOSIS] SSL/TLS certificate issue");
-                eprintln!("[HINT] The server may require or reject SSL connections");
-                eprintln!("[SOLUTION] Add one of these to your datasource config:");
-                eprintln!("  - \"disable_ssl\": true (to disable SSL)");
-                eprintln!("  - \"ssl_mode\": \"disable\" (to disable SSL)");
-                eprintln!("  - \"trust_server_certificate\": true (to trust any certificate)");
+                error!("SSL/TLS certificate issue");
+                info!("The server may require or reject SSL connections");
+                info!("Add one of these to your datasource config:");
+                info!("  - \"disable_ssl\": true (to disable SSL)");
+                info!("  - \"ssl_mode\": \"disable\" (to disable SSL)");
+                info!("  - \"trust_server_certificate\": true (to trust any certificate)");
             } else {
-                eprintln!("[DIAGNOSIS] Unrecognized error type");
-                eprintln!("[HINT] Check the full error message above for more details");
+                error!("Unrecognized error type");
+                info!("Check the full error message above for more details");
             }
             
-            eprintln!("[DEBUG] ========== SQL Server Connection Test Failed ==========");
+            debug!("SQL Server Connection Test Failed");
             Err(e)
         } else {
             Err("No connection attempts were made".into())

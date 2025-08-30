@@ -344,12 +344,11 @@ pub async fn handle_chat_stream_ws(
     );
     
     // Log first 500 chars of conversation for debugging
-    let preview = if conversation_text.len() > 500 {
+    let _preview = if conversation_text.len() > 500 {
         format!("{}...", &conversation_text[..500])
     } else {
         conversation_text.clone()
     };
-    tracing::info!("Sending to Claude (first 500 chars): {}", preview);
 
     let options = QueryOptions {
         max_turns: Some(1),

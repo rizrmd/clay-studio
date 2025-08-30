@@ -207,6 +207,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Public routes (no auth required)
     let public_router = Router::new()
         .push(Router::with_path("/health").get(health_check))
+        .push(Router::with_path("/health/database").get(database_health_check))
         .push(Router::with_path("/auth").push(auth::auth_routes()))
         .push(Router::new().push(clients::client_routes())) // Allow client creation during initial setup
         .push(Router::with_path("/debug/connections").get(api::debug::get_active_connections));
@@ -375,4 +376,32 @@ async fn health_check(res: &mut Response) {
         "status": "ok",
         "service": "clay-studio-backend"
     })));
+}
+
+#[handler]
+async fn database_health_check(depot: &mut Depot, res: &mut Response) {
+    let state = depot.obtain::<AppState>().unwrap();
+    
+    match state.health_check().await {
+        Ok(_) => {
+            // Log pool statistics
+            state.log_pool_stats("Health Check Endpoint").await;
+            
+            res.render(Json(serde_json::json!({
+                "status": "healthy",
+                "database": "connected",
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            })));
+        }
+        Err(e) => {
+            tracing::error!("Database health check failed via endpoint: {}", e);
+            res.status_code(salvo::http::StatusCode::SERVICE_UNAVAILABLE);
+            res.render(Json(serde_json::json!({
+                "status": "unhealthy",
+                "database": "disconnected",
+                "error": e.to_string(),
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            })));
+        }
+    }
 }
