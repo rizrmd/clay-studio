@@ -225,9 +225,10 @@ export function ProjectsPage() {
 
                 {/* Create New Project Card */}
                 {!isCreating ? (
-                  <div
+                  <button
                     onClick={() => setIsCreating(true)}
-                    className="bg-white dark:bg-gray-800 rounded-lg shadow-sm hover:shadow-md transition-shadow cursor-pointer border-2 border-dashed border-gray-300 dark:border-gray-600 hover:border-blue-400 dark:hover:border-blue-500"
+                    type="button"
+                    className="bg-white dark:bg-gray-800 rounded-lg shadow-sm hover:shadow-md transition-shadow cursor-pointer border-2 border-dashed border-gray-300 dark:border-gray-600 hover:border-blue-400 dark:hover:border-blue-500 w-full text-left"
                   >
                     <div className="p-6 flex flex-col items-center justify-center h-full min-h-[200px]">
                       <Plus className="h-12 w-12 text-gray-400 dark:text-gray-500 mb-4" />
@@ -235,7 +236,7 @@ export function ProjectsPage() {
                         Create New Project
                       </span>
                     </div>
-                  </div>
+                  </button>
                 ) : (
                   <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-blue-300 dark:border-blue-600">
                     <div className="p-6">

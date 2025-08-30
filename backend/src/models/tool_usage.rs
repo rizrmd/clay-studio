@@ -7,6 +7,7 @@ pub struct ToolUsage {
     pub id: Uuid,
     pub message_id: String,
     pub tool_name: String,
+    pub tool_use_id: Option<String>,
     pub parameters: Option<Value>,
     pub output: Option<Value>,
     pub execution_time_ms: Option<i64>,

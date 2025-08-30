@@ -28,7 +28,7 @@ import {
   User,
   Bot,
 } from "lucide-react";
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import rehypeRaw from "rehype-raw";
@@ -80,6 +80,38 @@ export const MessageListItem = memo(
   }: MessageListItemProps) => {
     const isQueued = message.isQueued;
     const isEditing = message.isEditing;
+
+    // Determine if content should use full width based on content characteristics
+    const shouldUseFullWidth = useMemo(() => {
+      if (message.role === "user") return false; // User messages always stay at 70%
+
+      const content = message.content || "";
+      const contentLength = content.length;
+
+      // Check for indicators of large/complex content
+      const hasCodeBlocks = content.includes("```");
+      const hasLongLines = content.split("\n").some((line) => line.length > 80);
+      const hasTables = content.includes("|") && content.includes("---");
+      const hasMultipleTools = (message.tool_usages?.length || 0) > 3;
+      const isLongContent = contentLength > 1500;
+      const hasLists = (content.match(/^\s*[\d•\-\*]\s+/gm) || []).length > 5;
+      const hasIndentedContent =
+        content.includes("    ") || content.includes("\t");
+      const hasMultipleAddresses =
+        (content.match(/Address:|Alamat:/gi) || []).length > 2;
+
+      // Use full width if any of these conditions are met
+      return (
+        hasCodeBlocks ||
+        hasLongLines ||
+        hasTables ||
+        hasMultipleTools ||
+        isLongContent ||
+        hasLists ||
+        hasIndentedContent ||
+        hasMultipleAddresses
+      );
+    }, [message.content, message.role, message.tool_usages]);
 
     // Hide system messages that are interaction responses
     if (
@@ -205,7 +237,14 @@ export const MessageListItem = memo(
             <div
               className={cn(
                 "flex flex-col gap-1 min-w-0",
-                message.role === "user" ? "max-w-[70%]" : "max-w-[70%]"
+                message.role === "user"
+                  ? "max-w-[70%]"
+                  : shouldUseFullWidth
+                  ? css`
+                      width: calc(100% - 30px) !important;
+                      max-width:570px;
+                    `
+                  : "max-w-[70%]"
               )}
             >
               {/* Queue indicator badge */}
@@ -528,7 +567,7 @@ export const MessageListItem = memo(
               <div
                 className={cn(
                   "absolute top-2 right-3 option-menu",
-                  "opacity-0 hover:opacity-100 transition-opacity ml-2 "
+                  "md:opacity-0 hover:opacity-100 transition-opacity ml-2 "
                 )}
               >
                 <DropdownMenu>

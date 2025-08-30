@@ -1381,21 +1381,13 @@ impl McpHandlers {
                 use_id
             );
             
-            // Since we store tool_use_id in pending_tools but not in database,
-            // we need to find the most recent tool_usage for this tool type
-            // that hasn't been completed yet
+            // Update the tool_usage by matching tool_use_id
             let tool_update_result = sqlx::query(
                 "UPDATE tool_usages 
                  SET output = $1,
                      execution_time_ms = $2
-                 WHERE id = (
-                     SELECT id FROM tool_usages 
-                     WHERE tool_name LIKE '%data_query%'
-                       AND (output->>'status' = 'executing' OR output IS NULL)
-                       AND created_at > NOW() - INTERVAL '30 seconds'
-                     ORDER BY created_at DESC
-                     LIMIT 1
-                 )
+                 WHERE tool_use_id = $3
+                   AND (output IS NULL OR output->>'status' = 'executing')
                  RETURNING id, message_id"
             )
             .bind(json!({
@@ -1407,6 +1399,7 @@ impl McpHandlers {
                 "timestamp": chrono::Utc::now().to_rfc3339()
             }))
             .bind(query_duration.as_millis() as i32)
+            .bind(use_id)
             .fetch_optional(&self.db_pool)
             .await.ok()
             .flatten();

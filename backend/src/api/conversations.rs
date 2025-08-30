@@ -90,6 +90,7 @@ pub async fn get_conversation_context(
                 message_id: message_id.clone(),
                 tool_name: tool_row.try_get("tool_name")
                     .map_err(|e| AppError::InternalServerError(format!("Failed to get tool_name: {}", e)))?,
+                tool_use_id: tool_row.try_get("tool_use_id").ok(),
                 parameters: tool_row.try_get("parameters").ok(),
                 output: tool_row.try_get("output").ok(),
                 execution_time_ms: tool_row.try_get("execution_time_ms").ok(),
@@ -777,6 +778,7 @@ pub async fn get_conversation_messages(
                         id: usage_row.try_get("id").unwrap_or_default(),
                         message_id: usage_row.try_get("message_id").unwrap_or_default(),
                         tool_name: usage_row.try_get("tool_name").unwrap_or_default(),
+                        tool_use_id: usage_row.try_get("tool_use_id").ok(),
                         parameters: usage_row.try_get("parameters").ok(),
                         output: usage_row.try_get("output").ok(),
                         execution_time_ms: usage_row.try_get("execution_time_ms").ok(),

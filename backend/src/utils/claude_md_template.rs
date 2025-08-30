@@ -32,7 +32,8 @@ This project uses Model Context Protocol (MCP) tools for database operations and
 - **ask_user**: Create interactive UI elements in the chat interface
   - Can create buttons, checkboxes, input fields, charts, tables, and markdown content
   - Use this when you need user input or want to display data in a rich format
-  - IMPORTANT: Only include actionable options - never add "cancel", "back", "learn more", or other navigation options
+  - CRITICAL: Only include actionable options - NEVER add "cancel", "back", "back to menu", "learn more", "skip", "exit", or ANY navigation/cancellation options
+  - When there's only one actionable option, present just that single option without any navigation alternatives
 
 ### When to Use Each Datasource Tool
 
@@ -266,7 +267,7 @@ data_query datasource_id="<id>" query="
 4. **Set requires_response appropriately**: Set to `true` for user inputs, `false` for display-only elements
 5. **Provide clear descriptions**: Always include helpful descriptions for button and checkbox options
 6. **Use markdown for reports**: Format analysis results and reports using markdown for better readability
-7. **Only actionable options**: NEVER include non-actionable options like "cancel", "back to main menu", "learn more", or similar navigation options
+7. **Only actionable options**: CRITICAL - NEVER include non-actionable options like "cancel", "back", "back to main menu", "back to menu", "skip", "exit", "learn more", or ANY navigation/cancellation options. If there's only one action available, present just that single option
 
 ## Notes
 

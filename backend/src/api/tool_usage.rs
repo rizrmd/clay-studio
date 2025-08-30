@@ -42,6 +42,7 @@ pub async fn get_message_tool_usages(
                 id: row.get("id"),
                 message_id: row.get("message_id"),
                 tool_name: row.get("tool_name"),
+                tool_use_id: row.get("tool_use_id"),
                 parameters: row.get("parameters"),
                 output: row.get("output"),
                 execution_time_ms: row.get("execution_time_ms"),
@@ -92,6 +93,7 @@ pub async fn get_tool_usage_by_name(
                 id: row.get("id"),
                 message_id: row.get("message_id"),
                 tool_name: row.get("tool_name"),
+                tool_use_id: row.get("tool_use_id"),
                 parameters: row.get("parameters"),
                 output: row.get("output"),
                 execution_time_ms: row.get("execution_time_ms"),
@@ -112,9 +114,10 @@ pub async fn save_tool_usage(
 ) -> Result<(), AppError> {
     sqlx::query(
         r#"
-        INSERT INTO tool_usages (id, message_id, tool_name, parameters, output, execution_time_ms, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        INSERT INTO tool_usages (id, message_id, tool_name, tool_use_id, parameters, output, execution_time_ms, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         ON CONFLICT (id) DO UPDATE SET
+            tool_use_id = EXCLUDED.tool_use_id,
             parameters = EXCLUDED.parameters,
             output = EXCLUDED.output,
             execution_time_ms = EXCLUDED.execution_time_ms
@@ -123,6 +126,7 @@ pub async fn save_tool_usage(
     .bind(tool_usage.id)
     .bind(&tool_usage.message_id)
     .bind(&tool_usage.tool_name)
+    .bind(&tool_usage.tool_use_id)
     .bind(&tool_usage.parameters)
     .bind(&tool_usage.output)
     .bind(tool_usage.execution_time_ms)

@@ -420,13 +420,6 @@ export function ConversationSidebar({
     alert("Profile functionality not yet implemented");
   };
 
-  // Handle settings click
-  const handleSettings = () => {
-    // TODO: Navigate to settings page or open settings modal
-    // For now, just show an alert
-    alert("Settings functionality not yet implemented");
-  };
-
   // Handle conversation rename
   const handleRenameConversation = async () => {
     if (!renamingConversation || !newTitle.trim()) return;
@@ -552,13 +545,10 @@ export function ConversationSidebar({
               variant="ghost"
               size="sm"
               onClick={() => {
-                // On mobile, close the menu
-                if (window.innerWidth < 768) {
-                  setIsMobileMenuOpen(false);
-                } else {
-                  // Navigate back to projects
-                  navigate("/projects");
-                }
+                // Always navigate back to projects
+                navigate("/projects");
+                // Also close mobile menu if open
+                setIsMobileMenuOpen(false);
               }}
               className="pl-1 gap-1 h-[25px] border border-transparent hover:border-gray-200"
             >
@@ -566,7 +556,7 @@ export function ConversationSidebar({
               <span className="text-xs">Projects</span>
             </Button>
 
-            {!isCollapsed && projectId && (
+            {(!isCollapsed || isMobileMenuOpen) && projectId && (
               <Button
                 variant="ghost"
                 size="sm"
@@ -754,9 +744,10 @@ export function ConversationSidebar({
           </div>
         )}
 
-        {/* Bottom user section */}
-        <div className="border-t p-3 relative z-10">
-          {isCollapsed ? (
+        {/* Bottom user section - visible on desktop and when mobile menu is open */}
+        {(!isCollapsed || isMobileMenuOpen) && (
+          <div className="border-t p-3 relative z-10">
+            {isCollapsed && !isMobileMenuOpen ? (
             <button
               className="h-8 w-8 p-0 cursor-pointer hover:bg-accent rounded-md flex items-center justify-center pointer-events-auto"
               onClick={handleLogout}
@@ -790,12 +781,6 @@ export function ConversationSidebar({
                   Profile
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  onClick={handleSettings}
-                  className="cursor-pointer"
-                >
-                  Settings
-                </DropdownMenuItem>
-                <DropdownMenuItem
                   onClick={handleLogout}
                   className="cursor-pointer"
                 >
@@ -804,7 +789,8 @@ export function ConversationSidebar({
               </DropdownMenuContent>
             </DropdownMenu>
           )}
-        </div>
+          </div>
+        )}
 
         {/* CLAUDE.md Modal */}
         {projectId && (
@@ -874,6 +860,38 @@ export function ConversationSidebar({
           <PanelLeftOpen className="h-5 w-5" />
         )}
       </Button>
+
+      {/* Mobile user button - always visible on mobile */}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="fixed bottom-4 right-4 z-40 h-10 w-10 p-0 md:hidden rounded-full shadow-lg bg-background border"
+          >
+            <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center text-primary font-medium text-xs">
+              {(user?.username || "G").charAt(0).toUpperCase()}
+            </div>
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-56 z-50 mb-2">
+          <div className="px-2 py-1.5 border-b">
+            <p className="text-sm font-medium">{user?.username || "Guest"}</p>
+          </div>
+          <DropdownMenuItem
+            onClick={handleProfile}
+            className="cursor-pointer"
+          >
+            Profile
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={handleLogout}
+            className="cursor-pointer"
+          >
+            Sign out
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </>
   );
 }

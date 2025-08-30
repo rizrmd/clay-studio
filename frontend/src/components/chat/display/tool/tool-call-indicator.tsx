@@ -115,6 +115,18 @@ export function ToolCallIndicator({
                   >
                     <CheckCircle className="h-3 w-3 text-green-600" />
                     Used {tools.length} tool{tools.length > 1 ? "s" : ""}
+                    {(() => {
+                      const totalTime = tools.reduce((sum, tool) => {
+                        const usage = toolUsages?.find(tu => tu.tool_name === tool);
+                        return sum + (usage?.execution_time_ms || 0);
+                      }, 0);
+                      const formatted = formatExecutionTime(totalTime);
+                      return formatted ? (
+                        <span className="text-muted-foreground ml-1">
+                          ({formatted})
+                        </span>
+                      ) : null;
+                    })()}
                   </div>
                 </PopoverTrigger>
                 <PopoverContent className="w-auto min-w-[250px] p-3">

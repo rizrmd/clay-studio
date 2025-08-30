@@ -115,9 +115,10 @@ async fn save_message(
     if let Some(tool_usages) = &message.tool_usages {
         for tool_usage in tool_usages {
             sqlx::query(
-                "INSERT INTO tool_usages (id, message_id, tool_name, parameters, output, execution_time_ms, created_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7)
+                "INSERT INTO tool_usages (id, message_id, tool_name, tool_use_id, parameters, output, execution_time_ms, created_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                  ON CONFLICT (id) DO UPDATE SET
+                    tool_use_id = EXCLUDED.tool_use_id,
                     parameters = EXCLUDED.parameters,
                     output = EXCLUDED.output,
                     execution_time_ms = EXCLUDED.execution_time_ms"
@@ -125,6 +126,7 @@ async fn save_message(
             .bind(&tool_usage.id)
             .bind(&message.id)
             .bind(&tool_usage.tool_name)
+            .bind(&tool_usage.tool_use_id)
             .bind(&tool_usage.parameters)
             .bind(&tool_usage.output)
             .bind(tool_usage.execution_time_ms)
@@ -533,13 +535,13 @@ pub async fn handle_chat_stream_ws(
                             
                             // Store the tool_usage_id for later matching
                             let lookup_key = tool_use_id.clone().unwrap_or_else(|| tool.clone());
-                            pending_tools.insert(lookup_key, (tool.clone(), args.clone(), std::time::Instant::now(), tool_usage_id));
+                            pending_tools.insert(lookup_key.clone(), (tool.clone(), args.clone(), std::time::Instant::now(), tool_usage_id));
                             
                             // Insert into database immediately with NULL output and execution_time_ms
                             // We'll update these when we get the ToolResult
                             let insert_result = sqlx::query(
-                                "INSERT INTO tool_usages (id, message_id, tool_name, parameters, output, execution_time_ms, created_at)
-                                 VALUES ($1, $2, $3, $4, $5, $6, $7)"
+                                "INSERT INTO tool_usages (id, message_id, tool_name, parameters, output, execution_time_ms, tool_use_id, created_at)
+                                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"
                             )
                             .bind(&tool_usage_id)
                             .bind(&message_id)
@@ -547,6 +549,7 @@ pub async fn handle_chat_stream_ws(
                             .bind(&args)
                             .bind(Option::<serde_json::Value>::None) // output is NULL initially
                             .bind(Option::<i64>::None) // execution_time_ms is NULL initially
+                            .bind(&tool_use_id) // Store the tool_use_id for matching
                             .bind(chrono::Utc::now())
                             .execute(&db_pool)
                             .await;
@@ -622,6 +625,7 @@ pub async fn handle_chat_stream_ws(
                                     id: tool_usage_id,
                                     message_id: message_id.clone(),
                                     tool_name: name.clone(),
+                                    tool_use_id: Some(tool.clone()), // Store the tool_use_id
                                     parameters: None, // We don't need to fetch this again
                                     output: Some(result.clone()),
                                     execution_time_ms: Some(execution_time),
@@ -635,12 +639,13 @@ pub async fn handle_chat_stream_ws(
                                 let tool_usage_id = uuid::Uuid::new_v4();
                                 
                                 let insert_result = sqlx::query(
-                                    "INSERT INTO tool_usages (id, message_id, tool_name, parameters, output, execution_time_ms, created_at)
-                                     VALUES ($1, $2, $3, $4, $5, $6, $7)"
+                                    "INSERT INTO tool_usages (id, message_id, tool_name, tool_use_id, parameters, output, execution_time_ms, created_at)
+                                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"
                                 )
                                 .bind(&tool_usage_id)
                                 .bind(&message_id)
                                 .bind(&tool)
+                                .bind(&tool) // Use tool as tool_use_id for orphan results
                                 .bind(Option::<serde_json::Value>::None)
                                 .bind(&result)
                                 .bind(Option::<i64>::None) // No execution time available
@@ -659,6 +664,7 @@ pub async fn handle_chat_stream_ws(
                                     id: tool_usage_id,
                                     message_id: message_id.clone(),
                                     tool_name: tool.clone(),
+                                    tool_use_id: Some(tool.clone()), // Store the tool_use_id for orphan results
                                     parameters: None,
                                     output: Some(result.clone()),
                                     execution_time_ms: None,
