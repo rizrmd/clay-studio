@@ -15,11 +15,25 @@ export function ValtioProvider({ children }: ValtioProviderProps) {
   useEffect(() => {
     initializeApp()
     
-    // Initialize and connect WebSocket service immediately
-    const wsService = WebSocketService.getInstance()
-    wsService.connect().catch(error => {
-      console.warn('Initial WebSocket connection failed:', error)
-    })
+    // Delay WebSocket connection to ensure session cookies are ready
+    // This prevents auth failures on first visit after deployment
+    const connectWebSocket = async () => {
+      // Small delay to ensure cookies are properly set
+      await new Promise(resolve => setTimeout(resolve, 100))
+      
+      const wsService = WebSocketService.getInstance()
+      wsService.connect().catch(error => {
+        console.warn('Initial WebSocket connection failed:', error)
+        // Retry once after another delay
+        setTimeout(() => {
+          wsService.connect().catch(err => {
+            console.warn('WebSocket retry failed:', err)
+          })
+        }, 1000)
+      })
+    }
+    
+    connectWebSocket()
   }, [])
 
   return <>{children}</>
