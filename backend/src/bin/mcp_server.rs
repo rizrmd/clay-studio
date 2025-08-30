@@ -1,8 +1,52 @@
 // Entry point for the MCP server binary
 // This creates a separate executable that Claude CLI will spawn
 
+use std::io::Write;
+
 
 fn main() {
+    // Set up global panic handler to prevent -32000 errors
+    std::panic::set_hook(Box::new(|panic_info| {
+        let panic_msg = if let Some(s) = panic_info.payload().downcast_ref::<String>() {
+            s.clone()
+        } else if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
+            s.to_string()
+        } else {
+            "Unknown panic occurred".to_string()
+        };
+        
+        let location = if let Some(location) = panic_info.location() {
+            format!(" at {}:{}:{}", location.file(), location.line(), location.column())
+        } else {
+            " at unknown location".to_string()
+        };
+        
+        eprintln!(
+            "[{}] [FATAL] Panic occurred{}: {}", 
+            chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+            location,
+            panic_msg
+        );
+        
+        // Try to send a proper JSON-RPC error response before exiting
+        let error_response = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": null,
+            "error": {
+                "code": -32603,
+                "message": format!("Internal server error: {}", panic_msg),
+                "data": format!("Panic occurred{}", location)
+            }
+        });
+        
+        if let Ok(error_json) = serde_json::to_string(&error_response) {
+            println!("{}", error_json);
+            let _ = std::io::stdout().flush();
+        }
+        
+        std::process::exit(1);
+    }));
+    
     // Load environment variables from backend/.env file if present
     let backend_env_path = std::env::current_exe()
         .ok()

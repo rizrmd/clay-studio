@@ -3,7 +3,6 @@ use uuid::Uuid;
 use serde_json::json;
 use tokio::sync::{mpsc, Mutex};
 use std::sync::Arc;
-use tracing::info;
 use tokio::process::Command as TokioCommand;
 
 use super::types::{QueryRequest, ClaudeMessage};
