@@ -1,4 +1,5 @@
 pub mod message;
+pub mod message_role;
 pub mod conversation;
 pub mod project;
 pub mod data_source;
@@ -11,6 +12,7 @@ pub mod file_upload;
 pub mod tool_usage;
 
 pub use message::*;
+pub use message_role::*;
 pub use conversation::*;
 pub use project::*;
 pub use data_source::*;

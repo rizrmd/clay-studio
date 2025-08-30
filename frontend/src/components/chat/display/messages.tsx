@@ -14,6 +14,7 @@ import {
 import { API_BASE_URL } from "@/lib/url";
 import { cn } from "@/lib/utils";
 import { css } from "goober";
+import "github-markdown-css/github-markdown-light.css";
 import {
   ArrowDown,
   Bot,
@@ -202,9 +203,9 @@ const MessageItem = memo(
               <div className="min-w-0">
                 <div
                   className={cn(
-                    "rounded-lg p-3 text-sm overflow-hidden",
+                    "rounded-lg px-0 py-3 text-sm overflow-hidden",
                     message.role === "user" && !isQueued
-                      ? "bg-primary text-primary-foreground"
+                      ? "bg-primary text-background"
                       : message.role === "user" && isQueued
                       ? "bg-primary/20 text-foreground border-2 border-dashed border-primary/30"
                       : "bg-muted"
@@ -244,120 +245,106 @@ const MessageItem = memo(
                   ) : (
                     <div
                       className={cn(
-                        "prose prose-sm max-w-none dark:prose-invert overflow-hidden break-words",
+                        "overflow-hidden break-words",
+                        message.role === "user" && !isQueued
+                          ? "markdown-body-dark"
+                          : "markdown-body",
                         css`
-                          & {
-                            margin-bottom: -5px;
-                            margin-top: -5px;
-                            word-break: break-word;
-                            overflow-wrap: anywhere;
+                          * {
+                            font-size: 0.85rem !important;
+                            line-height: 1.6;
+                          }
+
+                          &.markdown-body-dark pre {
+                            background-color: rgba(0, 0, 0, 0.2) !important;
+                          }
+
+                          &.markdown-body-dark code {
+                            background-color: rgba(0, 0, 0, 0.2) !important;
+                            color: inherit !important;
+                          }
+
+                          &.markdown-body-light {
+                            color: inherit !important;
                           }
 
                           * {
                             max-width: 100%;
                           }
 
-                          code {
-                            font-size: 13px;
-                            background: white;
-                            padding: 2px 6px;
-                            border-radius: 4px;
-                            word-break: break-all;
-                            overflow-wrap: anywhere;
-                          }
+                          &.markdown-body,
+                          &.markdown-body-dark {
+                            & > * {
+                              margin-left: 10px;
+                              margin-right: 10px;
+                            }
 
-                          h1,
-                          h2,
-                          h3,
-                          h4,
-                          h5,
-                          h6 {
-                            margin-top: 20px;
-                            margin-bottom: 5px;
-                            word-break: break-word;
-                            overflow-wrap: break-word;
-                          }
+                            color: inherit !important;
+                            h1 {
+                              font-size: 1.2rem !important;
+                            }
 
-                          h1 {
-                            font-size: 19px;
-                            border-bottom: 1px solid #ccc;
-                          }
+                            h2 {
+                              font-size: 1.1rem !important;
+                            }
 
-                          h2 {
-                            font-size: 18px;
-                            border-bottom: 1px solid #ddd;
-                          }
+                            h3 {
+                              font-size: 1.05rem !important;
+                            }
 
-                          h3 {
-                            font-size: 17px;
-                          }
+                            h4 {
+                              font-size: 1rem !important;
+                            }
 
-                          h4 {
-                            font-size: 16px;
-                          }
+                            h5 {
+                              font-size: 0.95rem !important;
+                            }
+                            h1,
+                            h2,
+                            h3,
+                            h4,
+                            h5 {
+                              margin-bottom: 5px;
+                              border-bottom: 1px solid #d1d9e0b3;
+                            }
 
-                          p {
-                            margin-top: 5px;
-                            margin-bottom: 5px;
-                            word-break: break-word;
-                            overflow-wrap: anywhere;
-                            hyphens: auto;
-                          }
+                            hr {
+                              margin: -5px 0px !important;
+                              height: 10px;
+                              background: white;
+                              position: relative;
+                            }
 
-                          ul,
-                          ol {
-                            margin-left: 10px;
-                            margin-bottom: 10px;
-                            padding-left: 0;
-                          }
+                            pre {
+                              max-width: 450px;
+                              overflow-x: auto;
+                              word-break: break-word;
+                              overflow-wrap: anywhere;
+                            }
 
-                          li {
-                            margin-left: 20px;
-                            list-style-type: square;
-                            word-break: break-word;
-                            overflow-wrap: anywhere;
-                          }
+                            code {
+                              word-break: break-all;
+                              overflow-wrap: anywhere;
+                            }
 
-                          ol > li {
-                            margin-left: 20px;
-                            list-style-type: decimal;
-                          }
+                            table {
+                              display: block;
+                              overflow-x: auto;
+                              max-width: 100%;
+                              width: max-content;
+                              max-width: calc(100% - 20px);
+                            }
 
-                          pre {
-                            background: white;
-                            padding: 5px;
-                            overflow-x: auto;
-                            overflow-y: auto;
-                            margin-bottom: 10px;
-                            max-width: 100%;
-                            word-break: normal;
-                            max-width: 450px;
-                          }
-
-                          pre code {
-                            display: block;
-                            overflow-x: auto;
-                            white-space: pre;
-                            word-break: normal;
-                            word-wrap: normal;
-                            min-width: 0;
-                          }
-
-                          table {
-                            display: block;
-                            overflow-x: auto;
-                            max-width: 100%;
-                            width: max-content;
-                          }
-
-                          blockquote {
-                            word-break: break-word;
-                            overflow-wrap: break-word;
-                          }
-
-                          a {
-                            word-break: break-all;
-                            overflow-wrap: anywhere;
+                            a {
+                              word-break: break-all;
+                              overflow-wrap: anywhere;
+                            }
+                            ol > li {
+                              list-style-type: square;
+                            }
+                            ul > li {
+                              list-style-type: decimal;
+                            }
                           }
                         `
                       )}
@@ -401,7 +388,7 @@ const MessageItem = memo(
                 </div>
               )}
               {/* Show AskUser component if present */}
-              {message.ask_user && message.role === 'assistant' && (
+              {message.ask_user && message.role === "assistant" && (
                 <div className="mt-3">
                   <AskUser
                     promptType={message.ask_user.prompt_type}
@@ -752,8 +739,10 @@ export function Messages({
   const latestTodoWrite = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       // Get all TodoWrite usages in this message
-      const todoUsages = messages[i].tool_usages?.filter(tu => tu.tool_name === 'TodoWrite') || [];
-      
+      const todoUsages =
+        messages[i].tool_usages?.filter((tu) => tu.tool_name === "TodoWrite") ||
+        [];
+
       // If this message has TodoWrite usages, return the last one
       if (todoUsages.length > 0) {
         const lastTodoUsage = todoUsages[todoUsages.length - 1];
@@ -762,17 +751,17 @@ export function Messages({
           todos: (() => {
             const params = lastTodoUsage.parameters;
             // Handle both direct object and stringified JSON
-            if (typeof params === 'string') {
+            if (typeof params === "string") {
               try {
                 const parsed = JSON.parse(params);
                 return parsed.todos || [];
               } catch (e) {
-                console.error('Failed to parse TodoWrite parameters:', e);
+                console.error("Failed to parse TodoWrite parameters:", e);
                 return [];
               }
             }
             return params?.todos || [];
-          })()
+          })(),
         };
       }
     }

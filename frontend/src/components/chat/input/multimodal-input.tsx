@@ -19,7 +19,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { API_BASE_URL } from "@/lib/url";
 import { FileBrowser } from "./file-browser";
-import { css } from "goober";
 
 interface FileWithDescription extends File {
   description?: string;
@@ -709,11 +708,7 @@ export function MultimodalInput({
             : "Enter to send, Shift+Enter for new line"
         }
         className={cn(
-          "min-h-[60px] max-h-[200px] resize-none pr-12 bg-white",
-          "focus-within:outline-none focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2",
-          css`
-            opacity: 1 !important;
-          `
+          "min-h-[60px] max-h-[200px] resize-none pr-12 bg-background"
         )}
         disabled={isDragging || isUploading}
         rows={1}

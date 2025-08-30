@@ -1,6 +1,7 @@
 use salvo::prelude::*;
 use serde::{Deserialize, Serialize};
 use crate::models::*;
+use crate::models::tool_usage::ToolUsage;
 use crate::utils::AppState;
 use crate::utils::AppError;
 use crate::utils::middleware::{get_current_client_id, is_current_user_root};
@@ -47,7 +48,7 @@ pub async fn get_conversation_context(
 
     // Fetch messages from database (excluding forgotten ones)
     let messages = sqlx::query(
-        "SELECT id, content, role FROM messages 
+        "SELECT id, content, role, created_at FROM messages 
          WHERE conversation_id = $1 
          AND (is_forgotten = false OR is_forgotten IS NULL)
          ORDER BY created_at ASC 
@@ -60,15 +61,60 @@ pub async fn get_conversation_context(
 
     let mut message_list = Vec::new();
     for row in messages {
+        let message_id: String = row.try_get("id")
+            .map_err(|e| AppError::InternalServerError(format!("Failed to get id: {}", e)))?;
         let role: String = row.try_get("role")
             .map_err(|e| AppError::InternalServerError(format!("Failed to get role: {}", e)))?;
         let content: String = row.try_get("content")
             .map_err(|e| AppError::InternalServerError(format!("Failed to get content: {}", e)))?;
-        let msg = match role.as_str() {
+        let created_at: chrono::DateTime<chrono::Utc> = row.try_get("created_at")
+            .map_err(|e| AppError::InternalServerError(format!("Failed to get created_at: {}", e)))?;
+        
+        // Fetch tool usages for this message
+        let tool_usages = sqlx::query(
+            "SELECT id, tool_name, parameters, output, execution_time_ms, created_at
+             FROM tool_usages 
+             WHERE message_id = $1
+             ORDER BY created_at ASC"
+        )
+        .bind(&message_id)
+        .fetch_all(&state.db_pool)
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("Database error fetching tool_usages: {}", e)))?;
+        
+        let mut tool_usage_list = Vec::new();
+        for tool_row in tool_usages {
+            let tool_usage = ToolUsage {
+                id: tool_row.try_get::<uuid::Uuid, _>("id")
+                    .map_err(|e| AppError::InternalServerError(format!("Failed to get tool_usage id: {}", e)))?,
+                message_id: message_id.clone(),
+                tool_name: tool_row.try_get("tool_name")
+                    .map_err(|e| AppError::InternalServerError(format!("Failed to get tool_name: {}", e)))?,
+                parameters: tool_row.try_get("parameters").ok(),
+                output: tool_row.try_get("output").ok(),
+                execution_time_ms: tool_row.try_get("execution_time_ms").ok(),
+                created_at: tool_row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
+                    .map(|dt| dt.to_rfc3339())
+                    .ok(),
+            };
+            tool_usage_list.push(tool_usage);
+        }
+        
+        let mut msg = match role.as_str() {
             "user" => Message::new_user(content),
             "assistant" => Message::new_assistant(content),
             _ => continue,
         };
+        
+        // Set the message ID and created_at
+        msg.id = message_id;
+        msg.created_at = Some(created_at.to_rfc3339());
+        
+        // Add tool usages if any exist
+        if !tool_usage_list.is_empty() {
+            msg.tool_usages = Some(tool_usage_list);
+        }
+        
         message_list.push(msg);
     }
 

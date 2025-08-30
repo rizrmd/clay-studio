@@ -3,6 +3,7 @@ use chrono::Utc;
 use uuid::Uuid;
 use crate::models::file_upload::FileUploadResponse;
 use crate::models::tool_usage::ToolUsage;
+use crate::models::message_role::MessageRole;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
@@ -14,14 +15,6 @@ pub struct Message {
     pub processing_time_ms: Option<i64>,
     pub file_attachments: Option<Vec<FileUploadResponse>>,
     pub tool_usages: Option<Vec<ToolUsage>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum MessageRole {
-    User,
-    Assistant,
-    System,
 }
 
 impl Message {

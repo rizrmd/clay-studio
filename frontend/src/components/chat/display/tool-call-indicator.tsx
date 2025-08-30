@@ -1,4 +1,4 @@
-import { Loader2, CheckCircle } from "lucide-react";
+import { Loader2, CheckCircle, Clock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
   Popover,
@@ -27,6 +27,26 @@ export function ToolCallIndicator({
   messageId,
   toolUsages,
 }: ToolCallIndicatorProps) {
+  
+  const formatExecutionTime = (ms?: number) => {
+    if (!ms) return null;
+    if (ms < 1000) return `${ms}ms`;
+    return `${(ms / 1000).toFixed(2)}s`;
+  };
+
+  const getToolExecutionTime = (toolName: string) => {
+    if (!toolUsages || toolUsages.length === 0) return null;
+    
+    const usage = toolUsages.find(tu => tu.tool_name === toolName);
+    
+    // Check for execution time in the usage data
+    const executionTime = usage?.execution_time_ms;
+    
+    if (executionTime !== undefined && executionTime !== null) {
+      return formatExecutionTime(executionTime);
+    }
+    return null;
+  };
   
   if (!tools || tools.length === 0) return null;
 
@@ -59,12 +79,22 @@ export function ToolCallIndicator({
                     >
                       <Icon />
                       {firstTool?.done || firstTool.friendlyName}
+                      {getToolExecutionTime(tools[0]) && (
+                        <span className="text-muted-foreground ml-1">
+                          ({getToolExecutionTime(tools[0])})
+                        </span>
+                      )}
                     </div>
                   </ToolUsagePopover>
                 ) : firstTool ? (
                   <div className={cn("flex gap-1 items-center")}>
                     <Icon />
                     {firstTool?.done || firstTool.friendlyName}
+                    {getToolExecutionTime(tools[0]) && (
+                      <span className="text-muted-foreground ml-1">
+                        ({getToolExecutionTime(tools[0])})
+                      </span>
+                    )}
                   </div>
                 ) : null}
               </>
@@ -85,19 +115,28 @@ export function ToolCallIndicator({
                     Used {tools.length} tool{tools.length > 1 ? "s" : ""}
                   </div>
                 </PopoverTrigger>
-                <PopoverContent className="w-auto p-3">
+                <PopoverContent className="w-auto min-w-[250px] p-3">
                   <div className="space-y-2">
                     <div className="text-sm font-medium mb-2">Tools Used:</div>
                     {tools.map((tool, index) => {
                       const parsedTool = parseMcpToolName(tool);
                       const Icon = parsedTool.icon;
+                      const executionTime = getToolExecutionTime(tool);
                       const content = (
                         <div
                           key={`${tool}-${index}`}
-                          className="flex items-center gap-2 text-sm"
+                          className="flex items-center justify-between gap-2 text-sm w-full"
                         >
-                          <Icon className="h-4 w-4 text-muted-foreground" />
-                          <span>{parsedTool.friendlyName}</span>
+                          <div className="flex items-center gap-2">
+                            <Icon className="h-4 w-4 text-muted-foreground" />
+                            <span>{parsedTool.friendlyName}</span>
+                          </div>
+                          {executionTime && (
+                            <div className="flex items-center gap-1 text-xs text-muted-foreground ml-auto">
+                              <Clock className="h-3 w-3" />
+                              <span>{executionTime}</span>
+                            </div>
+                          )}
                         </div>
                       );
 
@@ -143,6 +182,7 @@ export function ToolCallIndicator({
       {[tools[tools.length - 1]].map((tool, index) => {
         const parsedTool = parseMcpToolName(tool);
         const Icon = parsedTool.icon;
+        const executionTime = getToolExecutionTime(tool);
 
         return (
           <Badge
@@ -164,6 +204,12 @@ export function ToolCallIndicator({
                 ? parsedTool.friendlyName
                 : `${parsedTool.description}...`}
             </span>
+            {isCompleted && executionTime && (
+              <span className="text-muted-foreground flex items-center gap-1">
+                <Clock className="h-3 w-3" />
+                {executionTime}
+              </span>
+            )}
           </Badge>
         );
       })}
