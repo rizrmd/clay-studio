@@ -369,17 +369,25 @@ impl DataSourceConnector for MySQLConnector {
         });
         
         for row in tables {
-            let table_name: String = row.get("table_name");
+            let table_name: String = row.try_get("table_name")
+                .map_err(|e| format!("Failed to get table_name: {}", e))?;
             let column_info = json!({
-                "column_name": row.get::<String, _>("column_name"),
-                "data_type": row.get::<String, _>("data_type"),
-                "is_nullable": row.get::<String, _>("is_nullable"),
+                "column_name": row.try_get::<String, _>("column_name")
+                    .map_err(|e| format!("Failed to get column_name: {}", e))?,
+                "data_type": row.try_get::<String, _>("data_type")
+                    .map_err(|e| format!("Failed to get data_type: {}", e))?,
+                "is_nullable": row.try_get::<String, _>("is_nullable")
+                    .map_err(|e| format!("Failed to get is_nullable: {}", e))?,
             });
             
             if schema["tables"].get(&table_name).is_none() {
                 schema["tables"][&table_name] = json!([]);
             }
-            schema["tables"][&table_name].as_array_mut().unwrap().push(column_info);
+            if let Some(array) = schema["tables"][&table_name].as_array_mut() {
+                array.push(column_info);
+            } else {
+                return Err(format!("Failed to get array for table {}", table_name).into());
+            }
         }
         
         Ok(schema)
@@ -392,7 +400,10 @@ impl DataSourceConnector for MySQLConnector {
             .fetch_all(&pool)
             .await?;
         
-        let table_names: Vec<String> = tables.iter().map(|row| row.get(0)).collect();
+        let table_names: Vec<String> = tables.iter()
+            .map(|row| row.try_get::<String, _>(0))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("Failed to get table names: {}", e))?;
         Ok(table_names)
     }
     
@@ -411,7 +422,11 @@ impl DataSourceConnector for MySQLConnector {
         .await?;
         
         let table_count: i64 = stats.get("table_count");
-        let total_size: Option<i64> = stats.get("total_size");
+        let total_size: Option<i64> = stats.try_get::<Option<String>, _>("total_size")
+            .ok()
+            .flatten()
+            .and_then(|s| s.parse::<i64>().ok())
+            .or_else(|| stats.try_get::<Option<i64>, _>("total_size").ok().flatten());
         
         // Get detailed table information
         let tables = sqlx::query(
@@ -447,9 +462,10 @@ impl DataSourceConnector for MySQLConnector {
         let mut table_names = Vec::new();
         
         for (idx, table) in tables.iter().enumerate() {
-            let table_name: String = table.get("table_name");
-            let size_bytes: Option<i64> = table.get("size_bytes");
-            let row_count: Option<i64> = table.get("row_count");
+            let table_name: String = table.try_get("table_name")
+                .map_err(|e| format!("Failed to get table_name: {}", e))?;
+            let size_bytes: Option<i64> = table.try_get("size_bytes").ok();
+            let row_count: Option<i64> = table.try_get("row_count").ok();
             
             table_names.push(table_name.clone());
             
@@ -466,9 +482,11 @@ impl DataSourceConnector for MySQLConnector {
             // Count relationships for this table
             let connections = relationships.iter()
                 .filter(|r| {
-                    let t: String = r.get("table_name");
-                    let ft: Option<String> = r.get("foreign_table_name");
-                    t == table_name || (ft.is_some() && ft.unwrap() == table_name)
+                    if let (Ok(t), Ok(ft)) = (r.try_get::<String, _>("table_name"), r.try_get::<Option<String>, _>("foreign_table_name")) {
+                        t == table_name || (ft.is_some() && ft.unwrap() == table_name)
+                    } else {
+                        false
+                    }
                 })
                 .count();
             
@@ -698,11 +716,13 @@ impl DataSourceConnector for MySQLConnector {
         // Collect all related table names
         let mut related_tables = Vec::new();
         for row in references {
-            let table_name: String = row.get("foreign_table_name");
+            let table_name: String = row.try_get("foreign_table_name")
+                .map_err(|e| format!("Failed to get foreign_table_name: {}", e))?;
             related_tables.push(table_name);
         }
         for row in referenced_by {
-            let table_name: String = row.get("table_name");
+            let table_name: String = row.try_get("table_name")
+                .map_err(|e| format!("Failed to get table_name: {}", e))?;
             if !related_tables.contains(&table_name) {
                 related_tables.push(table_name);
             }

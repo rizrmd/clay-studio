@@ -467,17 +467,29 @@ impl DataSourceConnector for SqlServerConnector {
         
         if !results.is_empty() {
             for row in &results[0] {
-                let table_name: &str = row.get(0).unwrap_or("");
+                let table_name: &str = row.try_get::<&str, _>(0)
+                    .map_err(|e| format!("Failed to get table_name: {}", e))?
+                    .unwrap_or("");
                 let column_info = json!({
-                    "column_name": row.get::<&str, _>(1).unwrap_or(""),
-                    "data_type": row.get::<&str, _>(2).unwrap_or(""),
-                    "is_nullable": row.get::<&str, _>(3).unwrap_or(""),
+                    "column_name": row.try_get::<&str, _>(1)
+                        .map_err(|e| format!("Failed to get column_name: {}", e))?
+                        .unwrap_or(""),
+                    "data_type": row.try_get::<&str, _>(2)
+                        .map_err(|e| format!("Failed to get data_type: {}", e))?
+                        .unwrap_or(""),
+                    "is_nullable": row.try_get::<&str, _>(3)
+                        .map_err(|e| format!("Failed to get is_nullable: {}", e))?
+                        .unwrap_or(""),
                 });
                 
                 if schema["tables"].get(table_name).is_none() {
                     schema["tables"][table_name] = json!([]);
                 }
-                schema["tables"][table_name].as_array_mut().unwrap().push(column_info);
+                if let Some(array) = schema["tables"][table_name].as_array_mut() {
+                    array.push(column_info);
+                } else {
+                    return Err(format!("Failed to get array for table {}", table_name).into());
+                }
             }
         }
         

@@ -287,12 +287,6 @@ pub async fn handle_chat_stream_ws(
             conversation_text.push_str(&formatted);
         }
         
-        tracing::info!(
-            "Loaded {} messages for conversation {} ({} chars) - Claude SDK will handle compaction",
-            message_count,
-            conversation_id,
-            total_chars
-        );
     }
     
     // Add new message from request (only the last user message if it's new)

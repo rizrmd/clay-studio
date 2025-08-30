@@ -221,7 +221,8 @@ impl DataSourceConnector for SQLiteConnector {
         });
         
         for table_row in tables {
-            let table_name: String = table_row.get("name");
+            let table_name: String = table_row.try_get("name")
+                .map_err(|e| format!("Failed to get table name: {}", e))?;
             let columns = sqlx::query(&format!("PRAGMA table_info({})", table_name))
                 .fetch_all(&pool)
                 .await?;
@@ -247,7 +248,10 @@ impl DataSourceConnector for SQLiteConnector {
             .fetch_all(&pool)
             .await?;
         
-        let table_names: Vec<String> = tables.iter().map(|row| row.get("name")).collect();
+        let table_names: Vec<String> = tables.iter()
+            .map(|row| row.try_get::<String, _>("name"))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("Failed to get table names: {}", e))?;
         Ok(table_names)
     }
     
@@ -266,7 +270,8 @@ impl DataSourceConnector for SQLiteConnector {
         
         // Get info for each table
         for table_row in &tables {
-            let table_name: String = table_row.get("name");
+            let table_name: String = table_row.try_get("name")
+                .map_err(|e| format!("Failed to get table name: {}", e))?;
             table_names.push(table_name.clone());
             
             // Get row count for this table
@@ -457,7 +462,8 @@ impl DataSourceConnector for SQLiteConnector {
         
         let mut results = Vec::new();
         for table_row in tables {
-            let table_name: String = table_row.get("name");
+            let table_name: String = table_row.try_get("name")
+                .map_err(|e| format!("Failed to get table name: {}", e))?;
             
             // Get column count
             let col_count_query = format!("SELECT COUNT(*) as count FROM pragma_table_info('{}')", table_name.replace('\'', "''"));
@@ -551,7 +557,8 @@ impl DataSourceConnector for SQLiteConnector {
         let mut total_rows = 0i64;
         
         for table_row in &tables {
-            let table_name: String = table_row.get("name");
+            let table_name: String = table_row.try_get("name")
+                .map_err(|e| format!("Failed to get table name: {}", e))?;
             
             // Get row count
             let count_query = format!("SELECT COUNT(*) as count FROM \"{}\"", table_name.replace('"', "\"\""));

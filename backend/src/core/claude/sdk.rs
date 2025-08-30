@@ -112,9 +112,6 @@ impl ClaudeSDK {
             
             // Write the MCP servers configuration
             let _ = std::fs::write(&mcp_servers_file, serde_json::to_string_pretty(&mcp_servers).unwrap_or_default());
-            info!("Created MCP servers configuration for project {} at {:?}", project_id, mcp_servers_file);
-            info!("MCP server executable path: {:?}", mcp_server_path);
-            info!("Environment detection - Production: {}", is_production);
         }
     }
     
@@ -165,9 +162,6 @@ impl ClaudeSDK {
         let oauth_token = self.oauth_token.lock().await.clone()
             .ok_or("No OAuth token available")?;
         
-        // Log if we have a token (without exposing it)
-        tracing::info!("OAuth token present: {}", !oauth_token.is_empty());
-        
         let working_dir = self.project_dir.as_ref().unwrap_or(&self.client_dir);
         
         let working_dir_clone = working_dir.clone();
@@ -195,7 +189,6 @@ impl ClaudeSDK {
             let use_su_workaround = is_root && is_production;
             
             let mut cmd_builder = if use_su_workaround {
-                tracing::warn!("Production environment detected running as root, using su workaround for Claude CLI");
                 
                 // First ensure /app/.clients is accessible to nobody user
                 let _ = std::process::Command::new("chown")
