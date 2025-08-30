@@ -1,3 +1,7 @@
+// Forbid unwrap and expect to prevent panics
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+
 mod core;
 mod utils;
 mod api;

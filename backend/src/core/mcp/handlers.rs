@@ -100,7 +100,12 @@ impl McpHandlers {
             },
         };
         
-        let response = serde_json::to_value(result).unwrap();
+        let response = serde_json::to_value(result)
+            .map_err(|e| JsonRpcError {
+                code: INTERNAL_ERROR,
+                message: format!("Failed to serialize response: {}", e),
+                data: None,
+            })?;
         eprintln!(
             "[{}] [INFO] Initialize completed successfully", 
             Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
@@ -205,7 +210,8 @@ impl McpHandlers {
                 let content = ResourceContent {
                     uri: uri.to_string(),
                     mime_type: "application/json".to_string(),
-                    text: serde_json::to_string_pretty(&data_source).unwrap(),
+                    text: serde_json::to_string_pretty(&data_source)
+                        .unwrap_or_else(|e| format!("Failed to serialize datasource: {}", e)),
                 };
                 
                 Ok(json!({
@@ -506,7 +512,12 @@ impl McpHandlers {
                     }],
                     is_error: None,
                 };
-                Ok(serde_json::to_value(tool_result).unwrap())
+                serde_json::to_value(tool_result)
+                    .map_err(|e| JsonRpcError {
+                        code: INTERNAL_ERROR,
+                        message: format!("Failed to serialize tool result: {}", e),
+                        data: None,
+                    })
             }
             Err(e) => {
                 // Extract detailed error information to inform the LLM
@@ -534,7 +545,12 @@ impl McpHandlers {
                     }],
                     is_error: Some(true),
                 };
-                Ok(serde_json::to_value(tool_result).unwrap())
+                serde_json::to_value(tool_result)
+                    .map_err(|e| JsonRpcError {
+                        code: INTERNAL_ERROR,
+                        message: format!("Failed to serialize tool result: {}", e),
+                        data: None,
+                    })
             }
         }
     }
@@ -827,7 +843,7 @@ impl McpHandlers {
                         }
                         
                         // Update schema information in the database with combined result
-                        if !combined_result.as_object().unwrap().is_empty() {
+                        if combined_result.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
                             sqlx::query(
                                 "UPDATE data_sources 
                                  SET schema_info = $1 
@@ -1239,7 +1255,7 @@ impl McpHandlers {
                 .fetch_optional(&self.db_pool)
                 .await.ok();
                 
-                if update_result.is_some() && update_result.as_ref().unwrap().is_some() {
+                if update_result.as_ref().and_then(|r| r.as_ref()).is_some() {
                     break; // Successfully found and updated
                 }
             } else {
@@ -1326,7 +1342,7 @@ impl McpHandlers {
                 .fetch_optional(&self.db_pool)
                 .await.ok();
                 
-                if update_result.is_some() && update_result.as_ref().unwrap().is_some() {
+                if update_result.as_ref().and_then(|r| r.as_ref()).is_some() {
                     break; // Successfully found and updated
                 }
             }
@@ -1356,7 +1372,8 @@ impl McpHandlers {
         
         Ok(format!(
             "Query executed on '{}' (limited to {} rows):\n{}",
-            name, limit, serde_json::to_string_pretty(&result).unwrap()
+            name, limit, serde_json::to_string_pretty(&result)
+                .unwrap_or_else(|e| format!("Failed to serialize result: {}", e))
         ))
     }
     
@@ -1403,7 +1420,7 @@ impl McpHandlers {
         // Check if we have valid schema info with actual schema data
         if let Some(schema_info) = existing_schema {
             // Check if the schema_info contains the actual "schema" field with table definitions
-            if schema_info.get("schema").is_some() && schema_info.get("schema").unwrap().get("tables").is_some() {
+            if schema_info.get("schema").and_then(|s| s.get("tables")).is_some() {
                 return Ok(self.format_inspection_result(&name, &schema_info));
             }
             // If we have old format data without schema, continue to fetch fresh data
@@ -1606,7 +1623,8 @@ impl McpHandlers {
             "Tables matching '{}' in '{}':\n{}",
             pattern,
             source.name,
-            serde_json::to_string_pretty(&results).unwrap()
+            serde_json::to_string_pretty(&results)
+                .unwrap_or_else(|e| format!("Failed to serialize results: {}", e))
         ))
     }
     
@@ -1650,7 +1668,8 @@ impl McpHandlers {
             "Table '{}' and its relationships in '{}':\n{}",
             table,
             source.name,
-            serde_json::to_string_pretty(&related).unwrap()
+            serde_json::to_string_pretty(&related)
+                .unwrap_or_else(|e| format!("Failed to serialize related schemas: {}", e))
         ))
     }
     
@@ -1685,7 +1704,8 @@ impl McpHandlers {
         Ok(format!(
             "Database statistics for '{}':\n{}",
             source.name,
-            serde_json::to_string_pretty(&stats).unwrap()
+            serde_json::to_string_pretty(&stats)
+                .unwrap_or_else(|e| format!("Failed to serialize stats: {}", e))
         ))
     }
     
@@ -1753,7 +1773,8 @@ impl McpHandlers {
                         name,
                         table_count,
                         total_size,
-                        serde_json::to_string_pretty(&analysis).unwrap()
+                        serde_json::to_string_pretty(&analysis)
+                            .unwrap_or_else(|e| format!("Failed to serialize analysis: {}", e))
                     )
                 } else {
                     format!(
@@ -1761,7 +1782,8 @@ impl McpHandlers {
                         name,
                         table_count,
                         total_size,
-                        serde_json::to_string_pretty(&analysis).unwrap()
+                        serde_json::to_string_pretty(&analysis)
+                            .unwrap_or_else(|e| format!("Failed to serialize analysis: {}", e))
                     )
                 }
             },
