@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO messages (id, conversation_id, role, content, created_at)\n        VALUES ($1, $2, 'system', $3, NOW())\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "120eed61dacd7fb7710b7189b46069c241794d00b42d994df9b3b42676a04c1b"
+}

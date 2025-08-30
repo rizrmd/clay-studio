@@ -34,12 +34,14 @@ export function ToolUsagePopover({
       // Check if we have tool_usages passed as props
       // This is more efficient than making an API call
       if (toolUsages && toolUsages.length > 0) {
-        const usage = toolUsages.find((tu: ToolUsage) => tu.tool_name === toolName);
+        const usage = toolUsages.find(
+          (tu: ToolUsage) => tu.tool_name === toolName
+        );
         setToolUsage(usage || null);
         setHasFetched(true);
       } else if (messageId) {
         // If no tool usages in props, fetch from API
-        fetchToolUsage(messageId, toolName).then(usage => {
+        fetchToolUsage(messageId, toolName).then((usage) => {
           setToolUsage(usage);
           setHasFetched(true);
         });
@@ -241,7 +243,7 @@ export function ToolUsagePopover({
           // Check if result has meaningful content
           if (typeof result === "string" && result.trim()) {
             // For multiline strings, use pre formatting
-            if (result.includes('\n') || result.length > 100) {
+            if (result.includes("\n") || result.length > 100) {
               return (
                 <pre className="text-xs overflow-x-auto whitespace-pre-wrap break-words font-mono max-h-[300px] overflow-y-auto">
                   {result}
@@ -276,7 +278,9 @@ export function ToolUsagePopover({
                 <span className="font-medium">Error</span>
               </div>
               <pre className="text-xs overflow-x-auto whitespace-pre-wrap break-words font-mono">
-                {typeof result === "string" ? result : JSON.stringify(result, null, 2)}
+                {typeof result === "string"
+                  ? result
+                  : JSON.stringify(result, null, 2)}
               </pre>
             </div>
           );
@@ -289,9 +293,13 @@ export function ToolUsagePopover({
       if (typeof output === "string") {
         // Check for empty strings
         if (!output.trim()) {
-          return <span className="text-muted-foreground text-sm">No output produced</span>;
+          return (
+            <span className="text-muted-foreground text-sm">
+              No output produced
+            </span>
+          );
         }
-        
+
         // Try to parse as JSON first
         try {
           const parsed = JSON.parse(output);
@@ -299,7 +307,7 @@ export function ToolUsagePopover({
         } catch {
           // Return as string if not JSON
           // For multiline or long strings, use pre formatting
-          if (output.includes('\n') || output.length > 100) {
+          if (output.includes("\n") || output.length > 100) {
             return (
               <pre className="text-xs overflow-x-auto whitespace-pre-wrap break-words font-mono max-h-[300px] overflow-y-auto">
                 {output}
@@ -321,7 +329,7 @@ export function ToolUsagePopover({
         </pre>
       );
     } catch (err) {
-      console.error('Error rendering output:', err);
+      console.error("Error rendering output:", err);
       return (
         <pre className="text-xs overflow-x-auto whitespace-pre-wrap break-words font-mono">
           {String(output)}
@@ -342,10 +350,7 @@ export function ToolUsagePopover({
   return (
     <Popover open={isOpen} onOpenChange={setIsOpen}>
       <PopoverTrigger asChild>{children}</PopoverTrigger>
-      <PopoverContent
-        className="w-[500px] max-h-[600px] p-0"
-        align="start"
-      >
+      <PopoverContent className="w-[500px] max-h-[600px] p-0" align="start">
         <div className="flex items-center justify-between border-b px-4 py-3">
           <div className="flex items-center gap-2">
             <Icon className="h-4 w-4 text-muted-foreground" />
@@ -366,7 +371,9 @@ export function ToolUsagePopover({
             {loading && (
               <div className="flex flex-col items-center justify-center py-8 space-y-2">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                <span className="text-sm text-muted-foreground">Loading tool details...</span>
+                <span className="text-sm text-muted-foreground">
+                  Loading tool details...
+                </span>
               </div>
             )}
 
@@ -384,7 +391,9 @@ export function ToolUsagePopover({
                   <span>Tool executed successfully</span>
                 </div>
                 <div className="text-xs text-muted-foreground bg-muted/50 rounded-lg p-3">
-                  <p className="mb-2">No detailed output captured for this tool execution.</p>
+                  <p className="mb-2">
+                    No detailed output captured for this tool execution.
+                  </p>
                   <p>This could mean:</p>
                   <ul className="list-disc list-inside mt-1 space-y-1 ml-2">
                     <li>The tool completed without producing output</li>

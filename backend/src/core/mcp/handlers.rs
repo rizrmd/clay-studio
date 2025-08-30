@@ -1148,11 +1148,18 @@ impl McpHandlers {
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
         
+        // Extract tool_use_id from _meta if present
+        let tool_use_id = args.get("_meta")
+            .and_then(|meta| meta.get("claudecode/toolUseId"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        
         eprintln!(
-            "[{}] [DEBUG] Tool context - conversation_id: {:?}, message_id: {:?}", 
+            "[{}] [DEBUG] Tool context - conversation_id: {:?}, message_id: {:?}, tool_use_id: {:?}", 
             Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
             conversation_id,
-            message_id
+            message_id,
+            tool_use_id
         );
         
         let datasource_id = args.get("datasource_id")
@@ -1348,18 +1355,73 @@ impl McpHandlers {
                     );
                 }
             }
-        } else {
-            // Fallback to parameter matching if no message_id provided
+        } else if let Some(ref use_id) = tool_use_id {
+            // Try to find by tool_use_id first (most precise after message_id)
             eprintln!(
-                "[{}] [WARNING] No message_id provided, falling back to parameter matching with retries", 
+                "[{}] [INFO] Attempting to find tool_usage by tool_use_id: {}", 
+                Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+                use_id
+            );
+            
+            // Since we store tool_use_id in pending_tools but not in database,
+            // we need to find the most recent tool_usage for this tool type
+            // that hasn't been completed yet
+            let tool_update_result = sqlx::query(
+                "UPDATE tool_usages 
+                 SET output = $1,
+                     execution_time_ms = $2
+                 WHERE id = (
+                     SELECT id FROM tool_usages 
+                     WHERE tool_name LIKE '%data_query%'
+                       AND (output->>'status' = 'executing' OR output IS NULL)
+                       AND created_at > NOW() - INTERVAL '30 seconds'
+                     ORDER BY created_at DESC
+                     LIMIT 1
+                 )
+                 RETURNING id, message_id"
+            )
+            .bind(json!({
+                "status": "success",
+                "result": result,
+                "datasource": name,
+                "query": query,
+                "row_count": result.get("rows").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0),
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            }))
+            .bind(query_duration.as_millis() as i32)
+            .fetch_optional(&self.db_pool)
+            .await.ok()
+            .flatten();
+            
+            if let Some(row) = tool_update_result {
+                let id: uuid::Uuid = row.get("id");
+                let msg_id: String = row.get("message_id");
+                eprintln!(
+                    "[{}] [INFO] Successfully updated tool_usage {} via tool_use_id matching for message {}", 
+                    Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+                    id,
+                    msg_id
+                );
+            } else {
+                eprintln!(
+                    "[{}] [WARNING] No matching tool_usage found for tool_use_id: {}", 
+                    Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+                    use_id
+                );
+            }
+        } else {
+            // Fallback to parameter matching if no message_id or tool_use_id provided
+            eprintln!(
+                "[{}] [WARNING] No message_id or tool_use_id provided, falling back to parameter matching with retries", 
                 Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
             );
             
             // Build the parameters JSON to match against (excluding context params)
-            let expected_params = json!({
-                "datasource_id": datasource_id,
-                "query": query,
-                "limit": limit
+            // Use the exact args that were sent (minus context fields)
+            let mut expected_params = serde_json::to_value(args).unwrap_or(json!({}));
+            expected_params.as_object_mut().map(|obj| {
+                obj.remove("_context");
+                obj.remove("_meta");
             });
             
             // Try with retries for parameter matching too

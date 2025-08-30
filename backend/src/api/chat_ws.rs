@@ -526,6 +526,7 @@ pub async fn handle_chat_stream_ws(
                         
                         ClaudeMessage::ToolUse { tool, args, tool_use_id } => {
                             tracing::info!("Received ClaudeMessage::ToolUse for tool: {}", tool);
+                            tracing::debug!("Tool arguments: {:?}", args);
                             
                             // Generate a unique ID for this tool usage
                             let tool_usage_id = uuid::Uuid::new_v4();

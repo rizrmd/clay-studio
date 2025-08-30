@@ -354,6 +354,7 @@ impl ClaudeSDK {
                                                                         let tool_use_id = block.get("id").and_then(|id| id.as_str()).map(|s| s.to_string());
                                                                         tracing::info!("Detected tool usage: {} with id: {:?}", name, tool_use_id);
                                                                         let args = block.get("input").cloned().unwrap_or(json!({}));
+                                                                        tracing::debug!("Tool input/args extracted: {:?}", args);
                                                                         tracing::info!("Sending ToolUse event: {}", name);
                                                                         if let Err(e) = tx_clone.send(ClaudeMessage::ToolUse {
                                                                             tool: name.to_string(),
