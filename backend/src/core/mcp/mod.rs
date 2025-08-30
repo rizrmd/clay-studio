@@ -176,10 +176,9 @@ impl McpServer {
         // Clone request_id to avoid borrow issues
         let request_id = request.id.clone();
         
-        // Comprehensive error boundary to prevent panics
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            self.runtime.block_on(async {
-                match request.method.as_str() {
+        // Execute the method with async error handling (no panic catching for async operations)
+        let result = self.runtime.block_on(async {
+            match request.method.as_str() {
                 "initialize" => {
                     self.handlers.handle_initialize(request.params).await
                 }
@@ -217,13 +216,11 @@ impl McpServer {
                     })
                 }
             }
-            })
-        }));
+        });
         let method_duration = method_start.elapsed();
         
-        // Build response - handle both normal results and panics
+        // Build response
         let response = match result {
-            Ok(method_result) => match method_result {
             Ok(value) => {
                 eprintln!(
                     "[{}] [DEBUG] Method {} completed successfully in {}ms", 
@@ -252,38 +249,6 @@ impl McpServer {
                     id: request.id,
                     result: None,
                     error: Some(error),
-                }
-            }
-            },
-            Err(panic_error) => {
-                let panic_msg = if let Some(s) = panic_error.downcast_ref::<String>() {
-                    s.clone()
-                } else if let Some(s) = panic_error.downcast_ref::<&str>() {
-                    s.to_string()
-                } else {
-                    "Unknown panic occurred during method execution".to_string()
-                };
-                
-                eprintln!(
-                    "[{}] [FATAL] Panic caught in method {} after {}ms: {}", 
-                    Utc::now().format("%Y-%m-%d %H:%M:%S UTC"), 
-                    request.method, 
-                    method_duration.as_millis(), 
-                    panic_msg
-                );
-                
-                JsonRpcResponse {
-                    jsonrpc: "2.0".to_string(),
-                    id: request.id,
-                    result: None,
-                    error: Some(JsonRpcError {
-                        code: -32603, // Internal error
-                        message: format!("Internal server error: {}", panic_msg),
-                        data: Some(serde_json::json!({
-                            "method": request.method,
-                            "panic_message": panic_msg
-                        })),
-                    }),
                 }
             }
         };
