@@ -775,6 +775,9 @@ pub async fn handle_chat_stream_ws(
                     
                     if let Err(e) = save_message(&db_pool, &conversation_id_clone, &assistant_message).await {
                         tracing::error!("Failed to save assistant message: {}", e);
+                    } else if !tool_usages.is_empty() {
+                        // If we have tool_usages, the frontend needs to reload the message to see them
+                        tracing::info!("Message saved with {} tool_usages - frontend will need to reload", tool_usages.len());
                     }
                 }
                 
@@ -849,7 +852,7 @@ pub async fn handle_chat_stream_ws(
                             id: message_id,
                             conversation_id: conversation_id_clone.clone(),
                             processing_time_ms: start_time.elapsed().as_millis() as u64,
-                            tools_used: tool_usages.iter().map(|tu| tu.tool_name.clone()).collect(),
+                            tool_usages: if tool_usages.is_empty() { None } else { Some(tool_usages.clone()) },
                         }
                     ).await;
                 }

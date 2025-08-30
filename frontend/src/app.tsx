@@ -7,6 +7,7 @@ import { RootDashboard } from "./pages/RootDashboard";
 import { ClientDetailPage } from "./pages/ClientDetail";
 import { ConfigPage } from "./pages/ConfigPage";
 import { ProfilePage } from "./pages/ProfilePage";
+import { WipTablePage } from "./pages/WipTable";
 import { ValtioProvider } from "./providers/ValtioProvider";
 import { SetupRoute } from "./components/auth/setup-route";
 import { ProtectedRoute } from "./components/auth/protected-route";
@@ -83,6 +84,7 @@ function App() {
             </AdminRoute>
           }
         />
+        <Route path="/wip-table" element={<WipTablePage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </ValtioProvider>

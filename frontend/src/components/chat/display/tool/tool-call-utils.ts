@@ -7,6 +7,7 @@ import {
   Terminal,
   Globe,
   ListTodo,
+  MessageSquare,
 } from "lucide-react";
 
 // Function to parse MCP tool names and convert to friendly display names
@@ -123,6 +124,15 @@ export function parseMcpToolName(toolName: string): {
           done: "Schema retrieved",
           icon: Database,
           color: "text-orange-600 bg-orange-50 border-orange-200",
+        },
+        
+        // Interaction tool
+        ask_user: {
+          name: "Interactive Element",
+          description: "Creating interaction",
+          done: "Interaction created",
+          icon: MessageSquare,
+          color: "text-violet-600 bg-violet-50 border-violet-200",
         },
       };
 

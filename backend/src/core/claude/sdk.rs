@@ -105,6 +105,18 @@ impl ClaudeSDK {
                         "env": {
                             "DATABASE_URL": database_url
                         }
+                    },
+                    "interaction": {
+                        "type": "stdio",
+                        "command": mcp_server_path.to_string_lossy(),
+                        "args": [
+                            "--project-id", project_id,
+                            "--client-id", self.client_id.to_string(),
+                            "--server-type", "interaction"
+                        ],
+                        "env": {
+                            "DATABASE_URL": database_url
+                        }
                     }
                 }
             });
@@ -416,9 +428,9 @@ impl ClaudeSDK {
                                                                         
                                                                         tracing::info!("Detected tool result in user message with tool_use_id: {} -> mapped to tool: {}", tool_use_id, tool_name);
                                                                         
-                                                                        // Send the mapped tool name, not the tool_use_id
+                                                                        // Send the tool_use_id, not the mapped tool name, for proper lookup
                                                                         let _ = tx_clone.send(ClaudeMessage::ToolResult {
-                                                                            tool: tool_name.to_string(), // Use the mapped tool name
+                                                                            tool: tool_use_id.to_string(), // Use the tool_use_id for lookup
                                                                             result: block.get("content").cloned().unwrap_or(json!([])),
                                                                         }).await;
                                                                     }

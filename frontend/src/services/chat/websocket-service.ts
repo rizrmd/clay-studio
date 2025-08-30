@@ -18,7 +18,7 @@ interface ServerMessage {
   content?: string;
   tool?: string;
   processing_time_ms?: number;
-  tools_used?: string[];
+  tool_usages?: any[];
   error?: string;
   project_id?: string;
   // Title update fields
@@ -39,9 +39,12 @@ interface ServerMessage {
 
 // WebSocket message types to server
 interface ClientMessage {
-  type: 'subscribe' | 'unsubscribe' | 'ping';
+  type: 'subscribe' | 'unsubscribe' | 'ping' | 'ask_user_response';
   project_id?: string;
   conversation_id?: string;
+  // Ask user response fields
+  interaction_id?: string;
+  response?: string | string[];
 }
 
 export class WebSocketService {
@@ -91,7 +94,7 @@ export class WebSocketService {
     this.isConnecting = true;
     
     // Create authentication promise with timeout for mobile environments
-    this.authenticationPromise = new Promise<void>((resolve, reject) => {
+    this.authenticationPromise = new Promise<void>((resolve, _reject) => {
       this.authenticationResolver = resolve;
       
       // Add timeout to prevent hanging on mobile
@@ -244,6 +247,26 @@ export class WebSocketService {
   setCurrentConversation(conversationId: string): void {
     this.currentConversationId = conversationId === 'new' ? null : conversationId;
     logger.debug('WebSocketService: Current conversation set to', this.currentConversationId);
+  }
+
+  sendAskUserResponse(interactionId: string, response: string | string[]): void {
+    if (!this.currentConversationId) {
+      logger.error('WebSocketService: Cannot send ask_user response - no active conversation');
+      return;
+    }
+
+    logger.info('WebSocketService: Sending ask_user response', { 
+      interactionId, 
+      response,
+      conversationId: this.currentConversationId 
+    });
+
+    this.sendMessage({
+      type: 'ask_user_response',
+      conversation_id: this.currentConversationId,
+      interaction_id: interactionId,
+      response: response,
+    });
   }
 
   unsubscribe(): void {
@@ -486,7 +509,7 @@ export class WebSocketService {
     
     // Update message with final data
     const updates = {
-      clay_tools_used: message.tools_used && message.tools_used.length > 0 ? message.tools_used : undefined,
+      tool_usages: message.tool_usages, // Include tool_usages from backend
       processing_time_ms: message.processing_time_ms,
     };
     

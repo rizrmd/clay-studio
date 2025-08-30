@@ -3,12 +3,17 @@ import { useNavigate } from "react-router-dom";
 import { logger } from "@/lib/logger";
 import { Messages, ChatSkeleton } from "../display";
 import { MultimodalInput } from "../input/multimodal-input";
-import { ContextIndicator } from "../display/context-indicator";
+import { ContextIndicator } from "../display";
 import { useValtioChat } from "@/hooks/use-valtio-chat";
 import { useInputState } from "@/hooks/use-input-state";
 import { updateConversationMessages } from "@/store/chat-store";
 import { api } from "@/lib/api";
-import { AlertTriangle, FileText, PanelLeftOpen, PanelLeftClose } from "lucide-react";
+import {
+  AlertTriangle,
+  FileText,
+  PanelLeftOpen,
+  PanelLeftClose,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { Message } from "@/types/chat";
 
@@ -29,7 +34,15 @@ export function Chat({
   const [shouldFocusInput, setShouldFocusInput] = useState(false);
   const dragCounter = useRef(0);
   const navigate = useNavigate();
-  const previousPropConversationId = useRef(propConversationId);
+  const [previousId, setPreviousId] = useState("");
+
+  useEffect(() => {
+    // Reset when conversation changes
+    if (propConversationId !== previousConversationId.current) {
+      setPreviousId(propConversationId || "");
+    }
+  }, [propConversationId]);
+
 
   // Use the new Valtio-based chat hook
   const {
@@ -55,6 +68,10 @@ export function Chat({
     contextUsage,
   } = useValtioChat(projectId || "", propConversationId);
 
+  // Track current conversation ID similar to messages.tsx
+  const currentConversationId = hookConversationId || propConversationId || "new";
+  const previousConversationId = useRef(currentConversationId);
+
   // Use the input state hook to persist input across conversation switches
   const {
     draftMessage: input,
@@ -66,26 +83,18 @@ export function Chat({
   // Handle navigation when a new conversation is created
   // Navigate when we receive a real conversation ID from the backend
   useEffect(() => {
-    logger.debug('Chat: Navigation check:', {
-      propConversationId,
-      hookConversationId,
-      previousPropConversationId: previousPropConversationId.current,
-      shouldNavigate: propConversationId === "new" &&
-                     hookConversationId &&
-                     hookConversationId !== "new" &&
-                     previousPropConversationId.current !== "new" // Don't redirect if user just navigated to 'new'
-    });
-    
     if (
       propConversationId === "new" &&
       hookConversationId &&
       hookConversationId !== "new"
     ) {
-      logger.info('Chat: REDIRECTING to hookConversationId:', hookConversationId);
+      logger.info(
+        "Chat: REDIRECTING to hookConversationId:",
+        hookConversationId
+      );
       // Navigate to the real conversation URL
       navigate(`/chat/${projectId}/${hookConversationId}`, { replace: true });
     }
-    previousPropConversationId.current = propConversationId;
   }, [propConversationId, hookConversationId, projectId, navigate]);
 
   // Focus input when conversation changes (including navigating to /new)
@@ -194,7 +203,7 @@ export function Chat({
   const handleAskUserSubmit = (response: string | string[]) => {
     // Format the response for sending as a message
     let responseText: string;
-    
+
     if (Array.isArray(response)) {
       // For checkbox selections, send as comma-separated list
       responseText = response.join(", ");
@@ -202,7 +211,7 @@ export function Chat({
       // For buttons and input, send as is
       responseText = response;
     }
-    
+
     // Send the response as a new user message
     if (responseText) {
       sendMessage(responseText, []);
@@ -302,7 +311,7 @@ export function Chat({
           </div>
         )}
 
-        <div className="h-full">
+        <div className="h-full pb-0">
           <div className="h-full flex flex-col">
             {/* Error display */}
             {error && (
@@ -343,49 +352,44 @@ export function Chat({
             ) : isLoadingMessages ? (
               <ChatSkeleton />
             ) : (
-              <div className="flex-1 overflow-hidden">
-                <Messages
-                  messages={messages.map((msg) => ({
-                    ...msg,
-                    createdAt: msg.createdAt
-                      ? new Date(msg.createdAt)
-                      : new Date(),
-                    clay_tools_used: msg.clay_tools_used
-                      ? [...msg.clay_tools_used]
-                      : undefined,
-                    tool_usages: msg.tool_usages
-                      ? [...msg.tool_usages]
-                      : undefined,
-                    file_attachments: msg.file_attachments
-                      ? [...msg.file_attachments]
-                      : undefined,
-                  }))}
-                  isLoading={isLoading}
-                  onForgetFrom={forgetMessagesFrom}
-                  conversationId={hookConversationId}
-                  messageQueue={messageQueue.map((q) => ({
-                    ...q,
-                    files: [...q.files],
-                  }))}
-                  isProcessingQueue={isProcessingQueue}
-                  onEditQueued={editQueuedMessage}
-                  onCancelQueued={cancelQueuedMessage}
-                  isStreaming={isStreaming}
-                  canStop={canStop}
-                  onStop={stopMessage}
-                  activeTools={[...activeTools]}
-                  onResendMessage={handleResendMessage}
-                  onNewChatFromHere={handleNewChatFromHere}
-                  onAskUserSubmit={handleAskUserSubmit}
-                />
-              </div>
+              <Messages
+                messages={messages.map((msg) => ({
+                  ...msg,
+                  createdAt: msg.createdAt
+                    ? new Date(msg.createdAt)
+                    : new Date(),
+                  tool_usages: msg.tool_usages
+                    ? [...msg.tool_usages]
+                    : undefined,
+                  file_attachments: msg.file_attachments
+                    ? [...msg.file_attachments]
+                    : undefined,
+                }))}
+                isLoading={isLoading}
+                onForgetFrom={forgetMessagesFrom}
+                conversationId={hookConversationId}
+                messageQueue={messageQueue.map((q) => ({
+                  ...q,
+                  files: [...q.files],
+                }))}
+                isProcessingQueue={isProcessingQueue}
+                onEditQueued={editQueuedMessage}
+                onCancelQueued={cancelQueuedMessage}
+                isStreaming={isStreaming}
+                canStop={canStop}
+                onStop={stopMessage}
+                activeTools={[...activeTools]}
+                onResendMessage={handleResendMessage}
+                onNewChatFromHere={handleNewChatFromHere}
+                onAskUserSubmit={handleAskUserSubmit}
+              />
             )}
           </div>
         </div>
         <div className="w-full md:absolute bottom-0 right-0 fixed">
           <div className="mx-auto max-w-2xl px-2 sm:px-4">
             {/* Context usage indicator */}
-            {contextUsage && propConversationId !== 'new' && (
+            {contextUsage && propConversationId !== "new" && (
               <div className="flex justify-end mb-2 px-2">
                 <ContextIndicator contextUsage={contextUsage} />
               </div>
@@ -401,7 +405,7 @@ export function Chat({
               externalFiles={pendingFiles ? [...pendingFiles] : []}
               onExternalFilesChange={setPendingFiles}
               shouldFocus={shouldFocusInput}
-              className={""}
+              className={previousId === "new" ? "opacity-0" : ""}
             />
           </div>
         </div>

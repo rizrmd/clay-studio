@@ -13,6 +13,8 @@ pub struct McpServer {
     project_id: String,
     #[allow(dead_code)]
     client_id: String,
+    #[allow(dead_code)]
+    server_type: String,
     runtime: Runtime,
     handlers: McpHandlers,
 }
@@ -51,12 +53,61 @@ impl McpServer {
         let handlers = McpHandlers {
             project_id: project_id.clone(),
             client_id: client_id.clone(),
+            server_type: "data-analysis".to_string(),
             db_pool,
         };
         
         Ok(Self {
             project_id,
             client_id,
+            server_type: "data-analysis".to_string(),
+            runtime,
+            handlers,
+        })
+    }
+    
+    #[allow(dead_code)]
+    pub fn new_with_type(project_id: String, client_id: String, server_type: String) -> Result<Self, Box<dyn std::error::Error>> {
+        let start_time = Utc::now();
+        eprintln!(
+            "[{}] [INFO] MCP Server ({}) starting for project: {}, client: {}", 
+            start_time.format("%Y-%m-%d %H:%M:%S UTC"), 
+            server_type,
+            project_id, 
+            client_id
+        );
+        
+        let runtime = Runtime::new()?;
+        
+        // Get database URL from environment
+        let database_url = std::env::var("DATABASE_URL")
+            .map_err(|_| "DATABASE_URL environment variable not set")?;
+        
+        // Create database connection pool
+        eprintln!(
+            "[{}] [INFO] Connecting to database...", 
+            Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
+        );
+        let db_pool = runtime.block_on(async {
+            PgPool::connect(&database_url).await
+        })?;
+        
+        eprintln!(
+            "[{}] [INFO] Connected to database successfully", 
+            Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
+        );
+        
+        let handlers = McpHandlers {
+            project_id: project_id.clone(),
+            client_id: client_id.clone(),
+            server_type: server_type.clone(),
+            db_pool,
+        };
+        
+        Ok(Self {
+            project_id,
+            client_id,
+            server_type,
             runtime,
             handlers,
         })
@@ -268,10 +319,10 @@ impl McpServer {
     }
 }
 
-// Public function to run the MCP server
+// Public function to run the MCP server with specific type
 #[allow(dead_code)]
-pub fn run(project_id: String, client_id: String) {
-    match McpServer::new(project_id, client_id) {
+pub fn run_with_type(project_id: String, client_id: String, server_type: String) {
+    match McpServer::new_with_type(project_id, client_id, server_type) {
         Ok(mut server) => {
             server.run();
         }

@@ -21,6 +21,11 @@ pub enum ClientMessage {
     },
     Unsubscribe,
     Ping,
+    AskUserResponse {
+        conversation_id: String,
+        interaction_id: String,
+        response: serde_json::Value, // Can be string or array of strings
+    },
 }
 
 // WebSocket message types to client
@@ -70,7 +75,7 @@ pub enum ServerMessage {
         id: String, 
         conversation_id: String, 
         processing_time_ms: u64, 
-        tools_used: Vec<String> 
+        tool_usages: Option<Vec<crate::models::tool_usage::ToolUsage>>
     },
     Error { 
         error: String,
@@ -332,8 +337,89 @@ async fn handle_client_message(
         
         ClientMessage::Ping => {
             let _ = sender.send(ServerMessage::Pong);
+        },
+        
+        ClientMessage::AskUserResponse { conversation_id, interaction_id, response } => {
+            tracing::info!(
+                "Received ask_user response: conversation={}, interaction={}, response={:?}", 
+                conversation_id, interaction_id, response
+            );
+            
+            // Store the response in the database
+            match store_ask_user_response(state, &conversation_id, &interaction_id, &response).await {
+                Ok(_) => {
+                    tracing::info!("Stored ask_user response for interaction {}", interaction_id);
+                    
+                    // Send a continuation message to Claude with the response
+                    let response_text = match response {
+                        serde_json::Value::String(s) => s.to_string(),
+                        serde_json::Value::Array(arr) => {
+                            arr.iter()
+                                .filter_map(|v| v.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        }
+                        _ => response.to_string()
+                    };
+                    
+                    // Notify the client that the response was received
+                    let _ = sender.send(ServerMessage::Content {
+                        content: format!("✅ Response received: {}", response_text),
+                        conversation_id: conversation_id.clone(),
+                    });
+                    
+                    // TODO: In a production system, you would:
+                    // 1. Retrieve the conversation context
+                    // 2. Format the response appropriately
+                    // 3. Send a new message to Claude's API with the response
+                    // 4. Stream the response back through WebSocket
+                }
+                Err(e) => {
+                    tracing::error!("Failed to store ask_user response: {}", e);
+                    let _ = sender.send(ServerMessage::Error {
+                        error: format!("Failed to process response: {}", e),
+                        conversation_id: conversation_id.clone(),
+                    });
+                }
+            }
         }
     }
+}
+
+// Store ask_user response in the database
+async fn store_ask_user_response(
+    state: &AppState,
+    conversation_id: &str,
+    interaction_id: &str,
+    response: &serde_json::Value,
+) -> Result<(), AppError> {
+    // For now, store in a simple JSON column in messages table
+    // In production, you might want a dedicated interaction_responses table
+    
+    let response_json = serde_json::to_string(response)
+        .map_err(|e| AppError::InternalServerError(format!("Failed to serialize response: {}", e)))?;
+    
+    // Store as a system message with the interaction response
+    let message_content = format!(
+        "User response to interaction {}:\n{}",
+        interaction_id,
+        response_json
+    );
+    
+    sqlx::query!(
+        r#"
+        INSERT INTO messages (id, conversation_id, role, content, created_at)
+        VALUES ($1, $2, 'system', $3, NOW())
+        "#,
+        uuid::Uuid::new_v4().to_string(),
+        conversation_id,
+        message_content
+    )
+    .execute(&state.db_pool)
+    .await
+    .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
+    
+    Ok(())
 }
 
 // Global storage for active WebSocket connections (keyed by connection_id, not user_id)

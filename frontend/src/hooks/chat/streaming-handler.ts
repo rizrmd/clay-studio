@@ -255,10 +255,13 @@ export class StreamingHandler {
   }
 
   private static async handleCompleteEvent(event: any, updateId: string, projectId: string): Promise<void> {
+    console.log("StreamingHandler: handleCompleteEvent", event);
+    console.log("StreamingHandler: tool_usages in event", event.tool_usages);
+    
     updateLastMessage(updateId, {
       id: event.id,
       clay_tools_used: event.tools_used.length > 0 ? event.tools_used : undefined, // For backward compatibility
-      // TODO: Backend should send full tool_usages in complete event
+      tool_usages: event.tool_usages, // Now includes full tool_usages from backend
       processing_time_ms: event.processing_time_ms,
     });
     

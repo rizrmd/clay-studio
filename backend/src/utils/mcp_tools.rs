@@ -94,6 +94,14 @@ pub fn get_mcp_tools() -> HashMap<String, McpTool> {
         result_indicators: vec!["columns matching", "Table schema", "Column details"],
     });
     
+    // Interaction Tools
+    tools.insert("mcp__interaction__ask_user".to_string(), McpTool {
+        name: "ask_user",
+        display_name: "Interactive Element",
+        description: "Creates interactive elements like charts, tables, and user prompts",
+        result_indicators: vec!["interaction_type", "Interactive element created", "User interaction"],
+    });
+    
     // Add more MCP tools here as needed
     // Example for a new tool:
     // tools.insert("mcp__new-server__tool_name".to_string(), McpTool {

@@ -41,7 +41,6 @@ export interface Message {
   content: string;
   role: "user" | "assistant" | "system";
   createdAt?: string;
-  clay_tools_used?: string[]; // Deprecated - kept for backward compatibility
   processing_time_ms?: number;
   file_attachments?: FileAttachment[];
   tool_usages?: ToolUsage[];
@@ -50,13 +49,7 @@ export interface Message {
 
 // Helper to get tool names from a message
 export function getToolNamesFromMessage(message: Message): string[] {
-  // Prefer tool_usages if available, fallback to clay_tools_used for backward compatibility
-  let tools: string[] = [];
-  if (message.tool_usages && message.tool_usages.length > 0) {
-    tools = message.tool_usages.map(tu => tu.tool_name);
-  } else {
-    tools = message.clay_tools_used || [];
-  }
+  const tools = message.tool_usages?.map(tu => tu.tool_name) || [];
   // Filter out TodoWrite as it's not a real tool call
   return tools.filter(tool => tool !== 'TodoWrite');
 }

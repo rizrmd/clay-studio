@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
-import { Send, UserCheck } from "lucide-react";
+import { Send, UserCheck, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface AskUserOption {
@@ -21,6 +21,9 @@ interface AskUserProps {
   toolUseId?: string;
   onSubmit: (response: string | string[]) => void;
   isDisabled?: boolean;
+  hasResponse?: boolean;
+  selectedResponse?: string | string[];
+  onScroll?: () => void;
 }
 
 export function AskUser({
@@ -32,10 +35,40 @@ export function AskUser({
   toolUseId,
   onSubmit,
   isDisabled = false,
+  hasResponse = false,
+  selectedResponse,
+  onScroll,
 }: AskUserProps) {
   const [selectedValues, setSelectedValues] = useState<string[]>([]);
   const [inputValue, setInputValue] = useState("");
-  const [hasSubmitted, setHasSubmitted] = useState(false);
+  const [hasSubmitted, setHasSubmitted] = useState(hasResponse);
+
+  // Determine the selected option from the response
+  const [selectedOption, setSelectedOption] = useState<string | null>(() => {
+    console.log("AskUser init:", {
+      hasResponse,
+      selectedResponse,
+      promptType,
+      options,
+    });
+    if (
+      hasResponse &&
+      typeof selectedResponse === "string" &&
+      promptType === "buttons"
+    ) {
+      // Find the option that matches the response content
+      const matchingOption = options.find(
+        (opt) =>
+          opt.label === selectedResponse || opt.value === selectedResponse
+      );
+      console.log("AskUser matching option:", {
+        selectedResponse,
+        matchingOption,
+      });
+      return matchingOption ? matchingOption.value : null;
+    }
+    return null;
+  });
 
   const handleCheckboxChange = (value: string, checked: boolean) => {
     if (checked) {
@@ -47,40 +80,59 @@ export function AskUser({
 
   const handleButtonClick = (value: string) => {
     if (hasSubmitted || isDisabled) return;
+    setSelectedOption(value);
     setHasSubmitted(true);
     onSubmit(value);
+
+    // Scroll to bottom after a short delay to show the response
+    if (onScroll) {
+      setTimeout(() => {
+        onScroll();
+      }, 1000);
+    }
   };
 
   const handleCheckboxSubmit = () => {
     if (hasSubmitted || isDisabled || selectedValues.length === 0) return;
     setHasSubmitted(true);
     onSubmit(selectedValues);
+
+    // Scroll to bottom after a short delay to show the response
+    if (onScroll) {
+      setTimeout(() => {
+        onScroll();
+      }, 1000);
+    }
   };
 
   const handleInputSubmit = () => {
     if (hasSubmitted || isDisabled || !inputValue.trim()) return;
     setHasSubmitted(true);
     onSubmit(inputValue);
+
+    // Scroll to bottom after a short delay to show the response
+    if (onScroll) {
+      setTimeout(() => {
+        onScroll();
+      }, 1000);
+    }
   };
 
-  const isFormDisabled = hasSubmitted || isDisabled;
+  const isFormDisabled = hasSubmitted || isDisabled || hasResponse;
 
   return (
-    <Card className={cn(
-      "p-4 border-blue-200 bg-blue-50/50",
-      isFormDisabled && "opacity-60"
-    )}>
+    <Card className={cn("p-4 border-blue-200 bg-blue-50/50")}>
       <div className="space-y-3">
         {/* Header */}
         <div className="flex items-start gap-2">
           <UserCheck className="h-5 w-5 text-blue-600 mt-0.5" />
           <div className="flex-1">
             <h3 className="font-medium text-sm">{title}</h3>
-            {toolUseId && (
+            {/* {toolUseId && (
               <span className="text-xs text-muted-foreground">
                 ID: {toolUseId}
               </span>
-            )}
+            )} */}
           </div>
         </div>
 
@@ -90,17 +142,33 @@ export function AskUser({
             {options.map((option) => (
               <Button
                 key={option.value}
-                onClick={() => handleButtonClick(option.value)}
-                disabled={isFormDisabled}
+                onClick={() => {
+                  if (isFormDisabled) return;
+                  handleButtonClick(option.value);
+                }}
                 variant="outline"
-                className="w-full justify-start text-left"
+                className={cn(
+                  "w-full justify-start text-left",
+                  option.description && "min-h-[60px]",
+                  selectedOption === option.value &&
+                    "bg-green-50 border-green-200 hover:bg-green-100",
+                  isFormDisabled &&
+                    selectedOption !== option.value &&
+                    "opacity-40",
+                  isFormDisabled && "cursor-default"
+                )}
               >
-                <div className="flex-1">
-                  <div className="font-medium">{option.label}</div>
-                  {option.description && (
-                    <div className="text-xs text-muted-foreground mt-1">
-                      {option.description}
-                    </div>
+                <div className="flex w-full items-center">
+                  <div className="flex-1">
+                    <div className="font-medium">{option.label}</div>
+                    {option.description && (
+                      <div className="text-xs text-muted-foreground mt-1">
+                        {option.description}
+                      </div>
+                    )}
+                  </div>
+                  {selectedOption === option.value && (
+                    <Check className="h-4 w-4 text-green-600 ml-2" />
                   )}
                 </div>
               </Button>
@@ -162,6 +230,7 @@ export function AskUser({
               onChange={(e) => setInputValue(e.target.value)}
               placeholder={placeholder}
               disabled={isFormDisabled}
+              className="bg-white"
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
@@ -181,8 +250,8 @@ export function AskUser({
           </div>
         )}
 
-        {/* Status indicator */}
-        {hasSubmitted && (
+        {/* Status indicator for input and checkbox types */}
+        {hasSubmitted && promptType !== "buttons" && (
           <div className="text-xs text-green-600 flex items-center gap-1">
             <UserCheck className="h-3 w-3" />
             Response submitted

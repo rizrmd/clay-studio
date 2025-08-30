@@ -8,4 +8,4 @@ export { ConversationSidebar, FileSidebar, FileManager } from './sidebar'
 export { MultimodalInput } from './input'
 
 // Display components
-export { Messages, SuggestionCards, WelcomeArea, ToolsDisplay } from './display'
+export { Messages, SuggestionCards, WelcomeScreen, ToolsDisplay } from './display'

@@ -72,6 +72,7 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let mut project_id = String::from("default");
     let mut client_id = String::from("unknown");
+    let mut server_type = String::from("data-analysis");
     
     // Simple argument parsing
     let mut i = 1;
@@ -96,6 +97,18 @@ fn main() {
                 } else {
                     eprintln!(
                         "[{}] [ERROR] --client-id requires a value", 
+                        chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
+                    );
+                    std::process::exit(1);
+                }
+            }
+            "--server-type" => {
+                if i + 1 < args.len() {
+                    server_type = args[i + 1].clone();
+                    i += 2;
+                } else {
+                    eprintln!(
+                        "[{}] [ERROR] --server-type requires a value", 
                         chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
                     );
                     std::process::exit(1);
@@ -136,6 +149,7 @@ fn main() {
     );
     eprintln!("  Project ID: {}", project_id);
     eprintln!("  Client ID: {}", client_id);
+    eprintln!("  Server Type: {}", server_type);
     
     // Check for required DATABASE_URL
     if std::env::var("DATABASE_URL").is_err() {
@@ -150,7 +164,7 @@ fn main() {
     // Run the MCP server
     // Note: We need to access the mcp module from the library
     // This will be compiled as part of the same crate
-    clay_studio_backend::core::mcp::run(project_id, client_id);
+    clay_studio_backend::core::mcp::run_with_type(project_id, client_id, server_type);
 }
 
 fn print_help() {
@@ -161,6 +175,7 @@ fn print_help() {
     eprintln!("Options:");
     eprintln!("  --project-id <ID>   Project ID to serve data for");
     eprintln!("  --client-id <ID>    Client ID for authentication");
+    eprintln!("  --server-type <TYPE> Server type (data-analysis or interaction)");
     eprintln!("  -h, --help          Show this help message");
     eprintln!();
     eprintln!("Environment variables:");

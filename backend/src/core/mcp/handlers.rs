@@ -9,6 +9,8 @@ pub struct McpHandlers {
     pub project_id: String,
     #[allow(dead_code)]
     pub client_id: String,
+    #[allow(dead_code)]
+    pub server_type: String,
     pub db_pool: PgPool,
 }
 
@@ -229,9 +231,11 @@ impl McpHandlers {
     }
     
     pub async fn handle_tools_list(&self, _params: Option<Value>) -> Result<Value, JsonRpcError> {
-        let tools = vec![
+        let mut tools = vec![];
+        
+        if self.server_type == "data-analysis" {
             // Datasource Management Tools
-            Tool {
+            tools.push(Tool {
                 name: "datasource_add".to_string(),
                 description: "Add a new data source to the project".to_string(),
                 input_schema: json!({
@@ -267,16 +271,18 @@ impl McpHandlers {
                     },
                     "required": ["name", "source_type", "connection_config"]
                 }),
-            },
-            Tool {
+            });
+            
+            tools.push(Tool {
                 name: "datasource_list".to_string(),
                 description: "List all data sources in the project".to_string(),
                 input_schema: json!({
                     "type": "object",
                     "properties": {}
                 }),
-            },
-            Tool {
+            });
+            
+            tools.push(Tool {
                 name: "datasource_remove".to_string(),
                 description: "Remove a data source from the project".to_string(),
                 input_schema: json!({
@@ -289,8 +295,9 @@ impl McpHandlers {
                     },
                     "required": ["datasource_id"]
                 }),
-            },
-            Tool {
+            });
+            
+            tools.push(Tool {
                 name: "datasource_test".to_string(),
                 description: "Test connection to a data source".to_string(),
                 input_schema: json!({
@@ -303,8 +310,9 @@ impl McpHandlers {
                     },
                     "required": ["datasource_id"]
                 }),
-            },
-            Tool {
+            });
+            
+            tools.push(Tool {
                 name: "datasource_detail".to_string(),
                 description: "Get detailed information about a specific data source (lightweight alternative to inspect)".to_string(),
                 input_schema: json!({
@@ -317,8 +325,9 @@ impl McpHandlers {
                     },
                     "required": ["datasource_id"]
                 }),
-            },
-            Tool {
+            });
+            
+            tools.push(Tool {
                 name: "datasource_inspect".to_string(),
                 description: "Inspect database structure and return intelligent summary based on size. Call again to refresh if schema changed.".to_string(),
                 input_schema: json!({
@@ -336,9 +345,10 @@ impl McpHandlers {
                     },
                     "required": ["datasource_id"]
                 }),
-            },
+            });
+            
             // Schema Query Tools
-            Tool {
+            tools.push(Tool {
                 name: "schema_get".to_string(),
                 description: "Get full schema information for specific tables".to_string(),
                 input_schema: json!({
@@ -356,8 +366,9 @@ impl McpHandlers {
                     },
                     "required": ["datasource_id", "tables"]
                 }),
-            },
-            Tool {
+            });
+            
+            tools.push(Tool {
                 name: "schema_search".to_string(),
                 description: "Search for tables matching a pattern".to_string(),
                 input_schema: json!({
@@ -374,8 +385,9 @@ impl McpHandlers {
                     },
                     "required": ["datasource_id", "pattern"]
                 }),
-            },
-            Tool {
+            });
+            
+            tools.push(Tool {
                 name: "schema_get_related".to_string(),
                 description: "Get schema for a table and all related tables (via foreign keys)".to_string(),
                 input_schema: json!({
@@ -392,8 +404,9 @@ impl McpHandlers {
                     },
                     "required": ["datasource_id", "table"]
                 }),
-            },
-            Tool {
+            });
+            
+            tools.push(Tool {
                 name: "schema_stats".to_string(),
                 description: "Get database statistics and metadata".to_string(),
                 input_schema: json!({
@@ -406,9 +419,10 @@ impl McpHandlers {
                     },
                     "required": ["datasource_id"]
                 }),
-            },
+            });
+            
             // Data Query Tool
-            Tool {
+            tools.push(Tool {
                 name: "data_query".to_string(),
                 description: "Execute a read-only SQL query on a data source".to_string(),
                 input_schema: json!({
@@ -430,8 +444,44 @@ impl McpHandlers {
                     },
                     "required": ["datasource_id", "query"]
                 }),
-            },
-        ];
+            });
+        }
+        
+        if self.server_type == "interaction" {
+            // Interaction Tool
+            tools.push(Tool {
+                name: "ask_user".to_string(),
+                description: "Create interactive elements like charts, tables, and user prompts in the chat interface".to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "interaction_type": {
+                            "type": "string",
+                            "enum": ["buttons", "checkbox", "input", "chart", "table", "markdown"],
+                            "description": "Type of interaction to create"
+                        },
+                        "title": {
+                            "type": "string",
+                            "description": "Title or heading for the interaction"
+                        },
+                        "data": {
+                            "type": "object",
+                            "description": "Type-specific data for the interaction"
+                        },
+                        "options": {
+                            "type": "object",
+                            "description": "Optional configuration for the interaction"
+                        },
+                        "requires_response": {
+                            "type": "boolean",
+                            "description": "Whether this interaction requires a user response",
+                            "default": false
+                        }
+                    },
+                    "required": ["interaction_type", "title", "data"]
+                }),
+            });
+        }
         
         Ok(json!({
             "tools": tools
@@ -493,6 +543,18 @@ impl McpHandlers {
             // Data Query
             "data_query" => {
                 self.query_datasource(arguments).await
+            }
+            // Interaction Tool
+            "ask_user" => {
+                if self.server_type == "interaction" {
+                    self.handle_ask_user(arguments).await
+                } else {
+                    Err(JsonRpcError {
+                        code: -32601,
+                        message: "ask_user tool is only available on interaction server".to_string(),
+                        data: None,
+                    })
+                }
             }
             _ => {
                 Err(JsonRpcError {
@@ -2204,6 +2266,109 @@ impl McpHandlers {
             }
             _ => None
         }
+    }
+    
+    async fn handle_ask_user(
+        &self,
+        arguments: &serde_json::Map<String, Value>,
+    ) -> Result<String, JsonRpcError> {
+        // Extract required parameters
+        let interaction_type = arguments
+            .get("interaction_type")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| JsonRpcError {
+                code: INVALID_PARAMS,
+                message: "Missing interaction_type".to_string(),
+                data: None,
+            })?;
+        
+        let title = arguments
+            .get("title")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| JsonRpcError {
+                code: INVALID_PARAMS,
+                message: "Missing title".to_string(),
+                data: None,
+            })?;
+        
+        let data = arguments
+            .get("data")
+            .ok_or_else(|| JsonRpcError {
+                code: INVALID_PARAMS,
+                message: "Missing data".to_string(),
+                data: None,
+            })?;
+        
+        let options = arguments.get("options");
+        let requires_response = arguments
+            .get("requires_response")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        
+        // Validate interaction type
+        let valid_types = ["buttons", "checkbox", "input", "chart", "table", "markdown"];
+        if !valid_types.contains(&interaction_type) {
+            return Err(JsonRpcError {
+                code: INVALID_PARAMS,
+                message: format!("Invalid interaction_type: {}. Must be one of: {:?}", interaction_type, valid_types),
+                data: None,
+            });
+        }
+        
+        // Create interaction response
+        let interaction_id = uuid::Uuid::new_v4().to_string();
+        
+        // Build the response that will be passed through to the frontend
+        let interaction_spec = json!({
+            "interaction_id": interaction_id,
+            "interaction_type": interaction_type,
+            "title": title,
+            "data": data,
+            "options": options,
+            "requires_response": requires_response,
+            "created_at": chrono::Utc::now().to_rfc3339(),
+        });
+        
+        // Format response based on interaction type
+        let response_text = match interaction_type {
+            "chart" => {
+                format!(
+                    "📊 **Chart Created**: {}\n\n```json\n{}\n```\n\n✨ The chart has been rendered in the chat interface.",
+                    title,
+                    serde_json::to_string_pretty(&interaction_spec).unwrap_or_default()
+                )
+            }
+            "table" => {
+                format!(
+                    "📋 **Table Created**: {}\n\n```json\n{}\n```\n\n✨ The table has been rendered in the chat interface.",
+                    title,
+                    serde_json::to_string_pretty(&interaction_spec).unwrap_or_default()
+                )
+            }
+            "buttons" | "checkbox" | "input" => {
+                format!(
+                    "🔲 **User Interaction Created**: {}\n\n```json\n{}\n```\n\n⏳ Waiting for user response...",
+                    title,
+                    serde_json::to_string_pretty(&interaction_spec).unwrap_or_default()
+                )
+            }
+            "markdown" => {
+                format!(
+                    "📝 **Content Rendered**: {}\n\n```json\n{}\n```\n\n✨ The content has been rendered in the chat interface.",
+                    title,
+                    serde_json::to_string_pretty(&interaction_spec).unwrap_or_default()
+                )
+            }
+            _ => {
+                format!(
+                    "✨ **Interactive Element Created**: {}\n\n```json\n{}\n```",
+                    title,
+                    serde_json::to_string_pretty(&interaction_spec).unwrap_or_default()
+                )
+            }
+        };
+        
+        Ok(response_text)
     }
 }
 
