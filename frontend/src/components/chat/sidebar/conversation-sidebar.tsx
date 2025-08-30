@@ -109,10 +109,13 @@ export function ConversationSidebar({
       
       // Count messages in this conversation
       const currentMessageCount = state.messages?.length || 0;
-      const previousMessageCount = lastMessageCountRef.current[conversationId] || 0;
+      const previousMessageCount = lastMessageCountRef.current[conversationId];
       
-      // If this is not the active conversation and has new messages
-      if (conversationId !== actualConversationId && currentMessageCount > previousMessageCount) {
+      // Only mark as updated if we've seen this conversation before (not undefined)
+      // and it has new messages
+      if (previousMessageCount !== undefined && 
+          conversationId !== actualConversationId && 
+          currentMessageCount > previousMessageCount) {
         logger.info('New message detected in conversation', conversationId);
         setRecentlyUpdatedConversations(prev => {
           const newSet = new Set(prev);

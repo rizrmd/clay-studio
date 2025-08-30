@@ -35,7 +35,9 @@ export function ToolCallIndicator({
   };
 
   const getToolExecutionTime = (toolName: string) => {
-    if (!toolUsages || toolUsages.length === 0) return null;
+    if (!toolUsages || toolUsages.length === 0) {
+      return null;
+    }
     
     const usage = toolUsages.find(tu => tu.tool_name === toolName);
     

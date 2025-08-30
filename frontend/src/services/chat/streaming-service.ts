@@ -42,13 +42,24 @@ export class StreamingService {
       // Connect will now handle authentication waiting internally
       await this.wsService.connect();
       
+      // Add retry logic for authentication on mobile
+      let retries = 0;
+      while (!this.wsService.authenticated && retries < 3) {
+        logger.info(`StreamingService: Waiting for authentication (attempt ${retries + 1}/3)`);
+        await new Promise(resolve => setTimeout(resolve, 200));
+        retries++;
+      }
+      
       if (!this.wsService.authenticated) {
-        logger.error('StreamingService: WebSocket not authenticated after connect');
-        throw new Error('WebSocket authentication failed');
+        logger.error('StreamingService: WebSocket not authenticated after retries');
+        throw new Error('WebSocket authentication failed - please refresh the page');
       }
       
       this.wsService.subscribe(projectId);
       this.wsService.setCurrentConversation(conversationId);
+      
+      // Small delay to ensure subscription is processed
+      await new Promise(resolve => setTimeout(resolve, 50));
     } catch (error: any) {
       logger.error('Resume: WebSocket connection/auth failed:', error);
       await this.conversationManager.setError(conversationId, error.message);
@@ -73,9 +84,17 @@ export class StreamingService {
       // Ensure WebSocket connection is established and authenticated
       await this.wsService.connect();
       
+      // Add a small delay for mobile to ensure authentication is fully processed
+      // This helps prevent race conditions on slower mobile connections
       if (!this.wsService.authenticated) {
-        logger.error('StreamingService: WebSocket not authenticated after connect');
-        throw new Error('WebSocket authentication failed');
+        logger.info('StreamingService: Waiting for WebSocket authentication...');
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // Check again after delay
+        if (!this.wsService.authenticated) {
+          logger.error('StreamingService: WebSocket not authenticated after waiting');
+          throw new Error('WebSocket authentication failed');
+        }
       }
       
       logger.debug('StreamingService: WebSocket authenticated successfully');
@@ -83,6 +102,9 @@ export class StreamingService {
       // Subscribe to this project/conversation for streaming events
       this.wsService.subscribe(projectId);
       this.wsService.setCurrentConversation(conversationId);
+      
+      // Add another small delay to ensure subscription is processed
+      await new Promise(resolve => setTimeout(resolve, 50));
       
       logger.debug('StreamingService: Initiating stream for:', conversationId);
       const response = await api.fetchStream('/chat/stream', {

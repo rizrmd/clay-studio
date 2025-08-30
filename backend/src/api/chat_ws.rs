@@ -375,7 +375,7 @@ pub async fn handle_chat_stream_ws(
         let start_time = std::time::Instant::now();
         let message_id = assistant_message_id;
         let mut tool_usages: Vec<crate::models::tool_usage::ToolUsage> = Vec::new();
-        let mut pending_tools: std::collections::HashMap<String, (String, serde_json::Value, std::time::Instant)> = std::collections::HashMap::new();
+        let mut pending_tools: std::collections::HashMap<String, (String, serde_json::Value, std::time::Instant, uuid::Uuid)> = std::collections::HashMap::new();
         let mut assistant_content = String::new();
         
         // Send context usage info
@@ -527,14 +527,33 @@ pub async fn handle_chat_stream_ws(
                         ClaudeMessage::ToolUse { tool, args, tool_use_id } => {
                             tracing::info!("Received ClaudeMessage::ToolUse for tool: {}", tool);
                             
-                            // Track the pending tool usage with its parameters
-                            let tool_start = std::time::Instant::now();
-                            if let Some(id) = &tool_use_id {
-                                pending_tools.insert(id.clone(), (tool.clone(), args.clone(), tool_start));
+                            // Generate a unique ID for this tool usage
+                            let tool_usage_id = uuid::Uuid::new_v4();
+                            
+                            // Store the tool_usage_id for later matching
+                            let lookup_key = tool_use_id.clone().unwrap_or_else(|| tool.clone());
+                            pending_tools.insert(lookup_key, (tool.clone(), args.clone(), std::time::Instant::now(), tool_usage_id));
+                            
+                            // Insert into database immediately with NULL output and execution_time_ms
+                            // We'll update these when we get the ToolResult
+                            let insert_result = sqlx::query(
+                                "INSERT INTO tool_usages (id, message_id, tool_name, parameters, output, execution_time_ms, created_at)
+                                 VALUES ($1, $2, $3, $4, $5, $6, $7)"
+                            )
+                            .bind(&tool_usage_id)
+                            .bind(&message_id)
+                            .bind(&tool)
+                            .bind(&args)
+                            .bind(Option::<serde_json::Value>::None) // output is NULL initially
+                            .bind(Option::<i64>::None) // execution_time_ms is NULL initially
+                            .bind(chrono::Utc::now())
+                            .execute(&db_pool)
+                            .await;
+                            
+                            if let Err(e) = insert_result {
+                                tracing::error!("Failed to insert pending tool usage: {}", e);
                             } else {
-                                // If no tool_use_id, create one based on the tool name
-                                let generated_id = format!("{}_{}", tool, uuid::Uuid::new_v4());
-                                pending_tools.insert(generated_id, (tool.clone(), args.clone(), tool_start));
+                                tracing::debug!("Inserted pending tool usage {} for tool {}", tool_usage_id, tool);
                             }
                             
                             // Update active tools in streaming state
@@ -564,31 +583,78 @@ pub async fn handle_chat_stream_ws(
                         ClaudeMessage::ToolResult { tool, result } => {
                             tracing::info!("Received ToolResult for: {}", tool);
                             
-                            // Check if this is a tool_use_id or actual tool name
-                            let (_actual_tool_name, _tool_use_id) = if crate::utils::mcp_tools::is_tool_use_id(&tool) {
-                                // It's a tool_use_id, try to find the actual tool name from pending tools
-                                if let Some((name, params, start_time)) = pending_tools.remove(&tool) {
-                                    // Create a complete ToolUsage record
-                                    let execution_time = start_time.elapsed().as_millis() as i64;
-                                    let tool_usage = crate::models::tool_usage::ToolUsage {
-                                        id: uuid::Uuid::new_v4(),
-                                        message_id: message_id.clone(),
-                                        tool_name: name.clone(),
-                                        parameters: Some(params),
-                                        output: Some(result.clone()),
-                                        execution_time_ms: Some(execution_time),
-                                        created_at: Some(chrono::Utc::now().to_rfc3339()),
-                                    };
-                                    tool_usages.push(tool_usage);
-                                    (name, tool.clone())
-                                } else {
-                                    // No pending tool found, just track the name
-                                    (tool.clone(), tool.clone())
-                                }
+                            // Try to find the pending tool by either tool_use_id or tool name
+                            let pending_tool = if crate::utils::mcp_tools::is_tool_use_id(&tool) {
+                                // It's a tool_use_id, try to find by ID
+                                pending_tools.remove(&tool)
                             } else {
-                                // It's already a tool name, create a ToolUsage without matching to pending
+                                // It's a tool name, try to find by name
+                                pending_tools.remove(&tool)
+                            };
+                            
+                            if let Some((name, _params, start_time, tool_usage_id)) = pending_tool {
+                                // We found the pending tool, calculate execution time
+                                let execution_time = start_time.elapsed().as_millis() as i64;
+                                
+                                // Update the existing record in the database
+                                let update_result = sqlx::query(
+                                    "UPDATE tool_usages 
+                                     SET output = $1, 
+                                         execution_time_ms = $2 
+                                     WHERE id = $3"
+                                )
+                                .bind(&result)
+                                .bind(execution_time)
+                                .bind(&tool_usage_id)
+                                .execute(&db_pool)
+                                .await;
+                                
+                                if let Err(e) = update_result {
+                                    tracing::error!("Failed to update tool usage: {}", e);
+                                } else {
+                                    tracing::info!("Tool {} (id: {}) completed in {}ms", name, tool_usage_id, execution_time);
+                                }
+                                
+                                // Add to tool_usages vector for the message
                                 let tool_usage = crate::models::tool_usage::ToolUsage {
-                                    id: uuid::Uuid::new_v4(),
+                                    id: tool_usage_id,
+                                    message_id: message_id.clone(),
+                                    tool_name: name.clone(),
+                                    parameters: None, // We don't need to fetch this again
+                                    output: Some(result.clone()),
+                                    execution_time_ms: Some(execution_time),
+                                    created_at: None, // We don't need to fetch this again
+                                };
+                                tool_usages.push(tool_usage);
+                            } else {
+                                // No pending tool found - this could be a tool result without a corresponding ToolUse
+                                // This shouldn't happen in normal flow, but we'll handle it gracefully
+                                // Insert a new record with NULL execution_time_ms
+                                let tool_usage_id = uuid::Uuid::new_v4();
+                                
+                                let insert_result = sqlx::query(
+                                    "INSERT INTO tool_usages (id, message_id, tool_name, parameters, output, execution_time_ms, created_at)
+                                     VALUES ($1, $2, $3, $4, $5, $6, $7)"
+                                )
+                                .bind(&tool_usage_id)
+                                .bind(&message_id)
+                                .bind(&tool)
+                                .bind(Option::<serde_json::Value>::None)
+                                .bind(&result)
+                                .bind(Option::<i64>::None) // No execution time available
+                                .bind(chrono::Utc::now())
+                                .execute(&db_pool)
+                                .await;
+                                
+                                if let Err(e) = insert_result {
+                                    tracing::error!("Failed to insert orphan tool result: {}", e);
+                                } else {
+                                    tracing::warn!("Inserted orphan tool result for tool: {} (no corresponding ToolUse found)", tool);
+                                }
+                                
+                                // Add to tool_usages vector
+                                let tool_usage = crate::models::tool_usage::ToolUsage {
+                                    id: tool_usage_id,
                                     message_id: message_id.clone(),
                                     tool_name: tool.clone(),
                                     parameters: None,
@@ -597,7 +663,6 @@ pub async fn handle_chat_stream_ws(
                                     created_at: Some(chrono::Utc::now().to_rfc3339()),
                                 };
                                 tool_usages.push(tool_usage);
-                                (tool.clone(), format!("result_{}", uuid::Uuid::new_v4()))
                             };
                             
                             // Extract text content from the result if it's in the expected format

@@ -90,9 +90,24 @@ export class WebSocketService {
 
     this.isConnecting = true;
     
-    // Create authentication promise
-    this.authenticationPromise = new Promise<void>((resolve) => {
+    // Create authentication promise with timeout for mobile environments
+    this.authenticationPromise = new Promise<void>((resolve, reject) => {
       this.authenticationResolver = resolve;
+      
+      // Add timeout to prevent hanging on mobile
+      const timeout = setTimeout(() => {
+        if (!this.isAuthenticated) {
+          logger.warn('WebSocketService: Authentication timeout after 5 seconds');
+          resolve(); // Resolve anyway to prevent blocking
+        }
+      }, 5000);
+      
+      // Store original resolver to clear timeout
+      const originalResolver = this.authenticationResolver;
+      this.authenticationResolver = () => {
+        clearTimeout(timeout);
+        if (originalResolver) originalResolver();
+      };
     });
 
     try {
@@ -220,7 +235,9 @@ export class WebSocketService {
       });
       // Mark as pending subscription (will be confirmed by 'subscribed' message)
     } else {
-      logger.warn('WebSocketService: Cannot subscribe - not authenticated. Will subscribe after authentication.');
+      logger.warn('WebSocketService: Cannot subscribe - not authenticated. Will retry after authentication.');
+      // Store project ID to subscribe after authentication
+      this.currentProjectId = projectId;
     }
   }
   
