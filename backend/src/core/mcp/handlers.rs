@@ -1560,7 +1560,9 @@ impl McpHandlers {
         Ok(format!(
             "Schema for tables in '{}':\n{}",
             source.name,
-            serde_json::to_string_pretty(&schemas).unwrap()
+            serde_json::to_string_pretty(&schemas).unwrap_or_else(|e| {
+                format!("Failed to serialize schemas: {}", e)
+            })
         ))
     }
     

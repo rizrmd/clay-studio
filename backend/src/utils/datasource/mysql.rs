@@ -624,24 +624,41 @@ impl DataSourceConnector for MySQLConnector {
                 sample_data.push(row_data);
             }
             
+            let column_details: Result<Vec<_>, Box<dyn Error>> = columns.iter().map(|c| {
+                Ok(json!({
+                    "name": c.try_get::<String, _>("column_name")
+                        .map_err(|e| format!("Failed to get column_name: {}", e))?,
+                    "type": c.try_get::<String, _>("data_type")
+                        .map_err(|e| format!("Failed to get data_type: {}", e))?,
+                    "nullable": c.try_get::<String, _>("is_nullable")
+                        .map_err(|e| format!("Failed to get is_nullable: {}", e))? == "YES",
+                    "default": c.try_get::<Option<String>, _>("column_default").ok().flatten(),
+                    "max_length": c.try_get::<Option<i64>, _>("max_length").ok().flatten(),
+                    "key": c.try_get::<String, _>("column_key").ok().unwrap_or_default(),
+                    "extra": c.try_get::<String, _>("extra").ok().unwrap_or_default(),
+                }))
+            }).collect();
+            
+            let pk_list: Result<Vec<_>, Box<dyn Error>> = primary_keys.iter().map(|pk| {
+                pk.try_get::<String, _>("column_name")
+                    .map_err(|e| Box::new(e) as Box<dyn Error>)
+            }).collect();
+            
+            let fk_list: Result<Vec<_>, Box<dyn Error>> = foreign_keys.iter().map(|fk| {
+                Ok(json!({
+                    "column": fk.try_get::<String, _>("column_name")
+                        .map_err(|e| format!("Failed to get column_name: {}", e))?,
+                    "references_table": fk.try_get::<String, _>("foreign_table_name")
+                        .map_err(|e| format!("Failed to get foreign_table_name: {}", e))?,
+                    "references_column": fk.try_get::<String, _>("foreign_column_name")
+                        .map_err(|e| format!("Failed to get foreign_column_name: {}", e))?,
+                }))
+            }).collect();
+            
             result[table_name] = json!({
-                "columns": columns.iter().map(|c| json!({
-                    "name": c.get::<String, _>("column_name"),
-                    "type": c.get::<String, _>("data_type"),
-                    "nullable": c.get::<String, _>("is_nullable") == "YES",
-                    "default": c.get::<Option<String>, _>("column_default"),
-                    "max_length": c.get::<Option<i64>, _>("max_length"),
-                    "key": c.get::<String, _>("column_key"),
-                    "extra": c.get::<String, _>("extra"),
-                })).collect::<Vec<_>>(),
-                "primary_keys": primary_keys.iter().map(|pk| 
-                    pk.get::<String, _>("column_name")
-                ).collect::<Vec<_>>(),
-                "foreign_keys": foreign_keys.iter().map(|fk| json!({
-                    "column": fk.get::<String, _>("column_name"),
-                    "references_table": fk.get::<String, _>("foreign_table_name"),
-                    "references_column": fk.get::<String, _>("foreign_column_name"),
-                })).collect::<Vec<_>>(),
+                "columns": column_details?,
+                "primary_keys": pk_list?,
+                "foreign_keys": fk_list?,
                 "row_count": row_count.unwrap_or(0),
                 "sample_data": sample_data,
             });
@@ -670,13 +687,17 @@ impl DataSourceConnector for MySQLConnector {
         .fetch_all(&pool)
         .await?;
         
-        let results: Vec<Value> = tables.iter().map(|row| {
-            json!({
-                "name": row.get::<String, _>("table_name"),
-                "description": row.get::<Option<String>, _>("comment"),
-                "column_count": row.get::<i64, _>("column_count"),
-            })
+        let results: Result<Vec<Value>, Box<dyn Error>> = tables.iter().map(|row| {
+            Ok(json!({
+                "name": row.try_get::<String, _>("table_name")
+                    .map_err(|e| format!("Failed to get table_name: {}", e))?,
+                "description": row.try_get::<Option<String>, _>("comment").ok().flatten().unwrap_or_default(),
+                "column_count": row.try_get::<i64, _>("column_count")
+                    .map_err(|e| format!("Failed to get column_count: {}", e))?,
+            }))
         }).collect();
+        
+        let results = results?;
         
         let result = json!({
             "matches": results,
