@@ -32,6 +32,7 @@ This project uses Model Context Protocol (MCP) tools for database operations and
 - **ask_user**: Create interactive UI elements in the chat interface
   - Can create buttons, checkboxes, input fields, charts, tables, and markdown content
   - Use this when you need user input or want to display data in a rich format
+  - IMPORTANT: Only include actionable options - never add "cancel", "back", "learn more", or other navigation options
 
 ### When to Use Each Datasource Tool
 
