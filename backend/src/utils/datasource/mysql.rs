@@ -421,7 +421,8 @@ impl DataSourceConnector for MySQLConnector {
         .fetch_one(&pool)
         .await?;
         
-        let table_count: i64 = stats.get("table_count");
+        let table_count: i64 = stats.try_get("table_count")
+            .map_err(|e| format!("Failed to get table_count: {}", e))?;
         let total_size: Option<i64> = stats.try_get::<Option<String>, _>("total_size")
             .ok()
             .flatten()
@@ -586,7 +587,11 @@ impl DataSourceConnector for MySQLConnector {
             .bind(table_name)
             .fetch_one(&pool)
             .await?;
-            let row_count: Option<i64> = count_result.get("row_count");
+            let row_count: Option<i64> = count_result.try_get::<Option<u64>, _>("row_count")
+                .ok()
+                .flatten()
+                .map(|u| u as i64)
+                .or_else(|| count_result.try_get::<Option<i64>, _>("row_count").ok().flatten());
             
             // Get sample data
             let sample_query = format!("SELECT * FROM `{}` LIMIT 5", table_name.replace('`', "``"));
@@ -599,7 +604,8 @@ impl DataSourceConnector for MySQLConnector {
             for row in sample_rows {
                 let mut row_data = json!({});
                 for (i, col) in columns.iter().enumerate() {
-                    let col_name: String = col.get("column_name");
+                    let col_name: String = col.try_get("column_name")
+                        .map_err(|e| format!("Failed to get column_name: {}", e))?;
                     // Try to get value as different types
                     if let Ok(val) = row.try_get::<Option<String>, _>(i) {
                         row_data[&col_name] = json!(val);
