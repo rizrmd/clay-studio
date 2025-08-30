@@ -7,7 +7,6 @@ import { ArrowDown, ArrowUp, ArrowUpDown, EyeOff, Filter, Check, Search } from "
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"

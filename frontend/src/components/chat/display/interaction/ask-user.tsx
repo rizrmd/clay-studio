@@ -32,7 +32,6 @@ export function AskUser({
   options = [],
   inputType = "text",
   placeholder,
-  toolUseId,
   onSubmit,
   isDisabled = false,
   hasResponse = false,

@@ -57,9 +57,10 @@ export function DataTable({ columns: columnDefs, data, config }: DataTableProps)
     return columnDefs.map(col => ({
       id: col.key,
       accessorKey: col.key,
-      header: ({ column }) => (
+      header: ({ column, table }) => (
         <DataTableColumnHeader 
-          column={column} 
+          column={column}
+          table={table}
           title={col.label}
           sortable={col.sortable !== false}
         />

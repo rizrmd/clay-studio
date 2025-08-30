@@ -194,9 +194,6 @@ export async function forgetMessagesFrom(
         .slice(0, messageIndex + 1)
         .map((msg) => ({
           ...msg,
-          clay_tools_used: msg.clay_tools_used
-            ? [...msg.clay_tools_used]
-            : undefined,
           file_attachments: msg.file_attachments
             ? [...msg.file_attachments]
             : undefined,

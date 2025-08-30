@@ -260,7 +260,6 @@ export class StreamingHandler {
     
     updateLastMessage(updateId, {
       id: event.id,
-      clay_tools_used: event.tools_used.length > 0 ? event.tools_used : undefined, // For backward compatibility
       tool_usages: event.tool_usages, // Now includes full tool_usages from backend
       processing_time_ms: event.processing_time_ms,
     });
