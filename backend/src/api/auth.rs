@@ -334,6 +334,22 @@ pub async fn logout(depot: &mut Depot, res: &mut Response) -> Result<(), AppErro
 }
 
 #[handler]
+pub async fn get_session_token(req: &mut Request, _depot: &mut Depot, res: &mut Response) -> Result<(), AppError> {
+    // Get the session cookie value for WebSocket authentication on iOS
+    let session_token = if let Some(cookie) = req.cookie("clay_session") {
+        cookie.value().to_string()
+    } else {
+        return Err(AppError::Unauthorized("No session cookie found".to_string()));
+    };
+    
+    // Return the session token that can be used for WebSocket connection
+    res.render(Json(serde_json::json!({
+        "session_token": session_token
+    })));
+    Ok(())
+}
+
+#[handler]
 pub async fn me(depot: &mut Depot, res: &mut Response) -> Result<(), AppError> {
     let user_id = if let Some(session) = depot.session_mut() {
         let user_id: Option<String> = session.get("user_id");
@@ -587,6 +603,7 @@ pub fn auth_routes() -> Router {
         .push(Router::with_path("/login").post(login))
         .push(Router::with_path("/logout").post(logout))
         .push(Router::with_path("/me").get(me))
+        .push(Router::with_path("/session-token").get(get_session_token))
         .push(Router::with_path("/change-password").post(change_password))
         .push(Router::with_path("/registration-status").get(check_registration_status))
         .push(Router::with_path("/clients").get(list_public_clients))

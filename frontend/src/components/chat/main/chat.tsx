@@ -387,7 +387,7 @@ export function Chat({
             )}
           </div>
         </div>
-        <div className="w-full md:absolute bottom-0 right-0 fixed">
+        <div className="w-full md:absolute bottom-0 right-0 left-0 fixed">
           <div className="mx-auto max-w-2xl px-2 sm:px-4">
             {/* Context usage indicator */}
             {contextUsage && propConversationId !== "new" && (

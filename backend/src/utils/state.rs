@@ -10,6 +10,7 @@ use tracing::{info, warn, error};
 use crate::utils::Config;
 use crate::utils::db;
 use crate::models::client::Client;
+use crate::core::sessions::PostgresSessionStore;
 
 
 
@@ -31,6 +32,7 @@ pub struct AppState {
     #[allow(dead_code)]
     pub clients: Arc<RwLock<HashMap<Uuid, Client>>>,
     pub active_claude_streams: Arc<RwLock<HashMap<String, StreamingState>>>,
+    pub session_store: PostgresSessionStore,
 }
 
 impl AppState {
@@ -42,12 +44,16 @@ impl AppState {
         info!("🔌 Creating SQLx PostgreSQL connection pool...");
         let db_pool = Self::create_sqlx_pool(&config.database_url).await?;
         
+        let db_arc = Arc::new(db);
+        let session_store = PostgresSessionStore::new(db_arc.clone());
+        
         Ok(AppState {
-            db: Arc::new(db),
+            db: db_arc,
             db_pool,
             config: Arc::new(config.clone()),
             clients: Arc::new(RwLock::new(HashMap::new())),
             active_claude_streams: Arc::new(RwLock::new(HashMap::new())),
+            session_store,
         })
     }
     
