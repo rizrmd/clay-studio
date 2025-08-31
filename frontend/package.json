@@ -53,6 +53,7 @@
     "react-router-dom": "^6.21.3",
     "react-virtuoso": "^4.14.0",
     "react-window-infinite-loader": "^1.0.10",
+    "recharts": "^3.1.2",
     "rehype-highlight": "^7.0.2",
     "rehype-raw": "^7.0.0",
     "remark-gfm": "^4.0.1",

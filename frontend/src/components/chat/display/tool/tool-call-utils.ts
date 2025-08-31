@@ -142,6 +142,13 @@ export function parseMcpToolName(toolName: string): {
           icon: Table,
           color: "text-emerald-600 bg-emerald-50 border-emerald-200",
         },
+        show_chart: {
+          name: "Display Chart",
+          description: "Showing Chart",
+          done: "Chart displayed",
+          icon: Table,
+          color: "text-blue-600 bg-blue-50 border-blue-200",
+        },
       };
 
       // Check if we have a mapping for this action

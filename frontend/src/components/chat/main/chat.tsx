@@ -36,7 +36,7 @@ export function Chat({
   const dragCounter = useRef(0);
   const navigate = useNavigate();
   const [previousId, setPreviousId] = useState("");
-  const { keyboardHeight, isKeyboardOpen } = useViewportHeight();
+  const { viewportHeight } = useViewportHeight();
 
   useEffect(() => {
     // Reset when conversation changes
@@ -261,7 +261,8 @@ export function Chat({
   return (
     <>
       <div
-        className="group w-full overflow-auto pl-0 relative h-full flex flex-col"
+        className="group w-full overflow-auto pl-0 relative flex flex-col"
+        style={{ height: viewportHeight ? `${viewportHeight}px` : '100vh' }}
         onDragEnter={handleContainerDragEnter}
         onDragLeave={handleContainerDragLeave}
         onDragOver={handleContainerDragOver}
@@ -315,7 +316,7 @@ export function Chat({
 
         <div className="flex-1 overflow-hidden flex flex-col">
           <div id="portal-body"></div>
-          <div className="flex-1 overflow-y-auto" style={{ paddingBottom: isKeyboardOpen ? '80px' : '120px' }}>
+          <div className="flex-1 overflow-y-auto" style={{ paddingBottom: '120px' }}>
             {/* Error display */}
             {error && (
               <div className="mb-4 bg-red-600 p-4 text-white">
@@ -392,7 +393,7 @@ export function Chat({
         <div 
           className="fixed bottom-0 left-0 right-0 w-full bg-background border-t"
           style={{ 
-            bottom: isKeyboardOpen ? `${keyboardHeight}px` : '0',
+            bottom: '0',
             transition: 'bottom 0.3s ease-in-out'
           }}>
           <div className="mx-auto max-w-2xl px-2 sm:px-4">
