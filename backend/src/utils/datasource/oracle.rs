@@ -318,12 +318,18 @@ impl DataSourceConnector for OracleConnector {
     
     async fn execute_query(&self, query: &str, limit: i32) -> Result<Value, Box<dyn Error>> {
         let query = query.to_string();
+        let schema = self.schema.clone();
         let pool = Arc::clone(&self.pool);
         
         tokio::task::spawn_blocking(move || -> Result<Value, Box<dyn Error + Send + Sync>> {
             // Use the connection pool
             let runtime = tokio::runtime::Handle::current();
             let pooled_conn = runtime.block_on(pool.get_connection())?;
+            
+            // Set the current schema for this session
+            let set_schema_sql = format!("ALTER SESSION SET CURRENT_SCHEMA = {}", schema);
+            pooled_conn.connection.execute(&set_schema_sql, &[])
+                .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
             
             // Add ROWNUM limit if not already present and limit is specified
             let modified_query = if limit > 0 && !query.to_uppercase().contains("ROWNUM") && !query.to_uppercase().contains("FETCH") {

@@ -13,6 +13,7 @@ use tracing::{info, error, debug};
 pub struct SqlServerConnector {
     config: Config,
     server: String,
+    database: Option<String>,
     schema: String,
     #[allow(dead_code)]
     original_connection_string: Option<String>,
@@ -122,6 +123,7 @@ impl SqlServerConnector {
         Ok(Self {
             config: tiberius_config,
             server,
+            database,
             schema,
             original_connection_string: Some(connection_string),
             ssl_mode_used,
@@ -384,6 +386,21 @@ impl DataSourceConnector for SqlServerConnector {
     
     async fn execute_query(&self, query: &str, limit: i32) -> Result<Value, Box<dyn Error>> {
         let mut client = self.get_connection().await?;
+        
+        // SQL Server approach: Execute a USE statement with the database and then queries will use the user's default schema
+        // Or we can try to use EXECUTE AS to switch schema context, but that requires permissions
+        // The most reliable approach is to create the login/user with the correct default schema
+        
+        // For now, we'll add a helper query to check current schema context
+        if self.schema != "dbo" {
+            // Try to switch default schema context using dynamic SQL
+            // This works if the user has appropriate permissions
+            let schema_context = format!("EXEC('USE [{}]')", self.database.as_ref().unwrap_or(&"master".to_string()));
+            match client.execute(&schema_context, &[]).await {
+                Ok(_) => debug!("Set database context for schema operations"),
+                Err(e) => debug!("Could not set database context: {}. Tables may need to be fully qualified.", e)
+            }
+        }
         
         // Add TOP clause if not present (SQL Server specific)
         let query_with_limit = if query.to_lowercase().contains("top ") || query.to_lowercase().contains("limit ") {
