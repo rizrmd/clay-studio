@@ -224,6 +224,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let protected_router = Router::new()
         .hoop(auth_required)
         .hoop(client_scoped)
+        .push(Router::with_path("/auth").push(auth::auth_protected_routes()))
         .push(Router::with_path("/chat/stream").post(chat_ws::handle_chat_stream_ws))
         .push(Router::with_path("/prompt/stream").post(prompt::handle_prompt_stream))
         .push(

@@ -334,13 +334,25 @@ pub async fn logout(depot: &mut Depot, res: &mut Response) -> Result<(), AppErro
 }
 
 #[handler]
-pub async fn get_session_token(req: &mut Request, _depot: &mut Depot, res: &mut Response) -> Result<(), AppError> {
-    // Get the session cookie value for WebSocket authentication on iOS
+pub async fn get_session_token(req: &mut Request, depot: &mut Depot, res: &mut Response) -> Result<(), AppError> {
+    // Verify user is authenticated (auth_required middleware should have already checked this)
+    let user_id = if let Some(session) = depot.session() {
+        let uid: Option<String> = session.get("user_id");
+        uid.ok_or_else(|| AppError::Unauthorized("Not authenticated".to_string()))?
+    } else {
+        return Err(AppError::Unauthorized("No session found".to_string()));
+    };
+    
+    tracing::info!("get_session_token: User {} requesting session token", user_id);
+    
+    // Get the session cookie value for WebSocket authentication
     let session_token = if let Some(cookie) = req.cookie("clay_session") {
         cookie.value().to_string()
     } else {
         return Err(AppError::Unauthorized("No session cookie found".to_string()));
     };
+    
+    tracing::info!("get_session_token: Providing session token of length {}", session_token.len());
     
     // Return the session token that can be used for WebSocket connection
     res.render(Json(serde_json::json!({
@@ -603,13 +615,17 @@ pub fn auth_routes() -> Router {
         .push(Router::with_path("/login").post(login))
         .push(Router::with_path("/logout").post(logout))
         .push(Router::with_path("/me").get(me))
-        .push(Router::with_path("/session-token").get(get_session_token))
         .push(Router::with_path("/change-password").post(change_password))
         .push(Router::with_path("/registration-status").get(check_registration_status))
         .push(Router::with_path("/clients").get(list_public_clients))
         .push(Router::with_path("/clients/all").get(list_all_clients))
         .push(Router::with_path("/clients/detect-by-domain").get(detect_client_by_domain))
         .push(Router::with_path("/users/exists").get(check_users_exist))
+}
+
+pub fn auth_protected_routes() -> Router {
+    Router::new()
+        .push(Router::with_path("/session-token").get(get_session_token))
 }
 
 #[handler]

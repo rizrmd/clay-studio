@@ -114,30 +114,41 @@ pub async fn handle_websocket(
 ) -> Result<(), AppError> {
     let state = depot.obtain::<AppState>().unwrap().clone();
     
-    // Try to get session from query parameter first (for iOS compatibility)
+    // Try to get session from query parameter first (for compatibility)
     let session_from_query: Option<String> = req.query("session");
     
     // Extract session data for authentication
     let (user_id, client_id, role, is_authenticated) = if let Some(session_token) = session_from_query {
-        // iOS fallback: Load session from session token in query parameter
+        // Fallback: Load session from session token in query parameter
         tracing::info!("WebSocket: Attempting to load session from query parameter");
+        tracing::debug!("WebSocket: Session token length: {}", session_token.len());
         
         // The session token is the cookie value, load it from the store
-        if let Ok(Some(session)) = state.session_store.load_session(session_token).await {
-            let user_id: Option<String> = session.get("user_id");
-            let client_id: Option<String> = session.get("client_id");
-            let role: Option<String> = session.get("role");
-            
-            tracing::debug!("WebSocket session loaded from query: user_id={:?}, client_id={:?}, role={:?}", 
-                           user_id, client_id, role);
-            
-            match user_id {
-                Some(uid) => (uid, client_id, role, true),
-                None => ("anonymous".to_string(), None, None, false)
+        match state.session_store.load_session(session_token.clone()).await {
+            Ok(Some(session)) => {
+                let user_id: Option<String> = session.get("user_id");
+                let client_id: Option<String> = session.get("client_id");
+                let role: Option<String> = session.get("role");
+                
+                tracing::info!("WebSocket session loaded from query: user_id={:?}, client_id={:?}, role={:?}", 
+                               user_id, client_id, role);
+                
+                match user_id {
+                    Some(uid) => (uid, client_id, role, true),
+                    None => {
+                        tracing::warn!("WebSocket: Session found but no user_id");
+                        ("anonymous".to_string(), None, None, false)
+                    }
+                }
             }
-        } else {
-            tracing::warn!("WebSocket: Failed to load session from query parameter");
-            ("anonymous".to_string(), None, None, false)
+            Ok(None) => {
+                tracing::warn!("WebSocket: No session found for token");
+                ("anonymous".to_string(), None, None, false)
+            }
+            Err(e) => {
+                tracing::error!("WebSocket: Failed to load session from query parameter: {}", e);
+                ("anonymous".to_string(), None, None, false)
+            }
         }
     } else if let Some(session) = depot.session() {
         // Standard cookie-based session
