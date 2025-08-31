@@ -1,8 +1,11 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { DataTable } from "./data-table-virtual";
 import { TableColumn, TableConfig } from "./demo-data";
+import { Maximize2, Minimize2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 interface InteractiveTableProps {
   interactionId: string;
@@ -21,6 +24,7 @@ export function InteractiveTable({
   data,
   requiresResponse = false,
 }: InteractiveTableProps) {
+  const [isMaximized, setIsMaximized] = useState(false);
   // Prepare the data for DataTable component
   const tableData = useMemo(() => {
     if (!data?.rows) return [];
@@ -75,22 +79,45 @@ export function InteractiveTable({
   }
 
   return (
-    <div className="w-full space-y-2">
+    <div
+      className={`w-full space-y-2 ${
+        isMaximized
+          ? "fixed inset-0 flex flex-col z-[100] bottom-[70px] bg-background px-4"
+          : ""
+      }`}
+    >
       {/* Title Header */}
-      <div className="flex items-center gap-2 px-1">
-        <span className="text-sm font-medium">{title}</span>
-        <span className="text-xs text-muted-foreground">
-          ({tableData.length} rows)
-        </span>
+      <div className={cn("flex items-center justify-between px-1", isMaximized && "pt-2")}>
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium">{title}</span>
+          <span className="text-xs text-muted-foreground">
+            ({tableData.length} rows)
+          </span>
+        </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7"
+          onClick={() => setIsMaximized(!isMaximized)}
+          title={isMaximized ? "Minimize" : "Maximize"}
+        >
+          {isMaximized ? (
+            <Minimize2 className="h-4 w-4" />
+          ) : (
+            <Maximize2 className="h-4 w-4" />
+          )}
+        </Button>
       </div>
 
       {/* Data Table */}
-      <div className="border rounded-lg overflow-hidden">
+      <div className={cn(!isMaximized ? "border-2 rounded-md" : "overflow-hidden relative flex-1")}>
         <DataTable
           columns={tableColumns}
           data={tableData}
           config={tableConfig}
-          className="max-h-[400px]"
+          className={
+            isMaximized ? "max-h-[calc(100vh-120px)]" : "max-h-[400px]"
+          }
         />
       </div>
 

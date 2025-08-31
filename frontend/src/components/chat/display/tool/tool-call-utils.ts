@@ -136,7 +136,7 @@ export function parseMcpToolName(toolName: string): {
         },
         show_table: {
           name: "Display Table",
-          description: "Displaying data table",
+          description: "Showing Table",
           done: "Table displayed",
           icon: Database,
           color: "text-emerald-600 bg-emerald-50 border-emerald-200",
