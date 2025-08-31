@@ -658,7 +658,7 @@ export function DataTable({
           {table.getHeaderGroups().map((headerGroup) => (
             <tr
               key={headerGroup.id}
-              className="relative after:content-[''] after:absolute after:bottom-0 after:left-0 after:right-0 after:h-[1px] after:bg-border"
+              className="relative bg-white after:content-[''] after:absolute after:bottom-0 after:left-0 after:right-0 after:h-[1px] after:bg-border"
             >
               {headerGroup.headers.map((header, index) => {
                 const isLastColumn = index === headerGroup.headers.length - 1;
