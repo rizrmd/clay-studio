@@ -16,7 +16,6 @@ export function WipTablePage() {
     enable_export: true,
     enable_column_visibility: true,
     enable_row_selection: false,
-    enable_global_search: true,
     sticky_header: true,
   }
 
@@ -53,6 +52,7 @@ export function WipTablePage() {
         columns={demoColumns}
         data={data}
         config={config}
+        className="h-[300px]"
       />
     </div>
   )
