@@ -6,6 +6,7 @@ import { MultimodalInput } from "../input/multimodal-input";
 import { ContextIndicator } from "../display";
 import { useValtioChat } from "@/hooks/use-valtio-chat";
 import { useInputState } from "@/hooks/use-input-state";
+import { useViewportHeight } from "@/hooks/use-viewport-height";
 import { updateConversationMessages } from "@/store/chat-store";
 import { api } from "@/lib/api";
 import {
@@ -35,6 +36,7 @@ export function Chat({
   const dragCounter = useRef(0);
   const navigate = useNavigate();
   const [previousId, setPreviousId] = useState("");
+  const { keyboardHeight, isKeyboardOpen } = useViewportHeight();
 
   useEffect(() => {
     // Reset when conversation changes
@@ -259,7 +261,7 @@ export function Chat({
   return (
     <>
       <div
-        className="group w-full overflow-auto pl-0 relative h-full"
+        className="group w-full overflow-auto pl-0 relative h-full flex flex-col"
         onDragEnter={handleContainerDragEnter}
         onDragLeave={handleContainerDragLeave}
         onDragOver={handleContainerDragOver}
@@ -311,9 +313,9 @@ export function Chat({
           </div>
         )}
 
-        <div className="h-full pb-0">
+        <div className="flex-1 overflow-hidden flex flex-col">
           <div id="portal-body"></div>
-          <div className="h-full flex flex-col overflow-y-auto">
+          <div className="flex-1 overflow-y-auto" style={{ paddingBottom: isKeyboardOpen ? '80px' : '120px' }}>
             {/* Error display */}
             {error && (
               <div className="mb-4 bg-red-600 p-4 text-white">
@@ -387,7 +389,12 @@ export function Chat({
             )}
           </div>
         </div>
-        <div className="w-full md:absolute bottom-0 right-0 left-0 fixed">
+        <div 
+          className="fixed bottom-0 left-0 right-0 w-full bg-background border-t"
+          style={{ 
+            bottom: isKeyboardOpen ? `${keyboardHeight}px` : '0',
+            transition: 'bottom 0.3s ease-in-out'
+          }}>
           <div className="mx-auto max-w-2xl px-2 sm:px-4">
             {/* Context usage indicator */}
             {contextUsage && propConversationId !== "new" && (

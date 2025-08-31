@@ -538,6 +538,35 @@ impl McpHandlers {
                     "required": ["title", "data"]
                 }),
             });
+            
+            // Show Chart Tool - for displaying interactive charts
+            tools.push(Tool {
+                name: "show_chart".to_string(),
+                description: "Display interactive charts with 20+ visualization types including line, bar, pie, scatter, radar, gauge, map, sankey, treemap, and more".to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "title": {
+                            "type": "string",
+                            "description": "Title for the chart"
+                        },
+                        "chart_type": {
+                            "type": "string",
+                            "enum": ["line", "bar", "pie", "scatter", "radar", "gauge", "funnel", "heatmap", "boxplot", "candlestick", "map", "graph", "tree", "treemap", "sunburst", "sankey", "parallel", "calendar", "custom"],
+                            "description": "Type of chart to display"
+                        },
+                        "data": {
+                            "type": "object",
+                            "description": "Chart data (format varies by chart type)"
+                        },
+                        "options": {
+                            "type": "object",
+                            "description": "Additional ECharts configuration options"
+                        }
+                    },
+                    "required": ["title", "chart_type", "data"]
+                }),
+            });
         }
         
         Ok(json!({
@@ -630,6 +659,18 @@ impl McpHandlers {
                     Err(JsonRpcError {
                         code: -32601,
                         message: "show_table tool is only available on interaction server".to_string(),
+                        data: None,
+                    })
+                }
+            }
+            // Show Chart Tool
+            "show_chart" => {
+                if self.server_type == "interaction" {
+                    self.handle_show_chart(arguments).await
+                } else {
+                    Err(JsonRpcError {
+                        code: -32601,
+                        message: "show_chart tool is only available on interaction server".to_string(),
                         data: None,
                     })
                 }
@@ -2592,6 +2633,118 @@ impl McpHandlers {
             "📋 **Table Display**: {}\n\n```json\n{}\n```\n\n✨ The interactive table has been rendered with sorting, filtering, and export capabilities.",
             title,
             serde_json::to_string_pretty(&interaction_spec).unwrap_or_default()
+        );
+        
+        Ok(response_text)
+    }
+    
+    async fn handle_show_chart(
+        &self,
+        arguments: &serde_json::Map<String, Value>,
+    ) -> Result<String, JsonRpcError> {
+        // Extract required parameters
+        let title = arguments
+            .get("title")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| JsonRpcError {
+                code: INVALID_PARAMS,
+                message: "Missing title".to_string(),
+                data: None,
+            })?;
+        
+        let chart_type = arguments
+            .get("chart_type")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| JsonRpcError {
+                code: INVALID_PARAMS,
+                message: "Missing chart_type".to_string(),
+                data: None,
+            })?;
+        
+        let data = arguments
+            .get("data")
+            .ok_or_else(|| JsonRpcError {
+                code: INVALID_PARAMS,
+                message: "Missing data".to_string(),
+                data: None,
+            })?;
+        
+        // Validate chart type
+        let valid_chart_types = [
+            "line", "bar", "pie", "scatter", "radar", "gauge", "funnel",
+            "heatmap", "boxplot", "candlestick", "map", "graph", "tree",
+            "treemap", "sunburst", "sankey", "parallel", "calendar", "custom"
+        ];
+        
+        if !valid_chart_types.contains(&chart_type) {
+            return Err(JsonRpcError {
+                code: INVALID_PARAMS,
+                message: format!("Invalid chart_type: {}. Must be one of: {:?}", chart_type, valid_chart_types),
+                data: None,
+            });
+        }
+        
+        // Extract optional parameters
+        let options = arguments.get("options");
+        
+        // Create chart interaction response
+        let interaction_id = uuid::Uuid::new_v4().to_string();
+        
+        // Build the interaction spec specifically for charts
+        let mut chart_data = json!({
+            "chart_type": chart_type,
+            "series": data.get("series"),
+            "categories": data.get("categories"),
+            "dataset": data.get("dataset"),
+            "xAxis": data.get("xAxis"),
+            "yAxis": data.get("yAxis"),
+            "indicator": data.get("indicator"),
+            "nodes": data.get("nodes"),
+            "links": data.get("links"),
+            "value": data.get("value"),
+            "name": data.get("name"),
+            "min": data.get("min"),
+            "max": data.get("max"),
+            "mapType": data.get("mapType"),
+            "layout": data.get("layout"),
+            "parallelAxis": data.get("parallelAxis"),
+            "range": data.get("range"),
+            "option": data.get("option")
+        });
+        
+        // Merge any additional data properties
+        if let Some(data_obj) = data.as_object() {
+            if let Some(chart_data_obj) = chart_data.as_object_mut() {
+                for (key, value) in data_obj.iter() {
+                    if !chart_data_obj.contains_key(key) {
+                        chart_data_obj.insert(key.clone(), value.clone());
+                    }
+                }
+            }
+        }
+        
+        let interaction_spec = json!({
+            "interaction_id": interaction_id,
+            "interaction_type": "chart",
+            "title": title,
+            "data": chart_data,
+            "options": options.unwrap_or(&json!({
+                "theme": "light",
+                "animation": true,
+                "interactive": true,
+                "responsive": true
+            })),
+            "requires_response": false,
+            "created_at": chrono::Utc::now().to_rfc3339(),
+        });
+        
+        // Format response for chart display
+        let response_text = format!(
+            "📊 **Chart Display**: {} ({})\n\n```json\n{}\n```\n\n✨ The interactive {} chart has been rendered with zoom, export, and interactive capabilities.",
+            title,
+            chart_type,
+            serde_json::to_string_pretty(&interaction_spec).unwrap_or_default(),
+            chart_type
         );
         
         Ok(response_text)

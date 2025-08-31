@@ -56,6 +56,7 @@ export function MultimodalInput({
   externalFiles = [],
   onExternalFilesChange,
   shouldFocus,
+  className,
 }: MultimodalInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -359,7 +360,8 @@ export function MultimodalInput({
       className={cn(
         "relative m-3 transition-all",
         isDragging &&
-          "ring-2 ring-primary ring-offset-2 bg-primary/5 rounded-lg"
+          "ring-2 ring-primary ring-offset-2 bg-primary/5 rounded-lg",
+        className
       )}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}

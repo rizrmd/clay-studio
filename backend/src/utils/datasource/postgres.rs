@@ -307,6 +307,14 @@ impl DataSourceConnector for PostgreSQLConnector {
     async fn execute_query(&self, query: &str, limit: i32) -> Result<Value, Box<dyn Error>> {
         let pool = self.get_pool().await?;
         
+        // Set the search_path to the configured schema before executing the query
+        let set_schema_query = format!("SET search_path TO {}, public", quote_ident(&self.schema));
+        debug!("Setting PostgreSQL search_path for query execution: {}", set_schema_query);
+        sqlx::query(&set_schema_query)
+            .execute(&pool)
+            .await
+            .map_err(|e| format!("Failed to set search_path: {}", e))?;
+        
         // Add LIMIT if not present
         let query_with_limit = if query.to_lowercase().contains("limit") {
             query.to_string()

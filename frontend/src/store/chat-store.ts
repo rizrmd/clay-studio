@@ -44,6 +44,8 @@ export interface UIState {
   sidebarOpen: boolean;
   fileSidebarOpen: boolean;
   activeTab: string;
+  viewportHeight: number;
+  keyboardHeight: number;
 }
 
 export interface GlobalState {
@@ -90,6 +92,8 @@ const initialState: GlobalState = {
     sidebarOpen: true,
     fileSidebarOpen: false,
     activeTab: "chat",
+    viewportHeight: typeof window !== "undefined" ? window.innerHeight : 0,
+    keyboardHeight: 0,
   },
 };
 
@@ -314,6 +318,14 @@ export const setFileSidebarOpen = (open: boolean) => {
 
 export const setActiveTab = (tab: string) => {
   store.ui.activeTab = tab;
+};
+
+export const setViewportHeight = (height: number) => {
+  store.ui.viewportHeight = height;
+};
+
+export const setKeyboardHeight = (height: number) => {
+  store.ui.keyboardHeight = height;
 };
 
 // Message queue management functions

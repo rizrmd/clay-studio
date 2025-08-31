@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { AskUser } from "./ask-user";
 import { WebSocketService } from "@/services/chat/websocket-service";
 import { InteractiveTable } from "@/components/data-table/interactive-table";
+import { ChartDisplay } from "@/components/data-chart";
 
 interface InteractionSpec {
   interaction_id: string;
@@ -116,17 +117,16 @@ export function InteractionRenderer({
       );
       
     case "chart":
-      // For now, just show a placeholder for charts
+      // Render interactive chart using ChartDisplay component
       return (
-        <div className="border rounded-lg p-4 bg-blue-50/50">
-          <h3 className="font-medium text-sm mb-2">📊 {interactionSpec.title}</h3>
-          <div className="text-xs text-muted-foreground">
-            Chart visualization will be implemented here
-          </div>
-          <pre className="mt-2 text-xs bg-white p-2 rounded">
-            {JSON.stringify(interactionSpec.data, null, 2)}
-          </pre>
-        </div>
+        <ChartDisplay
+          interactionId={interactionSpec.interaction_id}
+          title={interactionSpec.title}
+          chartType={interactionSpec.data.chart_type || "line"}
+          data={interactionSpec.data}
+          options={interactionSpec.options}
+          requiresResponse={interactionSpec.requires_response}
+        />
       );
       
     case "table":
