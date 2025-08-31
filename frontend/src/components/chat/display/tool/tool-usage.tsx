@@ -166,7 +166,7 @@ export function ToolUsagePopover({
               <thead>
                 <tr className="border-b border-border bg-muted/20">
                   {keys.map((key) => (
-                    <th key={key} className="px-2 py-1 text-left font-medium">
+                    <th key={key} className="px-2 py-1 text-left font-medium ">
                       {key}
                     </th>
                   ))}
@@ -176,7 +176,7 @@ export function ToolUsagePopover({
                 {data.map((row: any, index: number) => (
                   <tr key={index} className="border-b border-border/50">
                     {keys.map((key) => (
-                      <td key={key} className="px-2 py-1 max-w-48 align-top">
+                      <td key={key} className="px-2 py-1 max-w-48 align-top whitespace-pre-wrap">
                         {renderComplexValue(row[key])}
                       </td>
                     ))}

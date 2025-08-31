@@ -73,6 +73,17 @@ impl PostgreSQLConnector {
             }
         };
         
+        // Add schema to connection string using options parameter
+        // This ensures every connection from the pool has the correct search_path
+        if schema != "public" && !connection_string.contains("options=") {
+            let separator = if connection_string.contains('?') { "&" } else { "?" };
+            // URL encode the options value - use quote_ident to safely escape schema name
+            let search_path_option = format!("-c search_path={},public", quote_ident(&schema));
+            let encoded_options = urlencoding::encode(&search_path_option);
+            connection_string.push_str(&format!("{}options={}", separator, encoded_options));
+            debug!("Added search_path to connection string: {}", search_path_option);
+        }
+        
         // Debug: Log the connection string (with password masked)
         let masked_string = if connection_string.contains('@') {
             let parts: Vec<&str> = connection_string.splitn(2, "://").collect();
@@ -307,14 +318,7 @@ impl DataSourceConnector for PostgreSQLConnector {
     async fn execute_query(&self, query: &str, limit: i32) -> Result<Value, Box<dyn Error>> {
         let pool = self.get_pool().await?;
         
-        // Set the search_path to the configured schema before executing the query
-        let set_schema_query = format!("SET search_path TO {}, public", quote_ident(&self.schema));
-        debug!("Setting PostgreSQL search_path for query execution: {}", set_schema_query);
-        sqlx::query(&set_schema_query)
-            .execute(&pool)
-            .await
-            .map_err(|e| format!("Failed to set search_path: {}", e))?;
-        
+        // No need to set search_path here anymore - it's set in the connection string
         // Add LIMIT if not present
         let query_with_limit = if query.to_lowercase().contains("limit") {
             query.to_string()
