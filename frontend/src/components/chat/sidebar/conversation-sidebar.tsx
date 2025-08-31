@@ -860,38 +860,6 @@ export function ConversationSidebar({
           <PanelLeftOpen className="h-5 w-5" />
         )}
       </Button>
-
-      {/* Mobile user button - always visible on mobile */}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="fixed bottom-4 right-4 z-40 h-10 w-10 p-0 md:hidden rounded-full shadow-lg bg-background border"
-          >
-            <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center text-primary font-medium text-xs">
-              {(user?.username || "G").charAt(0).toUpperCase()}
-            </div>
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-56 z-50 mb-2">
-          <div className="px-2 py-1.5 border-b">
-            <p className="text-sm font-medium">{user?.username || "Guest"}</p>
-          </div>
-          <DropdownMenuItem
-            onClick={handleProfile}
-            className="cursor-pointer"
-          >
-            Profile
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onClick={handleLogout}
-            className="cursor-pointer"
-          >
-            Sign out
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
     </>
   );
 }
