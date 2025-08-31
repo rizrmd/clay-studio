@@ -604,6 +604,9 @@ impl McpHandlers {
             "datasource_remove" => {
                 self.remove_datasource(arguments).await
             }
+            "datasource_update" => {
+                self.datasource_update(arguments).await
+            }
             "datasource_test" => {
                 self.test_connection(arguments).await
             }
@@ -917,6 +920,288 @@ impl McpHandlers {
                     message: "Data source not found. The datasource_id does not exist or has been deleted. Use datasource_list to see available data sources.".to_string(),
                     data: None,
                 })
+            }
+        }
+    }
+
+    async fn datasource_update(&self, args: &serde_json::Map<String, Value>) -> Result<String, JsonRpcError> {
+        let datasource_id = args.get("datasource_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| JsonRpcError {
+                code: INVALID_PARAMS,
+                message: "Missing datasource_id".to_string(),
+                data: None,
+            })?;
+        
+        eprintln!(
+            "[{}] [INFO] Updating datasource with ID: {}", 
+            Utc::now().format("%Y-%m-%d %H:%M:%S UTC"), 
+            datasource_id
+        );
+        
+        // First check if the data source exists and get its current configuration
+        let source = sqlx::query(
+            "SELECT name, source_type, connection_config FROM data_sources WHERE id = $1 AND project_id = $2"
+        )
+        .bind(datasource_id)
+        .bind(&self.project_id)
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(|e| JsonRpcError {
+            code: INTERNAL_ERROR,
+            message: format!("Database error: {}", e),
+            data: None,
+        })?
+        .ok_or_else(|| JsonRpcError {
+            code: INVALID_PARAMS,
+            message: "Data source not found. The datasource_id does not exist or has been deleted. Use datasource_list to see available data sources.".to_string(),
+            data: None,
+        })?;
+        
+        let name: String = source.get("name");
+        let source_type: String = source.get("source_type");
+        let mut connection_config: Value = source.get("connection_config");
+        
+        // Update the connection config with provided values
+        if let Some(config) = connection_config.as_object_mut() {
+            // Update each field if provided
+            if let Some(host) = args.get("host").and_then(|v| v.as_str()) {
+                config.insert("host".to_string(), json!(host));
+            }
+            if let Some(port) = args.get("port") {
+                config.insert("port".to_string(), port.clone());
+            }
+            if let Some(database) = args.get("database").and_then(|v| v.as_str()) {
+                config.insert("database".to_string(), json!(database));
+            }
+            if let Some(username) = args.get("username").and_then(|v| v.as_str()) {
+                config.insert("username".to_string(), json!(username));
+            }
+            if let Some(password) = args.get("password").and_then(|v| v.as_str()) {
+                config.insert("password".to_string(), json!(password));
+            }
+            if let Some(schema) = args.get("schema").and_then(|v| v.as_str()) {
+                config.insert("schema".to_string(), json!(schema));
+            }
+            
+            // Handle additional source-specific parameters
+            if let Some(additional_params) = args.get("additional_params").and_then(|v| v.as_object()) {
+                for (key, value) in additional_params {
+                    config.insert(key.clone(), value.clone());
+                }
+            }
+        }
+        
+        // Update the name if provided
+        let updated_name = args.get("name").and_then(|v| v.as_str()).unwrap_or(&name);
+        
+        // Update the data source in database
+        let result = sqlx::query(
+            "UPDATE data_sources 
+             SET name = $1, connection_config = $2, is_active = false 
+             WHERE id = $3 AND project_id = $4"
+        )
+        .bind(updated_name)
+        .bind(&connection_config)
+        .bind(datasource_id)
+        .bind(&self.project_id)
+        .execute(&self.db_pool)
+        .await
+        .map_err(|e| {
+            eprintln!(
+                "[{}] [ERROR] Failed to update datasource '{}': {}", 
+                Utc::now().format("%Y-%m-%d %H:%M:%S UTC"), 
+                name, 
+                e
+            );
+            JsonRpcError {
+                code: INTERNAL_ERROR,
+                message: format!("Failed to update data source: {}", e),
+                data: None,
+            }
+        })?;
+        
+        if result.rows_affected() == 0 {
+            return Err(JsonRpcError {
+                code: INVALID_PARAMS,
+                message: "Data source not found or no changes made".to_string(),
+                data: None,
+            });
+        }
+        
+        eprintln!(
+            "[{}] [INFO] Successfully updated datasource '{}' (ID: {})", 
+            Utc::now().format("%Y-%m-%d %H:%M:%S UTC"), 
+            updated_name, 
+            datasource_id
+        );
+        
+        // Log what was updated for clarity
+        let mut updated_fields = Vec::new();
+        if updated_name != name {
+            updated_fields.push(format!("name: {}", updated_name));
+        }
+        if args.contains_key("host") {
+            updated_fields.push("host".to_string());
+        }
+        if args.contains_key("port") {
+            updated_fields.push("port".to_string());
+        }
+        if args.contains_key("database") {
+            updated_fields.push("database".to_string());
+        }
+        if args.contains_key("username") {
+            updated_fields.push("username".to_string());
+        }
+        if args.contains_key("password") {
+            updated_fields.push("password (hidden)".to_string());
+        }
+        if args.contains_key("schema") {
+            updated_fields.push("schema".to_string());
+        }
+        
+        let updated_summary = if updated_fields.is_empty() {
+            "No fields were updated".to_string()
+        } else {
+            format!("Updated fields: {}", updated_fields.join(", "))
+        };
+        
+        // Automatically test the updated connection
+        eprintln!(
+            "[{}] [INFO] Testing updated connection for datasource '{}'", 
+            Utc::now().format("%Y-%m-%d %H:%M:%S UTC"), 
+            updated_name
+        );
+        
+        // Test the connection using the updated configuration
+        match create_connector(&source_type, &connection_config).await {
+            Ok(mut connector) => {
+                match connector.test_connection().await {
+                    Ok(true) => {
+                        // Connection successful - update last_tested_at and mark as active
+                        sqlx::query(
+                            "UPDATE data_sources 
+                             SET last_tested_at = NOW(), is_active = true 
+                             WHERE id = $1"
+                        )
+                        .bind(datasource_id)
+                        .execute(&self.db_pool)
+                        .await
+                        .map_err(|e| JsonRpcError {
+                            code: INTERNAL_ERROR,
+                            message: format!("Failed to update data source status: {}", e),
+                            data: None,
+                        })?;
+                        
+                        // Try to fetch schema information
+                        let mut schema_info = String::new();
+                        if let Ok(schema) = connector.fetch_schema().await {
+                            if let Some(tables) = schema.get("tables").and_then(|t| t.as_object()) {
+                                schema_info = format!(" Found {} tables.", tables.len());
+                                
+                                // Update schema information in the database
+                                sqlx::query(
+                                    "UPDATE data_sources 
+                                     SET schema_info = $1 
+                                     WHERE id = $2"
+                                )
+                                .bind(&schema)
+                                .bind(datasource_id)
+                                .execute(&self.db_pool)
+                                .await.ok();
+                            }
+                        }
+                        
+                        Ok(format!(
+                            "✅ Data source '{}' ({}) updated and verified successfully\nID: {}\n{}\nConnection test: PASSED{}",
+                            updated_name, source_type, datasource_id, updated_summary, schema_info
+                        ))
+                    }
+                    Ok(false) | Err(_) => {
+                        // Connection failed - use ask_user if this is an interaction server
+                        if self.server_type == "interaction" {
+                            // Prepare error details for user interaction
+                            let error_msg = if let Err(e) = connector.test_connection().await {
+                                format!("Connection test failed: {}", e)
+                            } else {
+                                "Connection test returned false".to_string()
+                            };
+                            
+                            let interaction_data = json!({
+                                "error": error_msg,
+                                "datasource_name": updated_name,
+                                "datasource_type": source_type,
+                                "datasource_id": datasource_id,
+                                "updated_fields": updated_fields,
+                                "message": format!("The updated configuration for '{}' failed to connect.\n\nError: {}\n\nWhat would you like to do?", updated_name, error_msg)
+                            });
+                            
+                            let options = json!([
+                                {"label": "Retry with different credentials", "value": "retry"},
+                                {"label": "Revert to previous configuration", "value": "revert"},
+                                {"label": "Keep changes (mark as inactive)", "value": "keep"},
+                                {"label": "View connection details", "value": "details"}
+                            ]);
+                            
+                            let mut ask_args = serde_json::Map::new();
+                            ask_args.insert("interaction_type".to_string(), json!("buttons"));
+                            ask_args.insert("title".to_string(), json!("Data Source Connection Failed"));
+                            ask_args.insert("data".to_string(), interaction_data);
+                            ask_args.insert("options".to_string(), options);
+                            ask_args.insert("requires_response".to_string(), json!(true));
+                            
+                            // Call ask_user and return its response
+                            return self.handle_ask_user(&ask_args).await;
+                        } else {
+                            // Not an interaction server, just return error message
+                            Ok(format!(
+                                "⚠️ Data source '{}' ({}) updated but connection test failed\nID: {}\n{}\n\nConnection test: FAILED\nThe data source has been marked as inactive. Please check the configuration.",
+                                updated_name, source_type, datasource_id, updated_summary
+                            ))
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                // Failed to create connector
+                eprintln!(
+                    "[{}] [ERROR] Failed to create connector for updated datasource '{}': {}", 
+                    Utc::now().format("%Y-%m-%d %H:%M:%S UTC"), 
+                    updated_name, 
+                    e
+                );
+                
+                if self.server_type == "interaction" {
+                    // Use ask_user for interaction
+                    let interaction_data = json!({
+                        "error": format!("Failed to create connector: {}", e),
+                        "datasource_name": updated_name,
+                        "datasource_type": source_type,
+                        "datasource_id": datasource_id,
+                        "updated_fields": updated_fields,
+                        "message": format!("Failed to create a connector for the updated configuration.\n\nError: {}\n\nThe configuration may be invalid. What would you like to do?", e)
+                    });
+                    
+                    let options = json!([
+                        {"label": "Retry with different configuration", "value": "retry"},
+                        {"label": "Revert to previous configuration", "value": "revert"},
+                        {"label": "Keep changes anyway", "value": "keep"}
+                    ]);
+                    
+                    let mut ask_args = serde_json::Map::new();
+                    ask_args.insert("interaction_type".to_string(), json!("buttons"));
+                    ask_args.insert("title".to_string(), json!("Invalid Data Source Configuration"));
+                    ask_args.insert("data".to_string(), interaction_data);
+                    ask_args.insert("options".to_string(), options);
+                    ask_args.insert("requires_response".to_string(), json!(true));
+                    
+                    return self.handle_ask_user(&ask_args).await;
+                } else {
+                    Ok(format!(
+                        "⚠️ Data source '{}' ({}) updated but configuration is invalid\nID: {}\n{}\n\nError: {}\nThe data source has been marked as inactive.",
+                        updated_name, source_type, datasource_id, updated_summary, e
+                    ))
+                }
             }
         }
     }

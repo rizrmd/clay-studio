@@ -39,7 +39,7 @@ interface ServerMessage {
 
 // WebSocket message types to server
 interface ClientMessage {
-  type: 'subscribe' | 'unsubscribe' | 'ping' | 'ask_user_response';
+  type: 'subscribe' | 'unsubscribe' | 'ping' | 'ask_user_response' | 'stop_streaming';
   project_id?: string;
   conversation_id?: string;
   // Ask user response fields
@@ -298,6 +298,15 @@ export class WebSocketService {
       response: response,
     });
   }
+  
+  stopStreaming(conversationId: string): void {
+    logger.info('WebSocketService: Sending stop streaming request for conversation', conversationId);
+    
+    this.sendMessage({
+      type: 'stop_streaming',
+      conversation_id: conversationId,
+    });
+  }
 
   unsubscribe(): void {
     this.currentProjectId = null;
@@ -430,6 +439,29 @@ export class WebSocketService {
   private async handleStartEvent(conversationId: string, messageId: string): Promise<void> {
     logger.debug('WebSocketService: Stream started for conversation', conversationId, 'message', messageId);
     
+    // Before starting a new stream, ensure any previous executing tools are marked complete
+    const state = conversationStore.conversations[conversationId];
+    if (state && state.messages.length > 0) {
+      // Check all messages for executing tools and mark them as complete
+      for (let i = 0; i < state.messages.length; i++) {
+        const msg = state.messages[i];
+        if (msg.tool_usages && msg.tool_usages.some(tu => tu.output?.status === 'executing')) {
+          const updatedToolUsages = msg.tool_usages.map(tu => {
+            if (tu.output?.status === 'executing') {
+              return {
+                ...tu,
+                output: { status: 'completed', result: 'Tool execution completed' }
+              };
+            }
+            return tu;
+          });
+          await this.conversationManager.updateMessageById(conversationId, msg.id, {
+            tool_usages: updatedToolUsages
+          });
+        }
+      }
+    }
+    
     // Initialize active stream
     this.activeStreams.set(conversationId, { content: '', messageId });
     
@@ -499,6 +531,42 @@ export class WebSocketService {
     logger.info('WebSocketService: Tool use detected', tool, 'for conversation', conversationId);
     await this.conversationManager.addActiveTool(conversationId, tool);
     logger.info('WebSocketService: Added tool to active tools:', tool);
+    
+    // Add to tool_usages for real-time display
+    const state = conversationStore.conversations[conversationId];
+    if (state && state.messages.length > 0) {
+      const lastMessage = state.messages[state.messages.length - 1];
+      if (lastMessage.role === 'assistant') {
+        const currentToolUsages = lastMessage.tool_usages || [];
+        
+        // Mark any previous executing tools as complete
+        const updatedToolUsages = currentToolUsages.map(tu => {
+          if (tu.output?.status === 'executing') {
+            return {
+              ...tu,
+              output: { status: 'completed', result: 'Tool execution completed' }
+            };
+          }
+          return tu;
+        });
+        
+        // Create an executing tool usage entry for the new tool
+        const toolUsage = {
+          id: `tool-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          message_id: lastMessage.id,
+          tool_name: tool,
+          parameters: null,
+          output: { status: 'executing' }, // Mark as executing during stream
+          createdAt: new Date().toISOString(),
+        };
+        
+        await this.conversationManager.updateLastMessage(conversationId, {
+          tool_usages: [...updatedToolUsages, toolUsage],
+        });
+        
+        logger.info('WebSocketService: Marked previous tools complete, added new executing tool:', tool);
+      }
+    }
   }
 
   private async handleContentEvent(content: string, conversationId: string): Promise<void> {
@@ -537,9 +605,48 @@ export class WebSocketService {
       this.currentConversationId = conversationId;
     }
     
-    // Update message with final data
+    // Update message with final data from backend
+    // ALWAYS mark executing tools as complete when message completes
+    const state = conversationStore.conversations[conversationId];
+    let finalToolUsages = message.tool_usages || [];
+    
+    if (state && state.messages.length > 0) {
+      const lastMessage = state.messages[state.messages.length - 1];
+      
+      if (lastMessage.tool_usages && lastMessage.tool_usages.length > 0) {
+        // Always mark our tracked tools as complete since the message is done
+        const completedTools = lastMessage.tool_usages.map(tu => {
+          if (tu.output?.status === 'executing') {
+            return {
+              ...tu,
+              output: { status: 'completed', result: 'Tool execution completed' }
+            };
+          }
+          return tu;
+        });
+        
+        if (finalToolUsages.length > 0) {
+          // Merge backend data with our completed tracking
+          const backendToolMap = new Map();
+          finalToolUsages.forEach(tu => {
+            backendToolMap.set(tu.tool_name, tu);
+          });
+          
+          // Use backend data where available, otherwise use our completed versions
+          finalToolUsages = completedTools.map(tool => {
+            return backendToolMap.get(tool.tool_name) || tool;
+          });
+          logger.debug('WebSocketService: Merged backend and completed tools');
+        } else {
+          // No backend data - use our completed tools
+          finalToolUsages = completedTools;
+          logger.debug('WebSocketService: Using completed tracked tools (no backend data)');
+        }
+      }
+    }
+    
     const updates = {
-      tool_usages: message.tool_usages, // Include tool_usages from backend
+      tool_usages: finalToolUsages,
       processing_time_ms: message.processing_time_ms,
     };
     

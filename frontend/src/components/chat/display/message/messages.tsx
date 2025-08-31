@@ -422,7 +422,12 @@ export function Messages({
                             onNewChatFromHere={onNewChatFromHere}
                             latestTodoWrite={latestTodoWrite}
                             onAskUserSubmit={onAskUserSubmit}
-                            isStreaming={_isStreaming}
+                            isStreaming={
+                              _isStreaming && 
+                              item.role === 'assistant' && 
+                              // Check if this is the last non-loading, non-queued message
+                              index === messages.length - 1
+                            }
                             isLoading={isLoading}
                             allMessages={allItems}
                             messageIndex={index}

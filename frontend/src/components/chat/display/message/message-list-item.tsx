@@ -242,7 +242,7 @@ export const MessageListItem = memo(
                   : shouldUseFullWidth
                   ? css`
                       width: calc(100% - 30px) !important;
-                      max-width:570px;
+                      max-width: 570px;
                     `
                   : "max-w-[70%]"
               )}
@@ -426,9 +426,10 @@ export const MessageListItem = memo(
               {/* Interaction Tool Rendering */}
               {(() => {
                 const interactionUsages = message.tool_usages?.filter(
-                  (usage) => usage.tool_name === "mcp__interaction__ask_user" ||
-                            usage.tool_name === "mcp__interaction__show_table" ||
-                            usage.tool_name === "mcp__interaction__show_chart"
+                  (usage) =>
+                    usage.tool_name === "mcp__interaction__ask_user" ||
+                    usage.tool_name === "mcp__interaction__show_table" ||
+                    usage.tool_name === "mcp__interaction__show_chart"
                 );
                 return interactionUsages?.some((usage) =>
                   hasInteraction(usage.output)
@@ -437,7 +438,7 @@ export const MessageListItem = memo(
                 <div
                   className={cn(
                     (message.content?.trim() || message.role === "user") &&
-                      "mt-4 ",
+                      "mt-2 ",
                     "space-y-2"
                   )}
                 >
@@ -490,7 +491,7 @@ export const MessageListItem = memo(
                     />
                   </div>
                 )}
-              {/* Show tools used for completed messages */}
+              {/* Show tools used for messages (both streaming and completed) */}
               {getToolNamesFromMessage(message as any).length > 0 &&
                 !message.isQueued && (
                   <div className=" flex items-center gap-2">
@@ -498,7 +499,7 @@ export const MessageListItem = memo(
                       <ToolCallIndicator
                         tools={getToolNamesFromMessage(message as any)}
                         variant="compact"
-                        isCompleted={true}
+                        isCompleted={!isStreaming} // Show as in-progress while streaming
                         messageId={message.id}
                         toolUsages={message.tool_usages}
                       />

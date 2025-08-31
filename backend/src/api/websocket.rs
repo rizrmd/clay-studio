@@ -27,6 +27,9 @@ pub enum ClientMessage {
         interaction_id: String,
         response: serde_json::Value, // Can be string or array of strings
     },
+    StopStreaming {
+        conversation_id: String,
+    },
 }
 
 // WebSocket message types to client
@@ -405,43 +408,30 @@ async fn handle_client_message(
             );
             
             // Store the response in the database
-            match store_ask_user_response(state, &conversation_id, &interaction_id, &response).await {
-                Ok(_) => {
-                    tracing::info!("Stored ask_user response for interaction {}", interaction_id);
-                    
-                    // Send a continuation message to Claude with the response
-                    let response_text = match response {
-                        serde_json::Value::String(s) => s.to_string(),
-                        serde_json::Value::Array(arr) => {
-                            arr.iter()
-                                .filter_map(|v| v.as_str())
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        }
-                        _ => response.to_string()
-                    };
-                    
-                    // Notify the client that the response was received
-                    let _ = sender.send(ServerMessage::Content {
-                        content: format!("✅ Response received: {}", response_text),
-                        conversation_id: conversation_id.clone(),
-                    });
-                    
-                    // TODO: In a production system, you would:
-                    // 1. Retrieve the conversation context
-                    // 2. Format the response appropriately
-                    // 3. Send a new message to Claude's API with the response
-                    // 4. Stream the response back through WebSocket
-                }
-                Err(e) => {
-                    tracing::error!("Failed to store ask_user response: {}", e);
-                    let _ = sender.send(ServerMessage::Error {
-                        error: format!("Failed to process response: {}", e),
-                        conversation_id: conversation_id.clone(),
-                    });
+            if let Err(e) = store_ask_user_response(
+                &state,
+                &conversation_id,
+                &interaction_id,
+                &response
+            ).await {
+                tracing::error!("Failed to store ask_user response: {}", e);
+            }
+        },
+        
+        ClientMessage::StopStreaming { conversation_id } => {
+            tracing::info!(
+                "Received stop streaming request: conversation={}", 
+                conversation_id
+            );
+            
+            // Remove the streaming state for this conversation
+            {
+                let mut streams = state.active_claude_streams.write().await;
+                if streams.remove(&conversation_id).is_some() {
+                    tracing::info!("Stopped streaming for conversation: {}", conversation_id);
                 }
             }
-        }
+        },
     }
 }
 

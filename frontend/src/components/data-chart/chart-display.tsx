@@ -54,11 +54,9 @@ export function ChartDisplay({
         ...defaultOpts,
         ...transformedData,
         ...options,
-        // Ensure title is set
+        // We don't use Echart's title, its ugly!
         title: {
-          text: title,
-          left: "center",
-          ...((options.title as any) || {}),
+          text: "",
         },
         // Add toolbox for export functionality
         toolbox: {

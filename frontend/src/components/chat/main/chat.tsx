@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { Message } from "@/types/chat";
+import { cn } from "@/lib/utils";
 
 interface ChatProps {
   projectId?: string;
@@ -45,7 +46,6 @@ export function Chat({
     }
   }, [propConversationId]);
 
-
   // Use the new Valtio-based chat hook
   const {
     messages,
@@ -71,7 +71,8 @@ export function Chat({
   } = useValtioChat(projectId || "", propConversationId);
 
   // Track current conversation ID similar to messages.tsx
-  const currentConversationId = hookConversationId || propConversationId || "new";
+  const currentConversationId =
+    hookConversationId || propConversationId || "new";
   const previousConversationId = useRef(currentConversationId);
 
   // Use the input state hook to persist input across conversation switches
@@ -262,7 +263,7 @@ export function Chat({
     <>
       <div
         className="group w-full overflow-auto pl-0 relative flex flex-col"
-        style={{ height: viewportHeight ? `${viewportHeight}px` : '100vh' }}
+        style={{ height: viewportHeight ? `${viewportHeight}px` : "100vh" }}
         onDragEnter={handleContainerDragEnter}
         onDragLeave={handleContainerDragLeave}
         onDragOver={handleContainerDragOver}
@@ -316,7 +317,7 @@ export function Chat({
 
         <div className="flex-1 overflow-hidden flex flex-col">
           <div id="portal-body"></div>
-          <div className="flex-1 overflow-y-auto" style={{ paddingBottom: '120px' }}>
+          <div className="flex-1 overflow-y-auto">
             {/* Error display */}
             {error && (
               <div className="mb-4 bg-red-600 p-4 text-white">
@@ -390,13 +391,14 @@ export function Chat({
             )}
           </div>
         </div>
-        <div 
-          className="fixed bottom-0 left-0 right-0 w-full bg-background border-t"
-          style={{ 
-            bottom: '0',
-            transition: 'bottom 0.3s ease-in-out'
-          }}>
-          <div className="mx-auto max-w-2xl px-2 sm:px-4">
+        <div
+          className="bg-background border-t"
+          style={{
+            bottom: "0",
+            transition: "bottom 0.3s ease-in-out",
+          }}
+        >
+          <div className="mx-auto max-w-2xl sm:px-4">
             {/* Context usage indicator */}
             {contextUsage && propConversationId !== "new" && (
               <div className="flex justify-end mb-2 px-2">
@@ -414,7 +416,12 @@ export function Chat({
               externalFiles={pendingFiles ? [...pendingFiles] : []}
               onExternalFilesChange={setPendingFiles}
               shouldFocus={shouldFocusInput}
-              className={previousId === "new" ? "opacity-0" : ""}
+              className={cn(
+                previousId === "new" && propConversationId !== "new"
+                  ? "opacity-0"
+                  : "",
+                "lg:ml-[-10px] lg:mr-[40px]"
+              )}
             />
           </div>
         </div>

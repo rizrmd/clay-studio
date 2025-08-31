@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   Line,
   Bar,
@@ -16,6 +16,7 @@ import {
   ResponsiveContainer,
   Cell,
 } from "recharts";
+import { Download, Maximize2, RefreshCw, Layers } from "lucide-react";
 
 interface ChartDisplayProps {
   interactionId: string;
@@ -107,7 +108,7 @@ export function ChartDisplay({
       case "pie":
         return (
           <ResponsiveContainer width="100%" height={300}>
-            <PieChart>
+            <PieChart margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
               <Pie
                 data={chartData}
                 cx="50%"
@@ -136,7 +137,7 @@ export function ChartDisplay({
       case "bar":
         return (
           <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={chartData}>
+            <BarChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="name" />
               <YAxis />
@@ -156,7 +157,7 @@ export function ChartDisplay({
       case "area":
         return (
           <ResponsiveContainer width="100%" height={300}>
-            <AreaChart data={chartData}>
+            <AreaChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="name" />
               <YAxis />
@@ -180,7 +181,7 @@ export function ChartDisplay({
       default:
         return (
           <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={chartData}>
+            <LineChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="name" />
               <YAxis />
@@ -203,9 +204,16 @@ export function ChartDisplay({
   };
 
   return (
-    <div className="border rounded-lg p-4 bg-white shadow-sm">
-      <h3 className="font-medium text-sm mb-4">📊 {title}</h3>
-      <div className="w-full overflow-x-auto">{renderChart()}</div>
+    <div className="space-y-2">
+      {/* Title as standalone heading */}
+      <h1 className="text-base font-semibold text-gray-800">{title}</h1>
+      
+      {/* Chart container */}
+      <div className="relative border rounded-lg bg-white shadow-sm p-4">
+        <div className="w-full overflow-x-auto">
+          {renderChart()}
+        </div>
+      </div>
     </div>
   );
 }

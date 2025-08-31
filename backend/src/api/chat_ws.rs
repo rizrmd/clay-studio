@@ -418,6 +418,15 @@ pub async fn handle_chat_stream_ws(
                 
                 tracing::info!("Starting to receive messages from Claude SDK");
                 while let Some(message) = receiver.recv().await {
+                    // Check if streaming was cancelled for this conversation
+                    {
+                        let streams = active_claude_streams.read().await;
+                        if !streams.contains_key(&conversation_id_clone) {
+                            tracing::info!("Streaming cancelled for conversation: {}", conversation_id_clone);
+                            break;
+                        }
+                    }
+                    
                     // Log all received messages for debugging
                     tracing::debug!("chat_ws received message type: {:?}", std::mem::discriminant(&message));
                     

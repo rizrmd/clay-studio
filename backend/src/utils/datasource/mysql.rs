@@ -1,6 +1,7 @@
 use super::base::DataSourceConnector;
 use serde_json::{json, Value};
 use sqlx::{mysql::{MySqlPool, MySqlPoolOptions}, Row as SqlxRow, Column};
+use sqlx::types::Decimal;
 use std::error::Error;
 use async_trait::async_trait;
 use std::time::Duration;
@@ -841,15 +842,15 @@ impl DataSourceConnector for MySQLConnector {
         let result = json!({
             "summary": {
                 "total_tables": stats.get::<i64, _>("table_count"),
-                "total_size_bytes": stats.get::<Option<i64>, _>("total_size").unwrap_or(0),
-                "total_size_human": super::base::format_bytes(stats.get::<Option<i64>, _>("total_size").unwrap_or(0) as u64),
-                "total_rows": stats.get::<Option<i64>, _>("total_rows").unwrap_or(0),
+                "total_size_bytes": stats.get::<Option<Decimal>, _>("total_size").map(|v| v.to_string().parse::<i64>().unwrap_or(0)).unwrap_or(0),
+                "total_size_human": super::base::format_bytes(stats.get::<Option<Decimal>, _>("total_size").map(|v| v.to_string().parse::<u64>().unwrap_or(0)).unwrap_or(0)),
+                "total_rows": stats.get::<Option<Decimal>, _>("total_rows").map(|v| v.to_string().parse::<i64>().unwrap_or(0)).unwrap_or(0),
             },
             "largest_tables": largest_tables.iter().map(|t| json!({
                 "name": t.get::<String, _>("table_name"),
-                "row_count": t.get::<Option<i64>, _>("row_count").unwrap_or(0),
-                "size_bytes": t.get::<Option<i64>, _>("size_bytes").unwrap_or(0),
-                "size_human": format!("{:.2} MB", t.get::<Option<f64>, _>("size_mb").unwrap_or(0.0)),
+                "row_count": t.get::<Option<u64>, _>("row_count").unwrap_or(0),
+                "size_bytes": t.get::<Option<u64>, _>("size_bytes").unwrap_or(0) as i64,
+                "size_human": format!("{:.2} MB", t.get::<Option<Decimal>, _>("size_mb").map(|v| v.to_string().parse::<f64>().unwrap_or(0.0)).unwrap_or(0.0)),
             })).collect::<Vec<_>>(),
             "most_connected_tables": connections.iter().map(|c| json!({
                 "name": c.get::<String, _>("table_name"),

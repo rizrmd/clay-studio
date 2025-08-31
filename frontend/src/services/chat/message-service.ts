@@ -5,6 +5,7 @@ import { conversationStore } from '../../store/chat/conversation-store';
 import { chatEventBus } from './event-bus';
 import { abortControllerManager } from '../../utils/chat/abort-controller-manager';
 import { StreamingService } from './streaming-service';
+import { WebSocketService } from './websocket-service';
 import type { Message } from '../../types/chat';
 import type { QueuedMessage } from '../../store/chat/types';
 
@@ -394,6 +395,11 @@ export class MessageService {
   // Stop current message
   async stopMessage(conversationId: string): Promise<void> {
     abortControllerManager.abort(conversationId);
+    
+    // Send stop streaming message via WebSocket
+    const wsService = WebSocketService.getInstance();
+    wsService.stopStreaming(conversationId);
+    
     await this.conversationManager.updateStatus(conversationId, 'idle');
     await this.conversationManager.clearQueue(conversationId);
   }

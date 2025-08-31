@@ -27,7 +27,6 @@ export function ToolCallIndicator({
   messageId,
   toolUsages,
 }: ToolCallIndicatorProps) {
-  
   const formatExecutionTime = (ms?: number) => {
     if (!ms) return null;
     if (ms < 1000) return `${ms}ms`;
@@ -38,24 +37,35 @@ export function ToolCallIndicator({
     if (!toolUsages || toolUsages.length === 0) {
       return null;
     }
-    
-    const usage = toolUsages.find(tu => tu.tool_name === toolName);
-    
+
+    const usage = toolUsages.find((tu) => tu.tool_name === toolName);
+
     // Check for execution time in the usage data
     const executionTime = usage?.execution_time_ms;
-    
+
     if (executionTime !== undefined && executionTime !== null) {
       return formatExecutionTime(executionTime);
     }
     return null;
   };
-  
+
+  const isToolExecuting = (toolName: string) => {
+    if (!toolUsages || toolUsages.length === 0) {
+      return false;
+    }
+
+    const usage = toolUsages.find((tu) => tu.tool_name === toolName);
+    return usage?.output?.status === "executing";
+  };
+
   if (!tools || tools.length === 0) return null;
 
   if (variant === "compact") {
     if (isCompleted) {
       const firstTool = tools?.[0] ? parseMcpToolName(tools[0]) : null;
       const Icon = firstTool?.icon as any;
+      const anyToolExecuting = tools.some(isToolExecuting);
+      const effectiveCompleted = isCompleted && !anyToolExecuting;
       return (
         <div
           className={cn(
@@ -73,13 +83,21 @@ export function ToolCallIndicator({
             {tools.length === 1 ? (
               <>
                 {firstTool && messageId ? (
-                  <ToolUsagePopover messageId={messageId} toolName={tools[0]} toolUsages={toolUsages}>
+                  <ToolUsagePopover
+                    messageId={messageId}
+                    toolName={tools[0]}
+                    toolUsages={toolUsages}
+                  >
                     <div
                       className={cn(
                         "flex gap-1 items-center cursor-pointer hover:opacity-80 transition-opacity"
                       )}
                     >
-                      <Icon />
+                      {isToolExecuting(tools[0]) ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Icon />
+                      )}
                       {firstTool?.done || firstTool.friendlyName}
                       {getToolExecutionTime(tools[0]) && (
                         <span className="text-muted-foreground ml-1">
@@ -90,7 +108,11 @@ export function ToolCallIndicator({
                   </ToolUsagePopover>
                 ) : firstTool ? (
                   <div className={cn("flex gap-1 items-center")}>
-                    <Icon />
+                    {isToolExecuting(tools[0]) ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Icon />
+                    )}
                     {firstTool?.done || firstTool.friendlyName}
                     {getToolExecutionTime(tools[0]) && (
                       <span className="text-muted-foreground ml-1">
@@ -113,11 +135,18 @@ export function ToolCallIndicator({
                       `
                     )}
                   >
-                    <CheckCircle className="h-3 w-3 text-green-600" />
-                    Used {tools.length} tool{tools.length > 1 ? "s" : ""}
+                    {effectiveCompleted ? (
+                      <CheckCircle className="h-3 w-3 text-green-600" />
+                    ) : (
+                      <Loader2 className="h-3 w-3 text-green-600 animate-spin" />
+                    )}
+                    {effectiveCompleted ? "Used" : "Using"} {tools.length} tool
+                    {tools.length > 1 ? "s" : ""}
                     {(() => {
                       const totalTime = tools.reduce((sum, tool) => {
-                        const usage = toolUsages?.find(tu => tu.tool_name === tool);
+                        const usage = toolUsages?.find(
+                          (tu) => tu.tool_name === tool
+                        );
                         return sum + (usage?.execution_time_ms || 0);
                       }, 0);
                       const formatted = formatExecutionTime(totalTime);
@@ -136,13 +165,18 @@ export function ToolCallIndicator({
                       const parsedTool = parseMcpToolName(tool);
                       const Icon = parsedTool.icon;
                       const executionTime = getToolExecutionTime(tool);
+                      const executing = isToolExecuting(tool);
                       const content = (
                         <div
                           key={`${tool}-${index}`}
                           className="flex items-center justify-between gap-2 text-sm w-full"
                         >
                           <div className="flex items-center gap-2">
-                            <Icon className="h-4 w-4 text-muted-foreground" />
+                            {executing ? (
+                              <Loader2 className="h-4 w-4 text-muted-foreground animate-spin" />
+                            ) : (
+                              <Icon className="h-4 w-4 text-muted-foreground" />
+                            )}
                             <span>{parsedTool.friendlyName}</span>
                           </div>
                           {executionTime && (
@@ -154,8 +188,8 @@ export function ToolCallIndicator({
                         </div>
                       );
 
-                      // Wrap in ToolUsagePopover if we have a messageId
-                      if (messageId && isCompleted) {
+                      // Wrap in ToolUsagePopover if we have a messageId (allow clicking even during execution)
+                      if (messageId) {
                         return (
                           <ToolUsagePopover
                             key={`${tool}-${index}`}
@@ -181,22 +215,18 @@ export function ToolCallIndicator({
       );
     }
 
-    return (
-      <div className={cn("flex items-center gap-2", className)}>
-        <Loader2 className="h-3 w-3 text-green-600 animate-spin" />
-        <span className="text-xs text-green-600 font-medium">
-          Using {tools.length} tool{tools.length > 1 ? "s" : ""}
-        </span>
-      </div>
-    );
+    return null;
   }
 
+  // For full variant, show all tools with their status
   return (
     <div className={cn("space-y-1", className)}>
-      {[tools[tools.length - 1]].map((tool, index) => {
+      {tools.map((tool, index) => {
         const parsedTool = parseMcpToolName(tool);
         const Icon = parsedTool.icon;
         const executionTime = getToolExecutionTime(tool);
+        const executing = isToolExecuting(tool);
+        const effectiveCompleted = isCompleted && !executing;
 
         return (
           <Badge
@@ -208,17 +238,17 @@ export function ToolCallIndicator({
             )}
           >
             <Icon className="h-3 w-3" />
-            {isCompleted ? (
+            {effectiveCompleted ? (
               <CheckCircle className="h-3 w-3 text-green-600" />
             ) : (
               <Loader2 className="h-3 w-3 animate-spin" />
             )}
             <span>
-              {isCompleted
+              {effectiveCompleted
                 ? parsedTool.friendlyName
-                : `${parsedTool.description}...`}
+                : `${parsedTool.description || parsedTool.friendlyName}...`}
             </span>
-            {isCompleted && executionTime && (
+            {effectiveCompleted && executionTime && (
               <span className="text-muted-foreground flex items-center gap-1">
                 <Clock className="h-3 w-3" />
                 {executionTime}
