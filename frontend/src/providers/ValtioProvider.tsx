@@ -23,19 +23,34 @@ export function ValtioProvider({ children }: ValtioProviderProps) {
   useEffect(() => {
     if (user) {
       const connectWebSocket = async () => {
-        // Small delay to ensure cookies are properly set after login
-        await new Promise(resolve => setTimeout(resolve, 100))
+        // Longer delay to ensure cookies are properly set after login in all browsers
+        await new Promise(resolve => setTimeout(resolve, 300))
         
         const wsService = WebSocketService.getInstance()
-        wsService.connect().catch(error => {
-          console.warn('WebSocket connection failed:', error)
-          // Retry once after another delay
-          setTimeout(() => {
-            wsService.connect().catch(err => {
-              console.warn('WebSocket retry failed:', err)
-            })
-          }, 1000)
-        })
+        
+        // Try to connect with retries
+        let connected = false
+        let attempts = 0
+        const maxAttempts = 3
+        
+        while (!connected && attempts < maxAttempts) {
+          attempts++
+          try {
+            await wsService.connect()
+            connected = true
+            console.log(`WebSocket connected successfully on attempt ${attempts}`)
+          } catch (error) {
+            console.warn(`WebSocket connection attempt ${attempts} failed:`, error)
+            if (attempts < maxAttempts) {
+              // Wait before retrying, with exponential backoff
+              await new Promise(resolve => setTimeout(resolve, 1000 * attempts))
+            }
+          }
+        }
+        
+        if (!connected) {
+          console.error('WebSocket failed to connect after all attempts')
+        }
       }
       
       connectWebSocket()

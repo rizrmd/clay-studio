@@ -117,30 +117,28 @@ export class WebSocketService {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       let wsUrl = `${protocol}//${window.location.host}/api/ws`;
       
-      // Check if we're on iOS (Safari on iPhone/iPad)
-      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
-      const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-      
-      if (isIOS || isSafari) {
-        // On iOS/Safari, get session token and pass it as query parameter
-        logger.info('WebSocketService: Detected iOS/Safari, fetching session token');
-        try {
-          const response = await fetch('/api/auth/session-token', {
-            credentials: 'include'
-          });
-          
-          if (response.ok) {
-            const data = await response.json();
-            if (data.session_token) {
-              wsUrl = `${wsUrl}?session=${encodeURIComponent(data.session_token)}`;
-              logger.info('WebSocketService: Using session token for WebSocket authentication');
-            }
+      // For all browsers, try to get session token as fallback
+      // This helps with authentication issues across different browsers and environments
+      try {
+        const response = await fetch('/api/auth/session-token', {
+          credentials: 'include'
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          if (data.session_token) {
+            wsUrl = `${wsUrl}?session=${encodeURIComponent(data.session_token)}`;
+            logger.info('WebSocketService: Using session token for WebSocket authentication');
           } else {
-            logger.warn('WebSocketService: Failed to get session token, continuing without it');
+            logger.info('WebSocketService: No session token available, using standard cookie auth');
           }
-        } catch (error) {
-          logger.warn('WebSocketService: Error getting session token:', error);
+        } else if (response.status === 401) {
+          logger.warn('WebSocketService: Not authenticated, WebSocket will connect as anonymous');
+        } else {
+          logger.warn('WebSocketService: Failed to get session token, continuing with cookie auth');
         }
+      } catch (error) {
+        logger.warn('WebSocketService: Error getting session token, using cookie auth:', error);
       }
       
       logger.info('WebSocketService: Connecting to', wsUrl);

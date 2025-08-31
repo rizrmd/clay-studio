@@ -255,6 +255,9 @@ export const login = async (username: string, password: string) => {
     }
 
     // Reconnect WebSocket with new authentication
+    // Add delay to ensure cookies are properly set in all browsers
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    
     const wsService = WebSocketService.getInstance();
     await wsService.reconnect();
   } catch (error: any) {
@@ -293,6 +296,9 @@ export const register = async (
     }
 
     // Reconnect WebSocket with new authentication
+    // Add delay to ensure cookies are properly set in all browsers
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    
     const wsService = WebSocketService.getInstance();
     await wsService.reconnect();
   } catch (error: any) {
