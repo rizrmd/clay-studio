@@ -665,6 +665,15 @@ export class WebSocketService {
     this.isSubscribed = false;
   }
 
+  // Force reconnect with new authentication
+  async reconnect(): Promise<void> {
+    logger.info('WebSocketService: Forcing reconnection');
+    this.disconnect();
+    // Wait a bit for cleanup
+    await new Promise(resolve => setTimeout(resolve, 100));
+    return this.connect();
+  }
+
   // Getters for authentication status
   get authenticated(): boolean {
     return this.isAuthenticated;

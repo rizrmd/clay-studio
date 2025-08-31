@@ -1,5 +1,6 @@
 import { proxy } from "valtio";
 import axios from "@/lib/axios";
+import { WebSocketService } from "@/services/chat/websocket-service";
 
 export interface User {
   id: string;
@@ -252,6 +253,10 @@ export const login = async (username: string, password: string) => {
     } catch (error) {
       setSetupComplete(false);
     }
+
+    // Reconnect WebSocket with new authentication
+    const wsService = WebSocketService.getInstance();
+    await wsService.reconnect();
   } catch (error: any) {
     if (error.response?.data?.error) {
       throw new Error(error.response.data.error);
@@ -286,6 +291,10 @@ export const register = async (
     } catch (error) {
       setSetupComplete(false);
     }
+
+    // Reconnect WebSocket with new authentication
+    const wsService = WebSocketService.getInstance();
+    await wsService.reconnect();
   } catch (error: any) {
     if (error.response?.data?.error) {
       throw new Error(error.response.data.error);
