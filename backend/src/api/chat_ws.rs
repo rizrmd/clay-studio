@@ -539,6 +539,7 @@ pub async fn handle_chat_stream_ws(
                             
                             // Insert into database immediately with NULL output and execution_time_ms
                             // We'll update these when we get the ToolResult
+                            let params_option = Some(args.clone());
                             let insert_result = sqlx::query(
                                 "INSERT INTO tool_usages (id, message_id, tool_name, parameters, output, execution_time_ms, tool_use_id, created_at)
                                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"
@@ -546,7 +547,7 @@ pub async fn handle_chat_stream_ws(
                             .bind(&tool_usage_id)
                             .bind(&message_id)
                             .bind(&tool)
-                            .bind(&args)
+                            .bind(&params_option) // Bind the owned Option<Value>
                             .bind(Option::<serde_json::Value>::None) // output is NULL initially
                             .bind(Option::<i64>::None) // execution_time_ms is NULL initially
                             .bind(&tool_use_id) // Store the tool_use_id for matching
@@ -597,7 +598,7 @@ pub async fn handle_chat_stream_ws(
                                 pending_tools.remove(&tool)
                             };
                             
-                            if let Some((name, _params, start_time, tool_usage_id)) = pending_tool {
+                            if let Some((name, params, start_time, tool_usage_id)) = pending_tool {
                                 // We found the pending tool, calculate execution time
                                 let execution_time = start_time.elapsed().as_millis() as i64;
                                 
@@ -626,7 +627,7 @@ pub async fn handle_chat_stream_ws(
                                     message_id: message_id.clone(),
                                     tool_name: name.clone(),
                                     tool_use_id: Some(tool.clone()), // Store the tool_use_id
-                                    parameters: None, // We don't need to fetch this again
+                                    parameters: Some(params), // Keep the parameters from the pending tool
                                     output: Some(result.clone()),
                                     execution_time_ms: Some(execution_time),
                                     created_at: None, // We don't need to fetch this again

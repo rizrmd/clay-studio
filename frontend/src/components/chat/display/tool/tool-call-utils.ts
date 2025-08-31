@@ -126,13 +126,20 @@ export function parseMcpToolName(toolName: string): {
           color: "text-orange-600 bg-orange-50 border-orange-200",
         },
         
-        // Interaction tool
+        // Interaction tools
         ask_user: {
           name: "Interactive Element",
           description: "Creating interaction",
           done: "Interaction created",
           icon: MessageSquare,
           color: "text-violet-600 bg-violet-50 border-violet-200",
+        },
+        show_table: {
+          name: "Display Table",
+          description: "Displaying data table",
+          done: "Table displayed",
+          icon: Database,
+          color: "text-emerald-600 bg-emerald-50 border-emerald-200",
         },
       };
 
