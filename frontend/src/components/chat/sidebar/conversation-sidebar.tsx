@@ -613,7 +613,7 @@ export function ConversationSidebar({
 
         {/* Conversations area */}
         {(!isCollapsed || isMobileMenuOpen) && (
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 overflow-y-auto relative">
             {loading ? (
               <div className="p-4">
                 <div className="animate-pulse">
@@ -632,7 +632,7 @@ export function ConversationSidebar({
                 <p className="text-xs text-muted-foreground">Let's talk ? </p>
               </div>
             ) : (
-              <div className="p-2 min-w-[130px] ">
+              <div className="p-2 min-w-[130px] absolute inset-0 ">
                 {conversations.map((conversation) => (
                   <div
                     key={conversation.id}

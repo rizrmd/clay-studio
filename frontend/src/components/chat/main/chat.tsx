@@ -313,7 +313,7 @@ export function Chat({
 
         <div className="h-full pb-0">
           <div id="portal-body"></div>
-          <div className="h-full flex flex-col">
+          <div className="h-full flex flex-col overflow-y-auto">
             {/* Error display */}
             {error && (
               <div className="mb-4 bg-red-600 p-4 text-white">

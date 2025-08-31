@@ -78,7 +78,7 @@ export function MainApp() {
   };
 
   return (
-    <div className="h-screen flex relative overflow-hidden">
+    <div className="flex-1 flex relative h-full w-full">
       <ConversationSidebar
         isCollapsed={isMobile ? true : isSidebarCollapsed}
         onToggle={toggleSidebar}
