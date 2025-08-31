@@ -115,13 +115,20 @@ pub async fn handle_websocket(
     let state = depot.obtain::<AppState>().unwrap().clone();
     
     // Try to get session from query parameter first (for compatibility)
+    // Note: req.query automatically URL-decodes the parameter
     let session_from_query: Option<String> = req.query("session");
+    
+    // Also try to get the raw query string for debugging
+    if let Some(query_str) = req.uri().query() {
+        tracing::debug!("WebSocket: Raw query string: {}", query_str);
+    }
     
     // Extract session data for authentication
     let (user_id, client_id, role, is_authenticated) = if let Some(session_token) = session_from_query {
         // Fallback: Load session from session token in query parameter
         tracing::info!("WebSocket: Attempting to load session from query parameter");
-        tracing::debug!("WebSocket: Session token length: {}", session_token.len());
+        tracing::debug!("WebSocket: Session token (first 50 chars): {}", 
+                       &session_token.chars().take(50).collect::<String>());
         
         // The session token is the cookie value, load it from the store
         match state.session_store.load_session(session_token.clone()).await {
@@ -142,30 +149,45 @@ pub async fn handle_websocket(
                 }
             }
             Ok(None) => {
-                tracing::warn!("WebSocket: No session found for token");
+                tracing::warn!("WebSocket: No session found for token (session store returned None)");
                 ("anonymous".to_string(), None, None, false)
             }
             Err(e) => {
                 tracing::error!("WebSocket: Failed to load session from query parameter: {}", e);
+                tracing::error!("WebSocket: This usually means the session format is invalid or expired");
                 ("anonymous".to_string(), None, None, false)
             }
         }
-    } else if let Some(session) = depot.session() {
-        // Standard cookie-based session
-        let user_id: Option<String> = session.get("user_id");
-        let client_id: Option<String> = session.get("client_id");
-        let role: Option<String> = session.get("role");
-        
-        tracing::debug!("WebSocket session data from cookie: user_id={:?}, client_id={:?}, role={:?}", 
-                       user_id, client_id, role);
-        
-        match user_id {
-            Some(uid) => (uid, client_id, role, true),
-            None => ("anonymous".to_string(), None, None, false)
-        }
     } else {
-        tracing::warn!("WebSocket: No session found in depot or query");
-        ("anonymous".to_string(), None, None, false)
+        // Try standard cookie-based session
+        tracing::info!("WebSocket: No query parameter, checking cookie-based session");
+        
+        if let Some(session) = depot.session() {
+            let user_id: Option<String> = session.get("user_id");
+            let client_id: Option<String> = session.get("client_id");
+            let role: Option<String> = session.get("role");
+            
+            tracing::info!("WebSocket session data from cookie: user_id={:?}, client_id={:?}, role={:?}", 
+                           user_id, client_id, role);
+            
+            match user_id {
+                Some(uid) => (uid, client_id, role, true),
+                None => {
+                    tracing::warn!("WebSocket: Cookie session found but no user_id");
+                    ("anonymous".to_string(), None, None, false)
+                }
+            }
+        } else {
+            // Check if there's a cookie at all
+            if let Some(cookie) = req.cookie("clay_session") {
+                tracing::warn!("WebSocket: Cookie exists but depot.session() returned None");
+                tracing::debug!("WebSocket: Cookie value (first 50 chars): {}", 
+                               &cookie.value().chars().take(50).collect::<String>());
+            } else {
+                tracing::warn!("WebSocket: No session cookie found at all");
+            }
+            ("anonymous".to_string(), None, None, false)
+        }
     };
     
     tracing::info!("WebSocket connection request: user_id={}, authenticated={}, client_id={:?}", 

@@ -117,28 +117,34 @@ export class WebSocketService {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       let wsUrl = `${protocol}//${window.location.host}/api/ws`;
       
-      // For all browsers, try to get session token as fallback
-      // This helps with authentication issues across different browsers and environments
-      try {
-        const response = await fetch('/api/auth/session-token', {
-          credentials: 'include'
-        });
-        
-        if (response.ok) {
-          const data = await response.json();
-          if (data.session_token) {
-            wsUrl = `${wsUrl}?session=${encodeURIComponent(data.session_token)}`;
-            logger.info('WebSocketService: Using session token for WebSocket authentication');
-          } else {
-            logger.info('WebSocketService: No session token available, using standard cookie auth');
+      // First try without session parameter to use standard cookie auth
+      // Only add session parameter if cookies aren't working (fallback)
+      logger.info('WebSocketService: Attempting connection with standard cookie authentication');
+      
+      // For browsers that might have issues with cookies in WebSocket, try session token
+      // But only if we're authenticated (check for session cookie)
+      const hasCookie = document.cookie.includes('clay_session');
+      if (hasCookie) {
+        try {
+          const response = await fetch('/api/auth/session-token', {
+            credentials: 'include'
+          });
+          
+          if (response.ok) {
+            const data = await response.json();
+            if (data.session_token) {
+              // Only use session token if needed (we'll try cookie first)
+              wsUrl = `${wsUrl}?session=${encodeURIComponent(data.session_token)}`;
+              logger.info('WebSocketService: Adding session token as fallback for WebSocket authentication');
+            }
+          } else if (response.status === 401) {
+            logger.warn('WebSocketService: Session token endpoint returned 401, likely not authenticated');
           }
-        } else if (response.status === 401) {
-          logger.warn('WebSocketService: Not authenticated, WebSocket will connect as anonymous');
-        } else {
-          logger.warn('WebSocketService: Failed to get session token, continuing with cookie auth');
+        } catch (error) {
+          logger.debug('WebSocketService: Could not get session token, will use cookie auth:', error);
         }
-      } catch (error) {
-        logger.warn('WebSocketService: Error getting session token, using cookie auth:', error);
+      } else {
+        logger.info('WebSocketService: No session cookie found, connecting as anonymous');
       }
       
       logger.info('WebSocketService: Connecting to', wsUrl);
