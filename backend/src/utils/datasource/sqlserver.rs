@@ -213,7 +213,12 @@ impl SqlServerConnector {
     }
     
     async fn create_new_connection(&self) -> Result<Client<Compat<TcpStream>>, Box<dyn Error>> {
-        let tcp = TcpStream::connect(&self.server).await?;
+        // Connect with 3-second timeout
+        let tcp = tokio::time::timeout(
+            Duration::from_secs(3),
+            TcpStream::connect(&self.server)
+        ).await
+        .map_err(|_| Box::<dyn Error>::from("Connection timeout after 3 seconds"))??;
         tcp.set_nodelay(true)?;
         
         let mut client = Client::connect(self.config.clone(), tcp.compat_write()).await?;
@@ -256,9 +261,12 @@ impl DataSourceConnector for SqlServerConnector {
             
             info!("SQL Server connection attempt {} {}", attempt_num, ssl_status);
             
-            // Try to connect
-            match TcpStream::connect(&self.server).await {
-                Ok(tcp) => {
+            // Try to connect with 3-second timeout
+            match tokio::time::timeout(
+                Duration::from_secs(3),
+                TcpStream::connect(&self.server)
+            ).await {
+                Ok(Ok(tcp)) => {
                     tcp.set_nodelay(true).ok();
                     match Client::connect(config.clone(), tcp.compat_write()).await {
                         Ok(mut client) => {
@@ -303,8 +311,15 @@ impl DataSourceConnector for SqlServerConnector {
                         }
                     }
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     last_error = Some(Box::new(e) as Box<dyn Error + Send + Sync>);
+                    error!("TCP connection failed: {}", last_error.as_ref().unwrap());
+                    continue;
+                }
+                Err(_) => {
+                    last_error = Some(Box::<dyn Error + Send + Sync>::from("Connection timeout after 3 seconds"));
+                    error!("Connection timeout after 3 seconds");
+                    continue;
                 }
             }
         }

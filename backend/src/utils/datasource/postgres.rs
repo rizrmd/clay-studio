@@ -1,11 +1,12 @@
 use super::base::{DataSourceConnector, format_bytes};
 use serde_json::{json, Value};
-use sqlx::{postgres::PgPool, Row as SqlxRow, Column};
+use sqlx::{postgres::{PgPool, PgPoolOptions}, Row as SqlxRow, Column};
 use std::error::Error;
 use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{info, warn, error, debug};
+use std::time::Duration;
 
 pub struct PostgreSQLConnector {
     connection_string: String,
@@ -116,8 +117,14 @@ impl PostgreSQLConnector {
             // Pool is invalid, will create a new one below
         }
         
-        // Create new pool
-        let pool = PgPool::connect(&self.connection_string).await?;
+        // Create new pool with connection timeout
+        let pool = PgPoolOptions::new()
+            .max_connections(5)
+            .min_connections(1)
+            .acquire_timeout(Duration::from_secs(3))
+            .idle_timeout(Some(Duration::from_secs(30)))
+            .connect(&self.connection_string)
+            .await?;
         *pool_guard = Some(pool.clone());
         Ok(pool)
     }
@@ -157,8 +164,13 @@ impl DataSourceConnector for PostgreSQLConnector {
             
             info!("PostgreSQL connection attempt {} {}", attempt, ssl_status);
             
-            // Try to connect
-            match PgPool::connect(&conn_str).await {
+            // Try to connect with timeout (3 seconds max)
+            match PgPoolOptions::new()
+                .max_connections(5)
+                .min_connections(1)
+                .acquire_timeout(Duration::from_secs(3))
+                .idle_timeout(Some(Duration::from_secs(30)))
+                .connect(&conn_str).await {
                 Ok(pool) => {
                     // Try a simple query
                     match sqlx::query("SELECT 1").fetch_one(&pool).await {

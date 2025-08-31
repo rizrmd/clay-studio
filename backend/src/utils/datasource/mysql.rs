@@ -27,11 +27,11 @@ impl MySQLConnector {
             // Pool is invalid, will create a new one below
         }
         
-        // Create new pool
+        // Create new pool with 3-second timeout
         let pool_options = MySqlPoolOptions::new()
             .max_connections(5)
             .min_connections(1)
-            .acquire_timeout(Duration::from_secs(10))
+            .acquire_timeout(Duration::from_secs(3))
             .idle_timeout(Some(Duration::from_secs(30)));
         
         let pool = pool_options.connect(&self.connection_string).await?;

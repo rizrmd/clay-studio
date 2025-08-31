@@ -3,6 +3,7 @@ use serde_json::{json, Value};
 use clickhouse::Client;
 use std::error::Error;
 use async_trait::async_trait;
+use std::time::Duration;
 
 pub struct ClickHouseConnector {
     client: Client,
@@ -62,11 +63,15 @@ impl ClickHouseConnector {
 #[async_trait]
 impl DataSourceConnector for ClickHouseConnector {
     async fn test_connection(&mut self) -> Result<bool, Box<dyn Error>> {
-        let _result: u8 = self.client
-            .query("SELECT 1")
-            .fetch_one()
-            .await?;
-        Ok(true)
+        // Wrap the connection test with a 3-second timeout
+        match tokio::time::timeout(
+            Duration::from_secs(3),
+            self.client.query("SELECT 1").fetch_one::<u8>()
+        ).await {
+            Ok(Ok(_)) => Ok(true),
+            Ok(Err(e)) => Err(Box::new(e) as Box<dyn Error>),
+            Err(_) => Err(Box::<dyn Error>::from("Connection timeout after 3 seconds"))
+        }
     }
 
     async fn execute_query(&self, query: &str, limit: i32) -> Result<Value, Box<dyn Error>> {

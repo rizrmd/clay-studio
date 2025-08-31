@@ -23,7 +23,7 @@ impl Default for PoolConfig {
         Self {
             max_connections: 10,
             min_connections: 1,
-            connection_timeout: Duration::from_secs(30),
+            connection_timeout: Duration::from_secs(3),
             idle_timeout: Duration::from_secs(300), // 5 minutes
             max_lifetime: Duration::from_secs(1800), // 30 minutes
         }
