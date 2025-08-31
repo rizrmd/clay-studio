@@ -64,7 +64,12 @@ This project uses Model Context Protocol (MCP) tools for database operations and
 - **datasource_detail**: Check connection info (host, port, database, user, status) - FAST
 - **datasource_inspect**: Analyze database schema and structure - SLOW/HEAVY
 - **datasource_add**: Add a new datasource (check for duplicates first!)
+  - For non-default schemas, include `schema` parameter:
+    - PostgreSQL: `schema="myschema"` (default: public)
+    - Oracle: `schema="MYSCHEMA"` (default: username)
+    - SQL Server: `schema="myschema"` (default: dbo)
 - **datasource_update**: Update existing datasource configuration (use this to modify connection details)
+  - Can update schema: `datasource_update datasource_id="<id>" schema="new_schema"`
 - **datasource_remove**: Remove a datasource
 - **datasource_test**: Test if connection works
 
@@ -110,6 +115,19 @@ schema_get_related datasource_id="<id>" table="orders"
 schema_stats datasource_id="<id>"
 ```
 
+### Adding Datasources with Custom Schemas
+
+```mcp
+# PostgreSQL with custom schema (e.g., for Adempiere/iDempiere)
+datasource_add name="ERP Database" source_type="postgresql" host="server.com" port=5432 database="adempiere" username="user" password="pass" schema="adempiere"
+
+# Oracle with specific schema
+datasource_add name="Oracle DB" source_type="oracle" host="oracle.server.com" port=1521 service_name="ORCL" username="user" password="pass" schema="HR"
+
+# SQL Server with non-default schema
+datasource_add name="SQL Server" source_type="sqlserver" host="mssql.server.com" port=1433 database="mydb" username="user" password="pass" schema="accounting"
+```
+
 ### Updating Existing Datasources
 
 ```mcp
@@ -119,8 +137,11 @@ datasource_update datasource_id="<id>" host="new-host.com" port=5432
 # Update credentials
 datasource_update datasource_id="<id>" username="new_user" password="new_password"
 
+# Update schema
+datasource_update datasource_id="<id>" schema="new_schema"
+
 # Update multiple properties at once
-datasource_update datasource_id="<id>" host="new-host.com" database="new_db" username="new_user"
+datasource_update datasource_id="<id>" host="new-host.com" database="new_db" username="new_user" schema="new_schema"
 ```
 
 ### Data Querying
@@ -129,6 +150,34 @@ datasource_update datasource_id="<id>" host="new-host.com" database="new_db" use
 # Execute SQL queries
 data_query datasource_id="<id>" query="SELECT * FROM users LIMIT 10" limit=100
 ```
+
+#### Schema Handling for Different Databases
+
+**IMPORTANT**: Different databases handle schemas differently. The system automatically configures the correct schema for you:
+
+**PostgreSQL**:
+- Configured schema is automatically set in the search_path
+- You can query tables without schema prefix: `SELECT * FROM table_name`
+- The system searches in: configured_schema, then public
+
+**Oracle**:
+- Session automatically uses ALTER SESSION SET CURRENT_SCHEMA
+- Query tables directly: `SELECT * FROM table_name`
+- No need to prefix with schema name
+
+**SQL Server**:
+- Limited automatic schema support
+- For non-dbo schemas, you may need to use qualified names: `SELECT * FROM schema_name.table_name`
+- Or ensure the database user has the correct default schema
+
+**MySQL/MariaDB**:
+- Database and schema are synonymous
+- Tables are accessed directly within the selected database
+
+**When a table is not found**:
+1. First check if the table exists: `schema_search pattern="table_name"`
+2. For SQL Server, try with schema prefix: `SELECT * FROM schema_name.table_name`
+3. Verify the datasource configuration includes the correct schema
 
 #### IMPORTANT: Query Result Handling
 
