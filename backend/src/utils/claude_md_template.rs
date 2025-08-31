@@ -45,15 +45,18 @@ This project uses Model Context Protocol (MCP) tools for database operations and
 ### Interactive UI Tools
 
 - **ask_user**: Create interactive UI elements for user input
-  - Can create buttons, checkboxes, and input fields
+  - Can create buttons, checkboxes, input fields, charts, and markdown content
   - Use this when you need user input or selection
   - CRITICAL: Only include actionable options - NEVER add "cancel", "back", "back to menu", "learn more", "skip", "exit", or ANY navigation/cancellation options
   - When there's only one actionable option, present just that single option without any navigation alternatives
+  - Note: For displaying tables, use the dedicated `show_table` tool instead
 
-- **show_table**: Display interactive data tables
+- **show_table**: Display interactive data tables (SEPARATE TOOL from ask_user)
+  - This is a dedicated tool specifically for table display (NOT part of ask_user)
   - Use this to present data in a rich, sortable, filterable table format
   - Supports sorting, filtering, pivoting, and column management
   - Better than markdown tables for large datasets or when interactivity is needed
+  - IMPORTANT: This is invoked as `mcp__interaction__show_table`, not through ask_user
 
 ### When to Use Each Datasource Tool
 
@@ -151,7 +154,14 @@ data_query datasource_id="<id>" query="SELECT * FROM users LIMIT 10" limit=100
 
 ### Interactive UI Elements
 
-The `ask_user` tool allows you to create rich interactive elements in the chat interface:
+**IMPORTANT: Two Separate Tools for Interactions**
+
+1. **ask_user**: For user input (buttons, checkboxes, input fields, charts, markdown)
+2. **show_table**: For displaying data tables (THIS IS A SEPARATE TOOL)
+
+#### Using ask_user Tool
+
+The `ask_user` tool allows you to create interactive elements for user input:
 
 ```mcp
 # Create button choices for user selection
@@ -176,9 +186,15 @@ ask_user interaction_type="input" title="Enter custom SQL query" data={{
   "placeholder": "SELECT * FROM ...",
   "input_type": "text"
 }} requires_response=true
+```
 
-# Display interactive data table (using show_table tool)
-show_table interaction_type="table" title="Sales Performance Data" data={{
+#### Using show_table Tool (SEPARATE FROM ask_user)
+
+```mcp
+# Display interactive data table using the DEDICATED show_table tool
+# IMPORTANT: This calls mcp__interaction__show_table, NOT ask_user
+# DO NOT use ask_user with interaction_type="table" - use show_table instead
+show_table title="Sales Performance Data" data={{
   "columns": [
     {{"key": "product", "label": "Product", "data_type": "string", "sortable": true, "filterable": true}},
     {{"key": "revenue", "label": "Revenue", "data_type": "currency", "currency": "USD", "sortable": true}},
@@ -355,15 +371,15 @@ Use `schema_get tables=[\"<table_name>\"]` to see the actual columns."
 1. **Use buttons for single choices**: When users need to select one option from a list
 2. **Use checkboxes for multiple selections**: When users can select multiple items
 3. **Use input for free text**: When you need custom user input like SQL queries or search terms
-4. **Use show_table for data display**: When presenting query results or structured data that benefits from sorting, filtering, or pivoting
+4. **Use show_table for data display**: When presenting query results or structured data that benefits from sorting, filtering, or pivoting (Note: show_table is a separate tool, not part of ask_user)
 5. **Set requires_response appropriately**: Set to `true` for user inputs, `false` for display-only elements
 6. **Provide clear descriptions**: Always include helpful descriptions for button and checkbox options
-7. **Choose table vs markdown**: Use `show_table` for interactive data exploration, use markdown tables for small, static data
+7. **Choose table vs markdown**: Use `show_table` (separate tool) for interactive data exploration, use markdown tables for small, static data
 8. **Only actionable options**: CRITICAL - NEVER include non-actionable options like "cancel", "back", "back to main menu", "back to menu", "skip", "exit", "learn more", or ANY navigation/cancellation options. If there's only one action available, present just that single option
 
 ### When to Use show_table vs Markdown Tables
 
-- **Use show_table when**:
+- **Use show_table tool (mcp__interaction__show_table) when**:
   - You have ACTUAL data from a successful query (not examples)
   - Data has more than 10 rows
   - Users need to sort or filter the data
@@ -371,7 +387,8 @@ Use `schema_get tables=[\"<table_name>\"]` to see the actual columns."
   - You want to enable pivoting or aggregation
   - The data is the main focus of the response
   
-  **CRITICAL**: ONLY use show_table with real query results. NEVER create example data tables.
+  **CRITICAL**: ONLY use show_table tool with real query results. NEVER create example data tables.
+  **IMPORTANT**: show_table is a separate MCP tool (mcp__interaction__show_table), not a variant of ask_user.
 
 - **Use markdown tables when**:
   - Data has fewer than 10 rows

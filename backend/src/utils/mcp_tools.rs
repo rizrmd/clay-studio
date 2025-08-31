@@ -102,6 +102,13 @@ pub fn get_mcp_tools() -> HashMap<String, McpTool> {
         result_indicators: vec!["interaction_type", "Interactive element created", "User interaction"],
     });
     
+    tools.insert("mcp__interaction__show_table".to_string(), McpTool {
+        name: "show_table",
+        display_name: "Display Table",
+        description: "Displays interactive data tables with sorting, filtering, and export capabilities",
+        result_indicators: vec!["Table Display", "interactive table has been rendered", "Table Created"],
+    });
+    
     // Add more MCP tools here as needed
     // Example for a new tool:
     // tools.insert("mcp__new-server__tool_name".to_string(), McpTool {

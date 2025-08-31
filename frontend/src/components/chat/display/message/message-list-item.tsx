@@ -426,7 +426,8 @@ export const MessageListItem = memo(
               {/* Interaction Tool Rendering */}
               {(() => {
                 const interactionUsages = message.tool_usages?.filter(
-                  (usage) => usage.tool_name === "mcp__interaction__ask_user"
+                  (usage) => usage.tool_name === "mcp__interaction__ask_user" ||
+                            usage.tool_name === "mcp__interaction__show_table"
                 );
                 return interactionUsages?.some((usage) =>
                   hasInteraction(usage.output)
@@ -442,7 +443,8 @@ export const MessageListItem = memo(
                   {(message.tool_usages || [])
                     .filter(
                       (usage) =>
-                        usage.tool_name === "mcp__interaction__ask_user"
+                        usage.tool_name === "mcp__interaction__ask_user" ||
+                        usage.tool_name === "mcp__interaction__show_table"
                     )
                     .map((usage, index) => (
                       <InteractionRenderer

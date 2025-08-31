@@ -481,6 +481,63 @@ impl McpHandlers {
                     "required": ["interaction_type", "title", "data"]
                 }),
             });
+            
+            // Show Table Tool - for displaying interactive data tables
+            tools.push(Tool {
+                name: "show_table".to_string(),
+                description: "Display interactive data tables with sorting, filtering, and pivoting capabilities".to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "title": {
+                            "type": "string",
+                            "description": "Title for the table"
+                        },
+                        "data": {
+                            "type": "object",
+                            "description": "Table data including columns and rows",
+                            "properties": {
+                                "columns": {
+                                    "type": "array",
+                                    "description": "Column definitions",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "key": {"type": "string"},
+                                            "label": {"type": "string"},
+                                            "data_type": {"type": "string"},
+                                            "sortable": {"type": "boolean"},
+                                            "filterable": {"type": "boolean"},
+                                            "currency": {"type": "string"}
+                                        },
+                                        "required": ["key", "label"]
+                                    }
+                                },
+                                "rows": {
+                                    "type": "array",
+                                    "description": "Table data rows",
+                                    "items": {
+                                        "type": "object"
+                                    }
+                                }
+                            },
+                            "required": ["columns", "rows"]
+                        },
+                        "options": {
+                            "type": "object",
+                            "description": "Table display options",
+                            "properties": {
+                                "enable_sorting": {"type": "boolean", "default": true},
+                                "enable_filtering": {"type": "boolean", "default": true},
+                                "enable_pivoting": {"type": "boolean", "default": false},
+                                "enable_export": {"type": "boolean", "default": true},
+                                "page_size": {"type": "integer", "default": 50}
+                            }
+                        }
+                    },
+                    "required": ["title", "data"]
+                }),
+            });
         }
         
         Ok(json!({
@@ -561,6 +618,18 @@ impl McpHandlers {
                     Err(JsonRpcError {
                         code: -32601,
                         message: "ask_user tool is only available on interaction server".to_string(),
+                        data: None,
+                    })
+                }
+            }
+            // Show Table Tool
+            "show_table" => {
+                if self.server_type == "interaction" {
+                    self.handle_show_table(arguments).await
+                } else {
+                    Err(JsonRpcError {
+                        code: -32601,
+                        message: "show_table tool is only available on interaction server".to_string(),
                         data: None,
                     })
                 }
@@ -2440,6 +2509,90 @@ impl McpHandlers {
                 )
             }
         };
+        
+        Ok(response_text)
+    }
+    
+    async fn handle_show_table(
+        &self,
+        arguments: &serde_json::Map<String, Value>,
+    ) -> Result<String, JsonRpcError> {
+        // Extract required parameters
+        let title = arguments
+            .get("title")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| JsonRpcError {
+                code: INVALID_PARAMS,
+                message: "Missing title".to_string(),
+                data: None,
+            })?;
+        
+        let data = arguments
+            .get("data")
+            .ok_or_else(|| JsonRpcError {
+                code: INVALID_PARAMS,
+                message: "Missing data".to_string(),
+                data: None,
+            })?;
+        
+        // Validate data structure
+        if !data.is_object() {
+            return Err(JsonRpcError {
+                code: INVALID_PARAMS,
+                message: "data must be an object with 'columns' and 'rows' arrays".to_string(),
+                data: None,
+            });
+        }
+        
+        let data_obj = data.as_object().unwrap();
+        
+        // Validate columns
+        if !data_obj.contains_key("columns") || !data_obj["columns"].is_array() {
+            return Err(JsonRpcError {
+                code: INVALID_PARAMS,
+                message: "data.columns must be an array".to_string(),
+                data: None,
+            });
+        }
+        
+        // Validate rows
+        if !data_obj.contains_key("rows") || !data_obj["rows"].is_array() {
+            return Err(JsonRpcError {
+                code: INVALID_PARAMS,
+                message: "data.rows must be an array".to_string(),
+                data: None,
+            });
+        }
+        
+        // Extract optional parameters
+        let options = arguments.get("options");
+        
+        // Create table interaction response
+        let interaction_id = uuid::Uuid::new_v4().to_string();
+        
+        // Build the interaction spec specifically for tables
+        let interaction_spec = json!({
+            "interaction_id": interaction_id,
+            "interaction_type": "table",
+            "title": title,
+            "data": data,
+            "options": options.unwrap_or(&json!({
+                "enable_sorting": true,
+                "enable_filtering": true,
+                "enable_pivoting": false,
+                "enable_export": true,
+                "page_size": 50
+            })),
+            "requires_response": false,
+            "created_at": chrono::Utc::now().to_rfc3339(),
+        });
+        
+        // Format response for table display
+        let response_text = format!(
+            "📋 **Table Display**: {}\n\n```json\n{}\n```\n\n✨ The interactive table has been rendered with sorting, filtering, and export capabilities.",
+            title,
+            serde_json::to_string_pretty(&interaction_spec).unwrap_or_default()
+        );
         
         Ok(response_text)
     }

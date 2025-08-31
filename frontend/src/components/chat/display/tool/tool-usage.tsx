@@ -5,11 +5,20 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Clock, AlertCircle, CheckCircle } from "lucide-react";
+import {
+  Loader2,
+  Clock,
+  AlertCircle,
+  CheckCircle,
+  Maximize2,
+  Minimize2,
+} from "lucide-react";
 import { useToolUsage } from "@/hooks/use-tool-usage";
 import { ToolUsage } from "@/types/chat";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { parseMcpToolName } from "./tool-call-utils";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { createPortal } from "react-dom";
 
 interface ToolUsagePopoverProps {
   messageId: string;
@@ -27,6 +36,7 @@ export function ToolUsagePopover({
   const [toolUsage, setToolUsage] = useState<ToolUsage | null>(null);
   const [isOpen, setIsOpen] = useState(false);
   const [hasFetched, setHasFetched] = useState(false);
+  const [isMaximized, setIsMaximized] = useState(false);
   const { fetchToolUsage, loading, error } = useToolUsage();
 
   useEffect(() => {
@@ -151,7 +161,7 @@ export function ToolUsagePopover({
         const keys = Array.from(allKeys);
 
         return (
-          <div className="overflow-x-auto">
+          <div className="overflow-auto">
             <table className="min-w-full text-xs border border-border rounded bg-white">
               <thead>
                 <tr className="border-b border-border bg-muted/20">
@@ -182,7 +192,7 @@ export function ToolUsagePopover({
       if (typeof data === "object" && data !== null && !Array.isArray(data)) {
         const entries = Object.entries(data);
         return (
-          <div className="overflow-x-auto">
+          <div className="overflow-auto">
             <table className="min-w-full text-xs border border-border rounded bg-white">
               <thead>
                 <tr className="border-b border-border bg-muted/20">
@@ -207,13 +217,13 @@ export function ToolUsagePopover({
 
       // Fallback to formatted JSON
       return (
-        <pre className="text-xs overflow-x-auto whitespace-pre-wrap break-words font-mono">
+        <pre className="text-xs overflow-auto whitespace-pre-wrap break-words font-mono">
           {JSON.stringify(data, null, 2)}
         </pre>
       );
     } catch {
       return (
-        <pre className="text-xs overflow-x-auto whitespace-pre-wrap break-words font-mono">
+        <pre className="text-xs overflow-auto whitespace-pre-wrap break-words font-mono">
           {String(json)}
         </pre>
       );
@@ -245,7 +255,7 @@ export function ToolUsagePopover({
             // For multiline strings, use pre formatting
             if (result.includes("\n") || result.length > 100) {
               return (
-                <pre className="text-xs overflow-x-auto whitespace-pre-wrap break-words font-mono max-h-[300px] overflow-y-auto">
+                <pre className="text-xs overflow-auto whitespace-pre-wrap break-words font-mono max-h-[300px] overflow-y-auto">
                   {result}
                 </pre>
               );
@@ -258,7 +268,7 @@ export function ToolUsagePopover({
         if (status === "completed") {
           if (result && typeof result === "string" && result.trim()) {
             return (
-              <pre className="text-xs overflow-x-auto whitespace-pre-wrap break-words font-mono">
+              <pre className="text-xs overflow-auto whitespace-pre-wrap break-words font-mono">
                 {result}
               </pre>
             );
@@ -277,7 +287,7 @@ export function ToolUsagePopover({
                 <AlertCircle className="h-4 w-4" />
                 <span className="font-medium">Error</span>
               </div>
-              <pre className="text-xs overflow-x-auto whitespace-pre-wrap break-words font-mono">
+              <pre className="text-xs overflow-auto whitespace-pre-wrap break-words font-mono">
                 {typeof result === "string"
                   ? result
                   : JSON.stringify(result, null, 2)}
@@ -309,7 +319,7 @@ export function ToolUsagePopover({
           // For multiline or long strings, use pre formatting
           if (output.includes("\n") || output.length > 100) {
             return (
-              <pre className="text-xs overflow-x-auto whitespace-pre-wrap break-words font-mono max-h-[300px] overflow-y-auto">
+              <pre className="text-xs overflow-auto whitespace-pre-wrap break-words font-mono max-h-[300px] overflow-y-auto">
                 {output}
               </pre>
             );
@@ -324,14 +334,14 @@ export function ToolUsagePopover({
       }
 
       return (
-        <pre className="text-xs overflow-x-auto whitespace-pre-wrap break-words font-mono">
+        <pre className="text-xs overflow-auto whitespace-pre-wrap break-words font-mono">
           {String(output)}
         </pre>
       );
     } catch (err) {
       console.error("Error rendering output:", err);
       return (
-        <pre className="text-xs overflow-x-auto whitespace-pre-wrap break-words font-mono">
+        <pre className="text-xs overflow-auto whitespace-pre-wrap break-words font-mono">
           {String(output)}
         </pre>
       );
@@ -347,125 +357,155 @@ export function ToolUsagePopover({
   const toolInfo = parseMcpToolName(toolName);
   const Icon = toolInfo.icon;
 
+  const portal = document.getElementById("portal-body");
+  const content = (
+    <>
+      <div className="flex items-center justify-between border-b px-4 py-3">
+        <div className="flex items-center gap-2">
+          <Icon className="h-4 w-4 text-muted-foreground" />
+          <h3 className="font-medium">{toolInfo.friendlyName}</h3>
+        </div>
+        <div className="flex items-center gap-2">
+          {toolUsage && (
+            <Badge variant="outline" className="flex items-center gap-1">
+              <CheckCircle className="h-3 w-3 text-green-600" />
+              Completed
+            </Badge>
+          )}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={() => setIsMaximized(!isMaximized)}
+            title={isMaximized ? "Minimize" : "Maximize"}
+          >
+            {isMaximized ? (
+              <Minimize2 className="h-4 w-4" />
+            ) : (
+              <Maximize2 className="h-4 w-4" />
+            )}
+          </Button>
+        </div>
+      </div>
+
+      <div className="p-4 space-y-4 flex-1 flex flex-col">
+        {loading && (
+          <div className="flex flex-col items-center justify-center py-8 space-y-2">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            <span className="text-sm text-muted-foreground">
+              Loading tool details...
+            </span>
+          </div>
+        )}
+
+        {error && (
+          <div className="flex items-center gap-2 text-destructive text-sm">
+            <AlertCircle className="h-4 w-4" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        {!loading && !error && !toolUsage && hasFetched && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-sm">
+              <CheckCircle className="h-4 w-4 text-green-600" />
+              <span>Tool executed successfully</span>
+            </div>
+            <div className="text-xs text-muted-foreground bg-muted/50 rounded-lg p-3">
+              <p className="mb-2">
+                No detailed output captured for this tool execution.
+              </p>
+              <p>This could mean:</p>
+              <ul className="list-disc list-inside mt-1 space-y-1 ml-2">
+                <li>The tool completed without producing output</li>
+                <li>The output was processed internally</li>
+                <li>The tool execution details were not stored</li>
+              </ul>
+            </div>
+          </div>
+        )}
+
+        {toolUsage && (
+          <>
+            {/* Parameters Section */}
+            {!!toolUsage.parameters &&
+              Object.keys(toolUsage.parameters).length > 0 && (
+                <div className="space-y-2 flex flex-1 flex-col">
+                  <h4 className="text-sm font-medium text-muted-foreground">
+                    Parameters
+                  </h4>
+                  <div className="relative overflow-auto flex-1 min-h-[200px] border">
+                    <div className="absolute inset-0">
+                      {renderJsonAsTable(toolUsage.parameters)}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+            {/* Output Section */}
+            <div className="space-y-2 flex flex-1 flex-col">
+              <h4 className="text-sm font-medium text-muted-foreground items-center flex gap-2">
+                Output{" "}
+                {toolUsage.output?.status === "completed" && (
+                  <CheckCircle className="h-4 w-4 inline mr-2 text-green-600" />
+                )}
+              </h4>
+              <div className="relative overflow-auto flex-1 min-h-[200px] border">
+                <div className="absolute inset-0">
+                  {renderOutput(toolUsage.output)}
+                </div>
+              </div>
+            </div>
+
+            {/* Metadata */}
+            {(toolUsage.createdAt ||
+              toolUsage.execution_time_ms !== undefined) && (
+              <div className="flex items-center justify-between text-xs text-muted-foreground pt-2 border-t">
+                {toolUsage.createdAt && (
+                  <span>
+                    {new Date(toolUsage.createdAt).toLocaleString(undefined, {
+                      hour12: false,
+                      year: "numeric",
+                      month: "2-digit",
+                      day: "2-digit",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      second: "2-digit",
+                    })}
+                  </span>
+                )}
+                {toolUsage.execution_time_ms !== undefined && (
+                  <div className="flex items-center gap-1">
+                    <Clock className="h-3 w-3" />
+                    <span>
+                      {formatExecutionTime(toolUsage.execution_time_ms)}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </>
+  );
+  if (isOpen && isMaximized && portal) {
+    return createPortal(
+      <div className="absolute inset-0 z-[200] bg-white overflow-auto w-auto h-auto flex flex-col">
+        {content}
+      </div>,
+      portal
+    );
+  }
+
   return (
     <Popover open={isOpen} onOpenChange={setIsOpen}>
       <PopoverTrigger asChild>{children}</PopoverTrigger>
-      <PopoverContent className="w-[500px] max-h-[600px] p-0" align="start">
-        <div className="flex items-center justify-between border-b px-4 py-3">
-          <div className="flex items-center gap-2">
-            <Icon className="h-4 w-4 text-muted-foreground" />
-            <h3 className="font-medium">{toolInfo.friendlyName}</h3>
-          </div>
-          <div className="flex items-center gap-2">
-            {toolUsage && (
-              <Badge variant="outline" className="flex items-center gap-1">
-                <CheckCircle className="h-3 w-3 text-green-600" />
-                Completed
-              </Badge>
-            )}
-          </div>
-        </div>
-
-        <ScrollArea className="max-h-[500px]">
-          <div className="p-4 space-y-4">
-            {loading && (
-              <div className="flex flex-col items-center justify-center py-8 space-y-2">
-                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                <span className="text-sm text-muted-foreground">
-                  Loading tool details...
-                </span>
-              </div>
-            )}
-
-            {error && (
-              <div className="flex items-center gap-2 text-destructive text-sm">
-                <AlertCircle className="h-4 w-4" />
-                <span>{error}</span>
-              </div>
-            )}
-
-            {!loading && !error && !toolUsage && hasFetched && (
-              <div className="space-y-3">
-                <div className="flex items-center gap-2 text-sm">
-                  <CheckCircle className="h-4 w-4 text-green-600" />
-                  <span>Tool executed successfully</span>
-                </div>
-                <div className="text-xs text-muted-foreground bg-muted/50 rounded-lg p-3">
-                  <p className="mb-2">
-                    No detailed output captured for this tool execution.
-                  </p>
-                  <p>This could mean:</p>
-                  <ul className="list-disc list-inside mt-1 space-y-1 ml-2">
-                    <li>The tool completed without producing output</li>
-                    <li>The output was processed internally</li>
-                    <li>The tool execution details were not stored</li>
-                  </ul>
-                </div>
-              </div>
-            )}
-
-            {toolUsage && (
-              <>
-                {/* Parameters Section */}
-                {!!toolUsage.parameters &&
-                  Object.keys(toolUsage.parameters).length > 0 && (
-                    <div className="space-y-2">
-                      <h4 className="text-sm font-medium text-muted-foreground">
-                        Parameters
-                      </h4>
-                      <div className="bg-muted/50 rounded-lg p-3">
-                        {renderJsonAsTable(toolUsage.parameters)}
-                      </div>
-                    </div>
-                  )}
-
-                {/* Output Section */}
-                <div className="space-y-2">
-                  <h4 className="text-sm font-medium text-muted-foreground items-center flex gap-2">
-                    Output{" "}
-                    {toolUsage.output?.status === "completed" && (
-                      <CheckCircle className="h-4 w-4 inline mr-2 text-green-600" />
-                    )}
-                  </h4>
-                  <div className="bg-muted/50 rounded-lg p-3 max-h-60 overflow-auto">
-                    {renderOutput(toolUsage.output)}
-                  </div>
-                </div>
-
-                {/* Metadata */}
-                {(toolUsage.createdAt ||
-                  toolUsage.execution_time_ms !== undefined) && (
-                  <div className="flex items-center justify-between text-xs text-muted-foreground pt-2 border-t">
-                    {toolUsage.createdAt && (
-                      <span>
-                        {new Date(toolUsage.createdAt).toLocaleString(
-                          undefined,
-                          {
-                            hour12: false,
-                            year: "numeric",
-                            month: "2-digit",
-                            day: "2-digit",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                            second: "2-digit",
-                          }
-                        )}
-                      </span>
-                    )}
-                    {toolUsage.execution_time_ms !== undefined && (
-                      <div className="flex items-center gap-1">
-                        <Clock className="h-3 w-3" />
-                        <span>
-                          {formatExecutionTime(toolUsage.execution_time_ms)}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        </ScrollArea>
+      <PopoverContent
+        className={cn("p-0", "w-[500px] max-h-[600px]")}
+        align={isMaximized ? "center" : "start"}
+      >
+        {content}
       </PopoverContent>
     </Popover>
   );

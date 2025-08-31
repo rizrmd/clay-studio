@@ -8,6 +8,7 @@ import {
   Globe,
   ListTodo,
   MessageSquare,
+  Table,
 } from "lucide-react";
 
 // Function to parse MCP tool names and convert to friendly display names
@@ -138,7 +139,7 @@ export function parseMcpToolName(toolName: string): {
           name: "Display Table",
           description: "Showing Table",
           done: "Table displayed",
-          icon: Database,
+          icon: Table,
           color: "text-emerald-600 bg-emerald-50 border-emerald-200",
         },
       };
