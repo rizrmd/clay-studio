@@ -30,6 +30,12 @@ pub enum ClientMessage {
     StopStreaming {
         conversation_id: String,
     },
+    SendMessage {
+        project_id: String,
+        conversation_id: String,
+        content: String,
+        uploaded_file_paths: Option<Vec<String>>,
+    },
 }
 
 // WebSocket message types to client
@@ -48,6 +54,14 @@ pub enum ServerMessage {
         project_id: String, 
         conversation_id: Option<String> 
     },
+    ConversationHistory {
+        conversation_id: String,
+        messages: Vec<crate::models::Message>,
+    },
+    ConversationRedirect {
+        old_conversation_id: String,
+        new_conversation_id: String,
+    },
     Pong,
     // Streaming messages
     Start { 
@@ -55,13 +69,22 @@ pub enum ServerMessage {
         conversation_id: String 
     },
     Progress { 
-        content: String,
+        content: serde_json::Value,
         conversation_id: String 
     },
     ToolUse { 
         tool: String,
+        tool_usage_id: String,
         conversation_id: String 
     },
+    ToolComplete {
+        tool: String,
+        tool_usage_id: String,
+        execution_time_ms: i64,
+        output: Option<serde_json::Value>,
+        conversation_id: String
+    },
+    #[allow(dead_code)]
     AskUser {
         prompt_type: String,
         title: String,
@@ -84,18 +107,6 @@ pub enum ServerMessage {
     Error { 
         error: String,
         conversation_id: String 
-    },
-    TitleUpdated {
-        conversation_id: String,
-        title: String
-    },
-    ContextUsage {
-        conversation_id: String,
-        total_chars: usize,
-        max_chars: usize,
-        percentage: f32,
-        message_count: usize,
-        needs_compaction: bool,
     },
 }
 
@@ -281,6 +292,7 @@ async fn handle_websocket_connection(
                             handle_client_message(
                                 client_msg, 
                                 &user_id, 
+                                &client_id,
                                 &connection_id, 
                                 &msg_tx, 
                                 &state
@@ -317,6 +329,7 @@ async fn handle_websocket_connection(
 async fn handle_client_message(
     msg: ClientMessage,
     user_id: &str,
+    client_id: &Option<String>,
     connection_id: &str,
     sender: &mpsc::UnboundedSender<ServerMessage>,
     state: &AppState,
@@ -339,6 +352,29 @@ async fn handle_client_message(
             tracing::info!("User {} subscribing to project={}, conversation={:?}", 
                 user_id, project_id, conversation_id);
             
+            // Add subscriber to conversation cache and preload messages if conversation is specified
+            if let Some(ref conv_id) = conversation_id {
+                if conv_id != "new" {
+                    // Add as subscriber
+                    state.add_conversation_subscriber(conv_id, connection_id).await;
+                    
+                    // Get messages from cache and send them
+                    match state.get_conversation_messages(conv_id).await {
+                        Ok(messages) => {
+                            tracing::info!("Sending {} cached messages for conversation {}", 
+                                          messages.len(), conv_id);
+                            let _ = sender.send(ServerMessage::ConversationHistory {
+                                conversation_id: conv_id.clone(),
+                                messages,
+                            });
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to get conversation messages: {}", e);
+                        }
+                    }
+                }
+            }
+            
             // Update connection's subscription in connection manager
             {
                 let mut connections = WS_CONNECTIONS.write().await;
@@ -352,28 +388,74 @@ async fn handle_client_message(
             if let Some(ref conv_id) = conversation_id {
                 let streams = state.active_claude_streams.read().await;
                 if let Some(stream_state) = streams.get(conv_id) {
-                    tracing::info!("Found active stream for conversation {}, sending current state", conv_id);
-                    
-                    // Send current streaming state
-                    let _ = sender.send(ServerMessage::Start { 
-                        id: stream_state.message_id.clone(),
-                        conversation_id: conv_id.clone(),
-                    });
-                    
-                    // Send any active tools
-                    for tool in &stream_state.active_tools {
-                        let _ = sender.send(ServerMessage::ToolUse { 
-                            tool: tool.clone(),
-                            conversation_id: conv_id.clone()
+                    // Only replay if there are events to replay (message is still streaming)
+                    if !stream_state.progress_events.is_empty() {
+                        tracing::info!("Found active stream for conversation {}, replaying {} events", 
+                            conv_id, stream_state.progress_events.len());
+                        
+                        // First send the Start event to initialize the stream
+                        let _ = sender.send(ServerMessage::Start { 
+                            id: stream_state.message_id.clone(),
+                            conversation_id: conv_id.clone(),
                         });
-                    }
-                    
-                    // Send partial content if any
-                    if !stream_state.partial_content.is_empty() {
-                        let _ = sender.send(ServerMessage::Content { 
-                            content: stream_state.partial_content.clone(),
-                            conversation_id: conv_id.clone()
-                        });
+                        
+                        // Replay all stored events in order
+                        for event in &stream_state.progress_events {
+                            if let Some(event_type) = event.get("type").and_then(|t| t.as_str()) {
+                                match event_type {
+                                    "progress" => {
+                                        if let Some(content) = event.get("content") {
+                                            let _ = sender.send(ServerMessage::Progress {
+                                                content: content.clone(),
+                                                conversation_id: conv_id.clone(),
+                                            });
+                                        }
+                                    }
+                                    "tool_use" => {
+                                        if let (Some(tool), Some(tool_usage_id)) = (
+                                            event.get("tool").and_then(|t| t.as_str()),
+                                            event.get("tool_usage_id").and_then(|t| t.as_str())
+                                        ) {
+                                            let _ = sender.send(ServerMessage::ToolUse {
+                                                tool: tool.to_string(),
+                                                tool_usage_id: tool_usage_id.to_string(),
+                                                conversation_id: conv_id.clone(),
+                                            });
+                                        }
+                                    }
+                                    "tool_complete" => {
+                                        if let (Some(tool), Some(tool_usage_id), Some(execution_time_ms)) = (
+                                            event.get("tool").and_then(|t| t.as_str()),
+                                            event.get("tool_usage_id").and_then(|t| t.as_str()),
+                                            event.get("execution_time_ms").and_then(|t| t.as_i64()),
+                                        ) {
+                                            let _ = sender.send(ServerMessage::ToolComplete {
+                                                tool: tool.to_string(),
+                                                tool_usage_id: tool_usage_id.to_string(),
+                                                execution_time_ms,
+                                                output: event.get("output").cloned(),
+                                                conversation_id: conv_id.clone(),
+                                            });
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        
+                        tracing::info!(
+                            "Replayed {} events for conversation {} (content: {} chars, tools: {})", 
+                            stream_state.progress_events.len(),
+                            conv_id,
+                            stream_state.partial_content.len(),
+                            stream_state.active_tools.len()
+                        );
+                    } else {
+                        tracing::info!(
+                            "Found completed stream for conversation {} (no events to replay)", 
+                            conv_id
+                        );
+                        // Message is complete, no need to replay anything
                     }
                 }
             }
@@ -386,6 +468,18 @@ async fn handle_client_message(
         
         ClientMessage::Unsubscribe => {
             tracing::info!("Connection {} (user {}) unsubscribing", connection_id, user_id);
+            
+            // Remove from conversation cache if subscribed to one
+            {
+                let connections = WS_CONNECTIONS.read().await;
+                if let Some(conn) = connections.get(connection_id) {
+                    if let Some(ref conv_id) = conn.conversation_id {
+                        if conv_id != "new" {
+                            state.remove_conversation_subscriber(conv_id, connection_id).await;
+                        }
+                    }
+                }
+            }
             
             // Clear subscription in connection manager
             {
@@ -430,6 +524,37 @@ async fn handle_client_message(
                 if streams.remove(&conversation_id).is_some() {
                     tracing::info!("Stopped streaming for conversation: {}", conversation_id);
                 }
+            }
+        },
+        
+        ClientMessage::SendMessage { project_id, conversation_id, content, uploaded_file_paths } => {
+            tracing::info!(
+                "Received send message request: project={}, conversation={}, client_id={:?}", 
+                project_id, conversation_id, client_id
+            );
+            
+            // Check if we have a client_id for Claude authentication
+            if let Some(client_id_str) = client_id.clone() {
+                tracing::info!("Starting chat message handler with client_id: {}", client_id_str);
+                let state_owned = state.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = crate::api::chat_ws::handle_chat_message_ws(
+                        project_id,
+                        conversation_id,
+                        content,
+                        uploaded_file_paths.unwrap_or_default(),
+                        client_id_str,
+                        state_owned,
+                    ).await {
+                        tracing::error!("Failed to handle chat message via WebSocket: {}", e);
+                    }
+                });
+            } else {
+                tracing::error!("No client_id available for Claude authentication - user_id: {}", user_id);
+                let _ = sender.send(ServerMessage::Error {
+                    error: "Client not authenticated. Please complete setup first.".to_string(),
+                    conversation_id: conversation_id.clone(),
+                });
             }
         },
     }
@@ -486,10 +611,17 @@ pub async fn broadcast_to_subscribers(
     let connections = WS_CONNECTIONS.read().await;
     let mut _sent_count = 0;
     
+    tracing::info!("Broadcasting to subscribers: project={}, conversation={}, total_connections={}", 
+                   project_id, conversation_id, connections.len());
+    
     for (connection_id, conn) in connections.iter() {
+        tracing::info!("Checking connection {}: project={:?}, conversation={:?}", 
+                       connection_id, conn.project_id, conn.conversation_id);
+        
         // Check if connection is subscribed to this project/conversation
         if let (Some(user_project), Some(user_conversation)) = (&conn.project_id, &conn.conversation_id) {
             if user_project == project_id && user_conversation == conversation_id {
+                tracing::info!("Sending to exact match: {}", connection_id);
                 if conn.sender.send(message.clone()).is_ok() {
                     _sent_count += 1;
                 } else {
@@ -499,6 +631,7 @@ pub async fn broadcast_to_subscribers(
         } else if let Some(user_project) = &conn.project_id {
             // Connection is subscribed to project but not specific conversation - still send
             if user_project == project_id {
+                tracing::info!("Sending to project match: {}", connection_id);
                 if conn.sender.send(message.clone()).is_ok() {
                     _sent_count += 1;
                 }

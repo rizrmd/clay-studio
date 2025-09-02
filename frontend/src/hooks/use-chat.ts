@@ -1,7 +1,6 @@
 import { useEffect, useCallback, useMemo, useRef } from "react";
 import { useSnapshot } from "valtio";
 import { useNavigate } from "react-router-dom";
-import { logger } from "@/lib/logger";
 import {
   conversationStore,
   getOrCreateConversationState,
@@ -63,81 +62,41 @@ export function useChat(projectId: string, conversationId?: string) {
   // Set project ID and subscribe to WebSocket
   useEffect(() => {
     conversationStore.currentProjectId = projectId;
-    
-    // Subscribe to WebSocket for this project only
+
+    // Subscribe to WebSocket for this project and conversation
     const wsService = WebSocketService.getInstance();
-    wsService.subscribe(projectId);
-    
+    wsService.subscribe(projectId, currentConversationId);
+
     return () => {
       // Note: Don't unsubscribe on cleanup as other components might still need it
       // The WebSocket will handle reconnection and resubscription automatically
     };
-  }, [projectId]);
-
+  }, [projectId, currentConversationId]);
 
   // Handle conversation switching
   useEffect(() => {
-    logger.debug("useChat: Conversation switch check:", {
-      previous: previousConversationId.current,
-      current: currentConversationId,
-      shouldSwitch: previousConversationId.current !== currentConversationId,
-    });
-
     if (previousConversationId.current !== currentConversationId) {
-      logger.debug(
-        "useChat: SWITCHING conversation to:",
-        currentConversationId
-      );
-      
       // First, ensure the active conversation is properly set
       // This is critical for preventing message bleeding
       conversationStore.activeConversationId = currentConversationId;
-      
+
       // Update WebSocket service's current conversation
       const wsService = WebSocketService.getInstance();
       wsService.setCurrentConversation(currentConversationId);
-      
+
       // Switch conversation atomically
       conversationManager.switchConversation(currentConversationId);
 
-      // Load messages if it's an existing conversation
-      // BUT don't load if we're transitioning from a streaming 'new' conversation
-      // (the messages are already being streamed)
-      if (currentConversationId !== "new") {
-        const previousWasNew = previousConversationId.current === "new";
-        const newConversationIsStreaming =
-          conversationStore.conversations[currentConversationId]?.status ===
-          "streaming";
-
-        if (!previousWasNew || !newConversationIsStreaming) {
-          logger.debug(
-            "useChat: Loading messages for existing conversation:",
-            currentConversationId
-          );
-          messageService
-            .loadMessages(currentConversationId, projectId)
-            .catch((error) => {
-              console.error("useChat: Failed to load messages:", error);
-
-              // Navigate to new if conversation doesn't exist
-              if (
-                error.message?.includes("404") ||
-                error.message?.includes("doesn't exist")
-              ) {
-                navigate(`/chat/${projectId}/new`);
-              }
-            });
-        } else {
-          logger.debug(
-            "useChat: Skipping loadMessages for streaming conversation transition from new to:",
-            currentConversationId
-          );
-        }
-      } else {
-        // For new conversations, always ensure we start with a clean state
-        logger.debug("useChat: Clearing state for new conversation");
+      // For existing conversations, messages will be loaded via WebSocket
+      // For new conversations, ensure we start with a clean state
+      if (currentConversationId === "new") {
         conversationManager.clearConversation(currentConversationId);
+      } else {
+        // Set loading state while waiting for WebSocket to send messages
+        conversationManager.updateStatus(currentConversationId, 'loading');
       }
+      // Note: Messages for existing conversations will be sent via WebSocket
+      // when we subscribe to the conversation
 
       previousConversationId.current = currentConversationId;
     }
@@ -145,7 +104,6 @@ export function useChat(projectId: string, conversationId?: string) {
     currentConversationId,
     projectId,
     conversationManager,
-    messageService,
     navigate,
   ]);
 
@@ -159,19 +117,6 @@ export function useChat(projectId: string, conversationId?: string) {
       ? snapshot.conversations[snapshot.activeConversationId]
       : null;
 
-    logger.debug("useChat: Redirect check:", {
-      conversationId,
-      activeConversationId: snapshot.activeConversationId,
-      activeState: activeState ? { status: activeState.status } : null,
-      shouldRedirect:
-        conversationId === "new" &&
-        snapshot.activeConversationId &&
-        snapshot.activeConversationId !== "new" &&
-        activeState &&
-        (activeState.status === "streaming" ||
-          activeState.status === "loading"),
-    });
-
     if (
       conversationId === "new" &&
       snapshot.activeConversationId &&
@@ -179,7 +124,6 @@ export function useChat(projectId: string, conversationId?: string) {
       activeState &&
       (activeState.status === "streaming" || activeState.status === "loading")
     ) {
-      logger.debug("useChat: REDIRECTING to:", snapshot.activeConversationId);
       // Navigate to the real conversation
       navigate(`/chat/${projectId}/${snapshot.activeConversationId}`, {
         replace: true,
@@ -198,14 +142,10 @@ export function useChat(projectId: string, conversationId?: string) {
     const unsubscribe = chatEventBus.subscribe(
       "CONVERSATION_CREATED",
       async (event) => {
-        logger.debug("useChat: Received CONVERSATION_CREATED event:", event);
         if (
           event.type === "CONVERSATION_CREATED" &&
           event.projectId === projectId
         ) {
-          logger.debug(
-            "useChat: Dispatching conversation-created event to window"
-          );
           // Refresh sidebar or do other UI updates
           window.dispatchEvent(
             new CustomEvent("conversation-created", {
@@ -219,6 +159,23 @@ export function useChat(projectId: string, conversationId?: string) {
     return unsubscribe;
   }, [projectId]);
 
+  // Subscribe to conversation redirect events
+  useEffect(() => {
+    const unsubscribe = chatEventBus.subscribe(
+      "CONVERSATION_REDIRECT",
+      async (event) => {
+        if (event.type === "CONVERSATION_REDIRECT") {
+          // Navigate to the new conversation ID
+          navigate(`/chat/${projectId}/${event.newConversationId}`, {
+            replace: true,
+          });
+        }
+      }
+    );
+
+    return unsubscribe;
+  }, [projectId, navigate]);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -229,12 +186,6 @@ export function useChat(projectId: string, conversationId?: string) {
   // Send message
   const sendMessage = useCallback(
     async (content: string, files?: File[]) => {
-      logger.debug(
-        "useChat: Sending message to:",
-        currentConversationId,
-        "project:",
-        projectId
-      );
       await messageService.sendMessage(
         projectId,
         currentConversationId,
@@ -245,8 +196,8 @@ export function useChat(projectId: string, conversationId?: string) {
     [messageService, projectId, currentConversationId]
   );
 
-  // Resend message (retry last assistant response)
-  const resendMessage = useCallback(
+  // Trigger response without adding user message (for resend scenarios)
+  const triggerResponse = useCallback(
     async (content: string) => {
       // Remove last assistant message if exists
       const messages = conversationState.messages;
@@ -277,6 +228,14 @@ export function useChat(projectId: string, conversationId?: string) {
       currentConversationId,
       conversationState.messages,
     ]
+  );
+
+  // Resend message (retry last assistant response) - alias for triggerResponse
+  const resendMessage = useCallback(
+    async (content: string) => {
+      await triggerResponse(content);
+    },
+    [triggerResponse]
   );
 
   // Stop message
@@ -366,22 +325,6 @@ export function useChat(projectId: string, conversationId?: string) {
   const effectiveState =
     snapshot.conversations[effectiveConversationId] || conversationState;
 
-  // Debug logging
-  useEffect(() => {
-    logger.debug("useChat: State for", effectiveConversationId, ":", {
-      status: effectiveState.status,
-      messagesCount: effectiveState.messages.length,
-      isLoading:
-        effectiveState.status === "loading" ||
-        effectiveState.status === "streaming",
-      isStreaming: effectiveState.status === "streaming",
-    });
-  }, [
-    effectiveState.status,
-    effectiveState.messages.length,
-    effectiveConversationId,
-  ]);
-
   return {
     // Messages and state
     messages: effectiveState.messages as Message[],
@@ -397,6 +340,7 @@ export function useChat(projectId: string, conversationId?: string) {
     // Actions
     sendMessage,
     resendMessage,
+    triggerResponse,
     stopMessage,
     forgetMessagesFrom,
     restoreForgottenMessages,
@@ -420,7 +364,7 @@ export function useChat(projectId: string, conversationId?: string) {
 
     // Tool usage
     activeTools: effectiveState.activeTools,
-    
+
     // Context usage
     contextUsage: effectiveState.contextUsage,
 

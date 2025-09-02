@@ -45,6 +45,12 @@ export interface Message {
   file_attachments?: FileAttachment[];
   tool_usages?: ToolUsage[];
   ask_user?: AskUserData;
+  todoWrite?: {
+    todos: Array<{
+      content: string;
+      status: "pending" | "in_progress" | "completed";
+    }>;
+  };
 }
 
 // Helper to get tool names from a message

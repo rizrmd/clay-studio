@@ -6,7 +6,7 @@ import type { Message } from '../../types/chat';
 
 // WebSocket message types from server
 interface ServerMessage {
-  type: 'connected' | 'authentication_required' | 'subscribed' | 'pong' | 'start' | 'progress' | 'tool_use' | 'content' | 'complete' | 'error' | 'title_updated' | 'ask_user' | 'context_usage';
+  type: 'connected' | 'authentication_required' | 'subscribed' | 'conversation_history' | 'conversation_redirect' | 'pong' | 'start' | 'progress' | 'tool_use' | 'tool_complete' | 'content' | 'complete' | 'error' | 'title_updated' | 'ask_user' | 'context_usage';
   // Connection fields
   user_id?: string;
   authenticated?: boolean;
@@ -29,22 +29,34 @@ interface ServerMessage {
   input_type?: string;
   placeholder?: string;
   tool_use_id?: string;
+  // Tool complete fields  
+  tool_usage_id?: string;  // For ToolUse and ToolComplete events
+  execution_time_ms?: number;
+  output?: any;
   // Context usage fields
   total_chars?: number;
   max_chars?: number;
   percentage?: number;
   message_count?: number;
   needs_compaction?: boolean;
+  // Conversation redirect fields
+  old_conversation_id?: string;
+  new_conversation_id?: string;
+  // Conversation history fields
+  messages?: Message[];
 }
 
 // WebSocket message types to server
 interface ClientMessage {
-  type: 'subscribe' | 'unsubscribe' | 'ping' | 'ask_user_response' | 'stop_streaming';
+  type: 'subscribe' | 'unsubscribe' | 'ping' | 'ask_user_response' | 'stop_streaming' | 'send_message';
   project_id?: string;
   conversation_id?: string;
   // Ask user response fields
   interaction_id?: string;
   response?: string | string[];
+  // Send message fields
+  content?: string;
+  uploaded_file_paths?: string[];
 }
 
 export class WebSocketService {
@@ -249,22 +261,29 @@ export class WebSocketService {
     }
   }
 
-  subscribe(projectId: string): void {
-    // Check if already subscribed to this project
-    if (this.currentProjectId === projectId && this.isSubscribed) {
-      logger.debug('WebSocketService: Already subscribed to project', projectId);
+  subscribe(projectId: string, conversationId?: string): void {
+    // Check if already subscribed to this project and conversation
+    const effectiveConversationId = conversationId === 'new' ? undefined : conversationId;
+    if (this.currentProjectId === projectId && 
+        this.currentConversationId === effectiveConversationId && 
+        this.isSubscribed) {
+      logger.debug('WebSocketService: Already subscribed to project', projectId, 'conversation', effectiveConversationId);
       return;
     }
     
     this.currentProjectId = projectId;
+    if (conversationId !== undefined) {
+      this.currentConversationId = effectiveConversationId || null;
+    }
     
-    logger.info('WebSocketService: Subscribing to project', projectId);
+    logger.info('WebSocketService: Subscribing to project', projectId, 'conversation', effectiveConversationId);
     
     // Only send subscription if we're authenticated
     if (this.isAuthenticated) {
       this.sendMessage({
         type: 'subscribe',
         project_id: projectId,
+        conversation_id: effectiveConversationId,
       });
       // Mark as pending subscription (will be confirmed by 'subscribed' message)
     } else {
@@ -308,6 +327,23 @@ export class WebSocketService {
     });
   }
 
+  sendChatMessage(
+    projectId: string,
+    conversationId: string, 
+    content: string,
+    uploadedFilePaths?: string[]
+  ): void {
+    logger.info('WebSocketService: Sending chat message for conversation', conversationId);
+    
+    this.sendMessage({
+      type: 'send_message',
+      project_id: projectId,
+      conversation_id: conversationId,
+      content: content,
+      uploaded_file_paths: uploadedFilePaths || undefined,
+    });
+  }
+
   unsubscribe(): void {
     this.currentProjectId = null;
     this.currentConversationId = null;
@@ -347,9 +383,9 @@ export class WebSocketService {
             this.authenticationResolver = null;
           }
           
-          // Auto-subscribe to current project if we have one and we're authenticated
+          // Auto-subscribe to current project and conversation if we have them and we're authenticated
           if (this.isAuthenticated && this.currentProjectId) {
-            this.subscribe(this.currentProjectId);
+            this.subscribe(this.currentProjectId, this.currentConversationId || undefined);
           }
           break;
 
@@ -370,6 +406,18 @@ export class WebSocketService {
           this.isSubscribed = true;
           break;
 
+        case 'conversation_history':
+          if (message.messages && message.conversation_id) {
+            await this.handleConversationHistory(message.conversation_id, message.messages);
+          }
+          break;
+
+        case 'conversation_redirect':
+          if (message.old_conversation_id && message.new_conversation_id) {
+            await this.handleConversationRedirect(message.old_conversation_id, message.new_conversation_id);
+          }
+          break;
+
         case 'start':
           if (message.id && message.conversation_id) {
             await this.handleStartEvent(message.conversation_id, message.id);
@@ -384,7 +432,13 @@ export class WebSocketService {
 
         case 'tool_use':
           if (message.tool && message.conversation_id) {
-            await this.handleToolUseEvent(message.tool, message.conversation_id);
+            await this.handleToolUseEvent(message.tool, message.tool_usage_id, message.conversation_id);
+          }
+          break;
+
+        case 'tool_complete':
+          if (message.tool && message.conversation_id) {
+            await this.handleToolCompleteEvent(message);
           }
           break;
 
@@ -424,6 +478,7 @@ export class WebSocketService {
           }
           break;
 
+
         case 'pong':
           // Heartbeat response
           break;
@@ -436,8 +491,47 @@ export class WebSocketService {
     }
   }
 
+  private async handleConversationHistory(conversationId: string, messages: Message[]): Promise<void> {
+    logger.info('WebSocketService: Received conversation history', { 
+      conversationId, 
+      messageCount: messages.length 
+    });
+    
+    // Set the messages directly in the conversation manager
+    // This replaces any need to fetch from the database
+    await this.conversationManager.setMessages(conversationId, messages);
+    
+    // Update conversation status to idle since we have all the messages
+    await this.conversationManager.updateStatus(conversationId, 'idle');
+  }
+
+  private async handleConversationRedirect(oldConversationId: string, newConversationId: string): Promise<void> {
+    logger.info('WebSocketService: Conversation redirect', { oldConversationId, newConversationId });
+    
+    // Update current conversation ID
+    if (this.currentConversationId === oldConversationId || this.currentConversationId === 'new') {
+      this.currentConversationId = newConversationId;
+    }
+    
+    // Emit event to update URL and UI
+    await chatEventBus.emit({
+      type: 'CONVERSATION_REDIRECT',
+      oldConversationId,
+      newConversationId,
+    });
+  }
+
   private async handleStartEvent(conversationId: string, messageId: string): Promise<void> {
     logger.debug('WebSocketService: Stream started for conversation', conversationId, 'message', messageId);
+    
+    // Import setConversationAbortController at the top of the file if not already imported
+    const { setConversationAbortController } = await import('../../store/chat-store');
+    
+    // Create an abort controller for this streaming session
+    // This enables the stop button to appear in the UI
+    const abortController = new AbortController();
+    setConversationAbortController(conversationId, abortController);
+    logger.debug('WebSocketService: Created abort controller for conversation', conversationId);
     
     // Before starting a new stream, ensure any previous executing tools are marked complete
     const state = conversationStore.conversations[conversationId];
@@ -474,7 +568,7 @@ export class WebSocketService {
     await this.conversationManager.updateStatus(conversationId, 'streaming');
   }
 
-  private async handleProgressEvent(content: string, conversationId: string): Promise<void> {
+  private async handleProgressEvent(content: any, conversationId: string): Promise<void> {
     const streamState = this.activeStreams.get(conversationId);
     if (!streamState) {
       // Initialize stream state if it doesn't exist (in case we missed the start event)
@@ -482,10 +576,63 @@ export class WebSocketService {
       await this.conversationManager.updateStatus(conversationId, 'streaming');
     }
 
-    // The content is now the accumulated text directly, not JSON
+    // Extract text content from the JSON structure
+    let textContent = '';
+    let isIncremental = false; // Track if this is incremental text that should be appended
+    let todoWriteData = null; // Track TodoWrite updates
+    
     if (content) {
+      if (typeof content === 'string') {
+        textContent = content;
+      } else if (typeof content === 'object') {
+        // Extract text from various message types
+        if (content.type === 'result' && content.result) {
+          textContent = content.result;
+        } else if (content.type === 'assistant' && content.message?.content) {
+          // Extract text from assistant message content
+          const messageContent = content.message.content;
+          if (Array.isArray(messageContent)) {
+            // Extract text blocks and check for TodoWrite
+            for (const block of messageContent) {
+              if (block.type === 'text') {
+                textContent += block.text || '';
+              } else if (block.type === 'tool_use' && block.name === 'TodoWrite') {
+                // Extract TodoWrite data
+                todoWriteData = block.input || block.arguments;
+                logger.debug('WebSocketService: TodoWrite detected in progress', todoWriteData);
+              }
+            }
+          } else if (typeof messageContent === 'string') {
+            textContent = messageContent;
+          }
+        } else if (content.type === 'text' && content.text) {
+          textContent = content.text;
+        } else if (content.type === 'content_block_delta' && content.delta?.text) {
+          // Delta messages are incremental - they should be appended
+          textContent = content.delta.text;
+          isIncremental = true;
+        } else if (content.type === 'show_table' || content.type === 'show_chart') {
+          // For visualization events, pass the entire JSON as a stringified content
+          // The frontend components will parse and render these appropriately
+          textContent = JSON.stringify(content);
+          logger.debug('WebSocketService: Visualization event detected', content.type);
+        }
+        // Skip other message types that don't contain displayable text
+      }
+    }
+
+    if (textContent || todoWriteData) {
       const stream = this.activeStreams.get(conversationId)!;
-      stream.content = content; // Use the full accumulated text from backend
+      
+      // Handle text content
+      if (textContent) {
+        // Append incremental content, replace for full content
+        if (isIncremental) {
+          stream.content = (stream.content || '') + textContent;
+        } else {
+          stream.content = textContent;
+        }
+      }
       
       // Ensure conversation state exists
       if (!conversationStore.conversations[conversationId]) {
@@ -500,9 +647,16 @@ export class WebSocketService {
           const lastMessage = state.messages[state.messages.length - 1];
           
           if (lastMessage.role === 'assistant') {
-            await this.conversationManager.updateLastMessage(conversationId, {
-              content: stream.content,
-            });
+            // Update content and/or todoWrite data
+            const updates: any = {};
+            if (textContent) {
+              updates.content = stream.content;
+            }
+            if (todoWriteData) {
+              // Store TodoWrite data directly on the message
+              updates.todoWrite = todoWriteData;
+            }
+            await this.conversationManager.updateLastMessage(conversationId, updates);
           } else {
             // Create new assistant message
             const assistantMessage: Message = {
@@ -527,46 +681,80 @@ export class WebSocketService {
     }
   }
 
-  private async handleToolUseEvent(tool: string, conversationId: string): Promise<void> {
-    logger.info('WebSocketService: Tool use detected', tool, 'for conversation', conversationId);
-    await this.conversationManager.addActiveTool(conversationId, tool);
+  private async handleToolUseEvent(tool: string, toolUsageId: string | undefined, conversationId: string): Promise<void> {
+    logger.info('WebSocketService: Tool use detected', tool, 'with id', toolUsageId, 'for conversation', conversationId);
+    
+    // Use the provided tool_usage_id or generate a temporary one
+    const effectiveId = toolUsageId || `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    await this.conversationManager.addActiveTool(conversationId, tool, effectiveId);
     logger.info('WebSocketService: Added tool to active tools:', tool);
     
-    // Add to tool_usages for real-time display
-    const state = conversationStore.conversations[conversationId];
+    // Create the new tool usage with the actual ID from backend
+    const toolUsage = {
+      id: effectiveId,
+      message_id: '',  // Will be set by addToolUsage
+      tool_name: tool,
+      parameters: null,
+      output: { status: 'executing' }, // Mark as executing during stream
+      createdAt: new Date().toISOString(),
+    };
+    
+    // Add to tool_usages atomically
+    await this.conversationManager.addToolUsage(conversationId, toolUsage);
+    logger.info('WebSocketService: Added new executing tool:', tool, 'with id:', effectiveId);
+  }
+
+  private async handleToolCompleteEvent(message: ServerMessage): Promise<void> {
+    const { tool, tool_usage_id, execution_time_ms, output, conversation_id } = message;
+    
+    if (!conversation_id || !tool || !tool_usage_id) return;
+    
+    logger.info('WebSocketService: Tool completed', tool, 'with execution time', execution_time_ms, 'ms');
+    
+    // Update the specific tool usage to completed status
+    const state = conversationStore.conversations[conversation_id];
     if (state && state.messages.length > 0) {
       const lastMessage = state.messages[state.messages.length - 1];
-      if (lastMessage.role === 'assistant') {
-        const currentToolUsages = lastMessage.tool_usages || [];
+      if (lastMessage.role === 'assistant' && lastMessage.tool_usages) {
+        let toolUpdated = false;
         
-        // Mark any previous executing tools as complete
-        const updatedToolUsages = currentToolUsages.map(tu => {
-          if (tu.output?.status === 'executing') {
+        // Find and update the specific tool by ID
+        const updatedToolUsages = lastMessage.tool_usages.map(tu => {
+          // Match by tool_usage_id first, fallback to matching by tool name and executing status
+          if (tu.id === tool_usage_id || (!toolUpdated && tu.tool_name === tool && tu.output?.status === 'executing')) {
+            toolUpdated = true;
+            logger.debug('WebSocketService: Updating tool', tool, 'with id', tool_usage_id, 'from executing to completed');
             return {
               ...tu,
-              output: { status: 'completed', result: 'Tool execution completed' }
+              id: tool_usage_id, // Ensure we have the correct ID
+              output: output || { status: 'completed', result: 'Tool execution completed' },
+              execution_time_ms: execution_time_ms,
             };
           }
           return tu;
         });
         
-        // Create an executing tool usage entry for the new tool
-        const toolUsage = {
-          id: `tool-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          message_id: lastMessage.id,
-          tool_name: tool,
-          parameters: null,
-          output: { status: 'executing' }, // Mark as executing during stream
-          createdAt: new Date().toISOString(),
-        };
-        
-        await this.conversationManager.updateLastMessage(conversationId, {
-          tool_usages: [...updatedToolUsages, toolUsage],
-        });
-        
-        logger.info('WebSocketService: Marked previous tools complete, added new executing tool:', tool);
+        if (toolUpdated) {
+          await this.conversationManager.updateLastMessage(conversation_id, {
+            tool_usages: updatedToolUsages,
+          });
+          
+          logger.debug('WebSocketService: Successfully updated tool', tool, 'to completed status with execution time', execution_time_ms);
+        } else {
+          logger.warn('WebSocketService: Could not find executing tool to update:', tool);
+        }
       }
     }
+    
+    // Update the tool status in activeTools to completed
+    await this.conversationManager.updateToolCompleted(
+      conversation_id, 
+      tool, 
+      tool_usage_id,
+      execution_time_ms || 0
+    );
+    
+    logger.debug('WebSocketService: Updated tool', tool, 'to completed status in activeTools');
   }
 
   private async handleContentEvent(content: string, conversationId: string): Promise<void> {
@@ -596,6 +784,11 @@ export class WebSocketService {
     const messageId = message.id!;
     
     logger.debug('WebSocketService: Stream completed for conversation', conversationId, 'message', messageId);
+    
+    // Clear abort controller since streaming is complete
+    const { setConversationAbortController } = await import('../../store/chat-store');
+    setConversationAbortController(conversationId, null);
+    logger.debug('WebSocketService: Cleared abort controller for conversation', conversationId);
     
     // Clean up active stream
     this.activeStreams.delete(conversationId);
@@ -671,6 +864,11 @@ export class WebSocketService {
   private async handleErrorEvent(error: string, conversationId: string): Promise<void> {
     logger.error('WebSocketService: Stream error', error);
     
+    // Clear abort controller since streaming has stopped due to error
+    const { setConversationAbortController } = await import('../../store/chat-store');
+    setConversationAbortController(conversationId, null);
+    logger.debug('WebSocketService: Cleared abort controller for conversation due to error', conversationId);
+    
     // Clean up active stream
     this.activeStreams.delete(conversationId);
     
@@ -712,6 +910,7 @@ export class WebSocketService {
       needsCompaction: needs_compaction || false,
     });
   }
+
 
   private async handleAskUserEvent(message: ServerMessage): Promise<void> {
     const { conversation_id, prompt_type, title, options, input_type, placeholder, tool_use_id } = message;

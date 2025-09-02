@@ -42,12 +42,12 @@ const fuzzyFilter: FilterFn<any> = (row, columnId, value, addMeta) => {
   return itemRank.passed;
 };
 
-export function DataTable({
+export const DataTable = React.forwardRef<any, DataTableProps>(({
   columns: columnDefs,
   data,
   config,
   className,
-}: DataTableProps) {
+}, ref) => {
   // Initialize sorting from initialState
   const [sorting, setSorting] = useState<SortingState>(() => {
     if (config?.initialState?.sorting) {
@@ -581,6 +581,9 @@ export function DataTable({
     getSortedRowModel: getSortedRowModel(),
     globalFilterFn: fuzzyFilter,
   });
+
+  // Expose table instance through ref
+  React.useImperativeHandle(ref, () => table, [table]);
 
   // Update column order when pivot columns change
   React.useEffect(() => {
@@ -1192,7 +1195,9 @@ export function DataTable({
       </table>
     </div>
   );
-}
+});
+
+DataTable.displayName = "DataTable";
 
 function formatCellValue(
   value: any,

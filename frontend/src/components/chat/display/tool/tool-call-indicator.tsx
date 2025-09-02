@@ -215,47 +215,70 @@ export function ToolCallIndicator({
       );
     }
 
-    return null;
+    return <></>;
   }
 
   // For full variant, show all tools with their status
   return (
-    <div className={cn("space-y-1", className)}>
+    <div className={cn("gap-1 flex flex-row flex-wrap", className)}>
       {tools.map((tool, index) => {
         const parsedTool = parseMcpToolName(tool);
         const Icon = parsedTool.icon;
         const executionTime = getToolExecutionTime(tool);
         const executing = isToolExecuting(tool);
-        const effectiveCompleted = isCompleted && !executing;
+        // Check actual tool status, not just the isCompleted prop
+        const effectiveCompleted = !executing;
 
-        return (
+        const badge = (
           <Badge
             key={`${tool}-${index}`}
             variant="outline"
             className={cn(
               "flex items-center gap-1.5 text-xs px-2 py-1",
-              parsedTool.color
+              parsedTool.color,
+              effectiveCompleted && "opacity-70",
+              messageId && "cursor-pointer hover:opacity-80 transition-opacity"
             )}
           >
-            <Icon className="h-3 w-3" />
-            {effectiveCompleted ? (
-              <CheckCircle className="h-3 w-3 text-green-600" />
-            ) : (
-              <Loader2 className="h-3 w-3 animate-spin" />
-            )}
-            <span>
-              {effectiveCompleted
-                ? parsedTool.friendlyName
-                : `${parsedTool.description || parsedTool.friendlyName}...`}
-            </span>
+            <div className="flex items-center flex-1 gap-1">
+              {effectiveCompleted ? (
+                <Icon className="h-3 w-3" />
+              ) : (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              )}
+              <span>
+                {effectiveCompleted
+                  ? parsedTool.friendlyName
+                  : `${parsedTool.description || parsedTool.friendlyName}...`}
+              </span>
+            </div>
             {effectiveCompleted && executionTime && (
-              <span className="text-muted-foreground flex items-center gap-1">
-                <Clock className="h-3 w-3" />
+              <span className="text-muted-foreground flex items-center gap-1 ml-4">
+                {/* <Clock className="h-3 w-3" /> */}
                 {executionTime}
               </span>
             )}
           </Badge>
         );
+
+        // Check if we have tool_usage_id to show details
+        const hasToolUsageId = toolUsages?.find(tu => tu.tool_name === tool)?.id;
+        
+        // Wrap with ToolUsagePopover if we have messageId and tool usage data
+        if (messageId && hasToolUsageId) {
+          return (
+            <ToolUsagePopover
+              key={`${tool}-${index}`}
+              messageId={messageId}
+              toolName={tool}
+              toolUsages={toolUsages}
+            >
+              {badge}
+            </ToolUsagePopover>
+          );
+        }
+
+        return badge;
       })}
     </div>
   );

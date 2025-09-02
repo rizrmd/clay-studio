@@ -7,7 +7,6 @@ import { ContextIndicator } from "../display";
 import { useValtioChat } from "@/hooks/use-valtio-chat";
 import { useInputState } from "@/hooks/use-input-state";
 import { useViewportHeight } from "@/hooks/use-viewport-height";
-import { updateConversationMessages } from "@/store/chat-store";
 import { api } from "@/lib/api";
 import {
   AlertTriangle,
@@ -16,7 +15,6 @@ import {
   PanelLeftClose,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import type { Message } from "@/types/chat";
 import { cn } from "@/lib/utils";
 
 interface ChatProps {
@@ -50,6 +48,7 @@ export function Chat({
   const {
     messages,
     sendMessage,
+    triggerResponse,
     stopMessage,
     forgetMessagesFrom,
     restoreForgottenMessages,
@@ -141,23 +140,8 @@ export function Chat({
       content = content.substring(0, attachedFilesIndex);
     }
 
-    // Remove the current message from the messages array
-    const messageIndex = messages.findIndex((m) => m.id === message.id);
-    if (messageIndex !== -1) {
-      // Remove the current message and any subsequent assistant response
-      const messagesToKeep = messages.slice(0, messageIndex);
-
-      // Update the conversation state with the filtered messages
-      const currentConversationId =
-        hookConversationId || propConversationId || "new";
-      updateConversationMessages(
-        currentConversationId,
-        messagesToKeep as Message[]
-      );
-    }
-
-    // Send the message as a new message (not resend)
-    await sendMessage(content.trim());
+    // Use triggerResponse to avoid duplicating the user message
+    await triggerResponse(content.trim());
   };
 
   const handleNewChatFromHere = async (messageId: string) => {

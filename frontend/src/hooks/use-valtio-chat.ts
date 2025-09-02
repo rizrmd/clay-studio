@@ -11,8 +11,7 @@
 // Use the new implementation by default
 export { useChat as useValtioChat } from "./use-chat";
 
-// Export the old implementation for gradual migration if needed
-export { useValtioChat as useValtioChatOld } from "./chat/main";
+// Old implementation removed with SSE streaming
 
 // Keep context hooks as they are
 export { useConversationContext, useProjectContext } from "./chat/use-context";

@@ -4,7 +4,6 @@ import { getToolNamesFromMessage } from "@/types/chat";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ToolCallIndicator } from "../tool/tool-call-indicator";
-import { TodoList } from "../interaction/todo-list";
 import { AskUser } from "../interaction/ask-user";
 import {
   InteractionRenderer,
@@ -48,7 +47,6 @@ interface MessageListItemProps {
   onResendMessage?: (message: Message) => void;
   isLastUserMessage?: boolean;
   onNewChatFromHere?: (messageId: string) => void;
-  latestTodoWrite?: { messageId: string; todos: any[] } | null;
   onAskUserSubmit?: (response: string | string[]) => void;
   isStreaming?: boolean;
   isLoading?: boolean;
@@ -70,7 +68,6 @@ export const MessageListItem = memo(
     onResendMessage,
     isLastUserMessage,
     onNewChatFromHere,
-    latestTodoWrite,
     onAskUserSubmit,
     isStreaming,
     isLoading,
@@ -85,7 +82,8 @@ export const MessageListItem = memo(
     const shouldUseFullWidth = useMemo(() => {
       if (message.role === "user") return false; // User messages always stay at 70%
 
-      const content = message.content || "";
+      // Ensure content is always a string
+      const content = typeof message.content === 'string' ? message.content : '';
       const contentLength = content.length;
 
       // Check for indicators of large/complex content
@@ -123,22 +121,16 @@ export const MessageListItem = memo(
 
     // Find if there's a response to this interaction anywhere in the subsequent messages
     const findInteractionResponse = () => {
-      console.log("findInteractionResponse called for message:", message.id);
 
       if (
         !message.tool_usages?.some(
           (u) => u.tool_name === "mcp__interaction__ask_user"
         )
       ) {
-        console.log("No interaction tool usage found");
         return { hasResponse: false, response: undefined };
       }
 
       if (!allMessages || messageIndex === undefined) {
-        console.log("Missing allMessages or messageIndex:", {
-          allMessages: !!allMessages,
-          messageIndex,
-        });
         return { hasResponse: false, response: undefined };
       }
 
@@ -147,7 +139,6 @@ export const MessageListItem = memo(
         (u) => u.tool_name === "mcp__interaction__ask_user"
       );
       if (!interactionUsage?.output) {
-        console.log("No interaction output found");
         return { hasResponse: false, response: undefined };
       }
 
@@ -417,12 +408,12 @@ export const MessageListItem = memo(
                 </div>
               )}
               <FileAttachments attachments={message.file_attachments || []} />
-              {/* Show TodoList only for the latest TodoWrite message */}
-              {latestTodoWrite && latestTodoWrite.messageId === message.id && (
+              {/* Show TodoList if this message has TodoWrite data AND */}
+              {/* {message.todoWrite && (
                 <div className="mt-3">
-                  <TodoList todos={latestTodoWrite.todos} />
+                  <TodoList todos={message.todoWrite.todos} />
                 </div>
-              )}
+              )} */}
               {/* Interaction Tool Rendering */}
               {(() => {
                 const interactionUsages = message.tool_usages?.filter(

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex as StdMutex, LazyLock};
 use uuid::Uuid;
 use tokio::sync::mpsc;
+use sqlx::Row;
 
 use super::{
     setup::ClaudeSetup,
@@ -133,6 +134,57 @@ impl ClaudeManager {
         let sdk = ClaudeSDK::new(client_id, oauth_token).with_project(project_id);
         let request = QueryRequest { prompt, options };
         sdk.query(request).await
+    }
+    
+    pub async fn query_claude_with_project_and_db(
+        client_id: Uuid,
+        project_id: &str,
+        prompt: String,
+        options: Option<QueryOptions>,
+        db_pool: &sqlx::PgPool,
+    ) -> Result<mpsc::Receiver<ClaudeMessage>, Box<dyn std::error::Error + Send + Sync>> {
+        tracing::info!("ClaudeManager::query_claude_with_project_and_db - checking OAuth token for client: {}", client_id);
+        
+        // First check if we have an OAuth token for this client
+        let setup = Self::get_client_setup(client_id);
+        let oauth_token = if let Some(setup) = setup {
+            tracing::info!("Found existing setup, getting token with DB");
+            setup.get_oauth_token_with_db(db_pool).await
+        } else {
+            tracing::info!("No existing setup, checking database directly");
+            // If no setup exists, try to get token directly from database
+            if let Ok(row) = sqlx::query("SELECT claude_token FROM clients WHERE id = $1")
+                .bind(client_id)
+                .fetch_optional(db_pool)
+                .await 
+            {
+                if let Some(row) = row {
+                    let token = row.get::<Option<String>, _>("claude_token");
+                    tracing::info!("Found token in database: {}", token.is_some());
+                    token
+                } else {
+                    tracing::info!("No client found in database");
+                    None
+                }
+            } else {
+                tracing::error!("Database query failed for client token");
+                None
+            }
+        };
+        
+        if oauth_token.is_none() {
+            tracing::error!("No OAuth token available for client: {}", client_id);
+            return Err("Client not authenticated. Please complete setup first.".into());
+        }
+        
+        tracing::info!("OAuth token found, creating SDK and querying Claude");
+        // Create SDK with project directory
+        let sdk = ClaudeSDK::new(client_id, oauth_token).with_project(project_id);
+        let request = QueryRequest { prompt, options };
+        tracing::info!("About to call sdk.query()");
+        let result = sdk.query(request).await;
+        tracing::info!("SDK query completed with result: {}", result.is_ok());
+        result
     }
     
     pub async fn query_claude_with_project_and_token(

@@ -128,19 +128,6 @@ pub fn get_mcp_tools() -> HashMap<String, McpTool> {
     tools
 }
 
-/// Attempts to identify a tool from its result content
-pub fn identify_tool_from_result(content: &str) -> Option<String> {
-    let tools = get_mcp_tools();
-    for (tool_id, tool_info) in tools.iter() {
-        // Check if any of the tool's indicators appear in the content
-        for indicator in &tool_info.result_indicators {
-            if content.contains(indicator) {
-                return Some(tool_id.clone());
-            }
-        }
-    }
-    None
-}
 
 /// Gets tool information by its full ID (e.g., "mcp__data-analysis__datasource_list")
 #[allow(dead_code)]
@@ -149,7 +136,3 @@ pub fn get_tool_info(tool_id: &str) -> Option<McpTool> {
     tools.get(tool_id).cloned()
 }
 
-/// Checks if a string is a tool_use_id (starts with "toolu_")
-pub fn is_tool_use_id(s: &str) -> bool {
-    s.starts_with("toolu_")
-}

@@ -20,7 +20,7 @@ pub enum PromptStreamMessage {
     #[serde(rename = "start")]
     Start { id: String },
     #[serde(rename = "progress")]
-    Progress { content: String },
+    Progress { content: serde_json::Value },
     #[serde(rename = "tool_use")]
     ToolUse { tool: String },
     #[serde(rename = "tool_result")]
@@ -125,38 +125,10 @@ pub async fn handle_prompt_stream(
                 while let Some(message) = receiver.recv().await {
                     match message {
                         ClaudeMessage::Progress { content } => {
-                            // Log the raw content for debugging
-                            tracing::debug!("Received progress message: {}", content);
-                            
-                            // Parse the stream-json to extract text content
-                            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&content) {
-                                // Check various message formats from Claude
-                                if let Some(msg_type) = parsed.get("type").and_then(|v| v.as_str()) {
-                                    tracing::debug!("Message type: {}", msg_type);
-                                    
-                                    // Handle text delta messages
-                                    if msg_type == "text" {
-                                        if let Some(text) = parsed.get("text").and_then(|v| v.as_str()) {
-                                            accumulated_text.push_str(text);
-                                            tracing::debug!("Accumulated text from 'text' type: {}", text);
-                                        }
-                                    }
-                                    // Handle content_block_delta messages
-                                    else if msg_type == "content_block_delta" {
-                                        if let Some(delta) = parsed.get("delta") {
-                                            if let Some(text) = delta.get("text").and_then(|v| v.as_str()) {
-                                                accumulated_text.push_str(text);
-                                                tracing::debug!("Accumulated text from 'content_block_delta': {}", text);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            
-                            // Send progress to frontend
+                            // Send progress to frontend without any parsing
                             if let Ok(event) = SseEvent::default()
                                 .name("message")
-                                .json(PromptStreamMessage::Progress { content: content.clone() }) {
+                                .json(PromptStreamMessage::Progress { content }) {
                                 let _ = tx.send(Ok(event)).await;
                             }
                         }

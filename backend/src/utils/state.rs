@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::collections::HashMap;
 use sea_orm::DatabaseConnection;
-use sqlx::{PgPool, postgres::PgPoolOptions};
+use sqlx::{PgPool, postgres::PgPoolOptions, Row};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
@@ -9,17 +9,55 @@ use std::time::Duration;
 use tracing::{info, warn, error};
 use crate::utils::Config;
 use crate::utils::db;
-use crate::models::client::Client;
+use crate::models::{client::Client, Message, tool_usage::ToolUsage};
 use crate::core::sessions::PostgresSessionStore;
+use std::collections::HashSet;
 
 
+#[derive(Clone, Debug, serde::Serialize)]
+#[allow(dead_code)]
+pub enum ToolStatus {
+    Executing,
+    Completed,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[allow(dead_code)]
+pub struct ToolExecution {
+    pub tool_name: String,
+    pub tool_usage_id: Uuid,
+    pub status: ToolStatus,
+    pub execution_time_ms: Option<i64>,
+    pub started_at: DateTime<Utc>,
+    pub completed_at: Option<DateTime<Utc>>,
+}
 
 #[derive(Clone, Debug)]
 pub struct StreamingState {
+    /// The ID of the message being streamed
     pub message_id: String,
+    
+    /// Accumulated text content from all progress events (for display)
     pub partial_content: String,
-    pub last_updated: DateTime<Utc>,
-    pub active_tools: Vec<String>,
+    
+    /// Currently executing or completed tools with their status
+    pub active_tools: Vec<ToolExecution>,
+    
+    /// Complete history of all events (progress, tool_use, tool_complete) 
+    /// stored in order to replay them exactly when WebSocket reconnects
+    pub progress_events: Vec<serde_json::Value>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ConversationCache {
+    /// All messages in the conversation (excluding forgotten ones)
+    pub messages: Vec<Message>,
+    
+    /// Set of WebSocket client IDs currently subscribed to this conversation
+    pub subscribers: HashSet<String>,
+    
+    /// Last time this cache was accessed
+    pub last_accessed: DateTime<Utc>,
 }
 
 #[derive(Clone)]
@@ -32,6 +70,7 @@ pub struct AppState {
     #[allow(dead_code)]
     pub clients: Arc<RwLock<HashMap<Uuid, Client>>>,
     pub active_claude_streams: Arc<RwLock<HashMap<String, StreamingState>>>,
+    pub conversation_cache: Arc<RwLock<HashMap<String, ConversationCache>>>,
     pub session_store: PostgresSessionStore,
 }
 
@@ -53,6 +92,7 @@ impl AppState {
             config: Arc::new(config.clone()),
             clients: Arc::new(RwLock::new(HashMap::new())),
             active_claude_streams: Arc::new(RwLock::new(HashMap::new())),
+            conversation_cache: Arc::new(RwLock::new(HashMap::new())),
             session_store,
         })
     }
@@ -171,5 +211,190 @@ impl AppState {
         }
         
         Ok(())
+    }
+    
+    /// Load conversation messages from database and cache them
+    pub async fn load_conversation_cache(
+        &self,
+        conversation_id: &str,
+    ) -> Result<Vec<Message>, Box<dyn std::error::Error + Send + Sync>> {
+        // Fetch messages from database
+        let messages = sqlx::query(
+            "SELECT id, content, role, processing_time_ms, created_at 
+             FROM messages 
+             WHERE conversation_id = $1 
+             AND (is_forgotten = false OR is_forgotten IS NULL)
+             ORDER BY created_at ASC, id ASC"
+        )
+        .bind(conversation_id)
+        .fetch_all(&self.db_pool)
+        .await?;
+        
+        let mut cached_messages = Vec::new();
+        
+        for row in messages {
+            let msg_id: String = row.get("id");
+            let role_str: String = row.get("role");
+            let role = match role_str.as_str() {
+                "user" => crate::models::MessageRole::User,
+                "assistant" => crate::models::MessageRole::Assistant,
+                "system" => crate::models::MessageRole::System,
+                _ => continue,
+            };
+            
+            // Fetch tool usages if it's an assistant message
+            let tool_usages = if role == crate::models::MessageRole::Assistant {
+                let tool_rows = sqlx::query(
+                    "SELECT id, message_id, tool_name, tool_use_id, parameters, output, execution_time_ms, created_at
+                     FROM tool_usages 
+                     WHERE message_id = $1 
+                     ORDER BY created_at ASC"
+                )
+                .bind(&msg_id)
+                .fetch_all(&self.db_pool)
+                .await?;
+                
+                if !tool_rows.is_empty() {
+                    let mut usages = Vec::new();
+                    for tool_row in tool_rows {
+                        usages.push(ToolUsage {
+                            id: tool_row.get("id"),
+                            message_id: tool_row.get("message_id"),
+                            tool_name: tool_row.get("tool_name"),
+                            tool_use_id: tool_row.get("tool_use_id"),
+                            parameters: tool_row.get::<Option<serde_json::Value>, _>("parameters"),
+                            output: tool_row.get::<Option<serde_json::Value>, _>("output"),
+                            execution_time_ms: tool_row.get("execution_time_ms"),
+                            created_at: tool_row.get::<Option<DateTime<Utc>>, _>("created_at")
+                                .map(|dt| dt.to_rfc3339()),
+                        });
+                    }
+                    Some(usages)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            
+            let message = Message {
+                id: msg_id,
+                content: row.get("content"),
+                role,
+                processing_time_ms: row.get("processing_time_ms"),
+                created_at: row.get::<DateTime<Utc>, _>("created_at").to_rfc3339().into(),
+                file_attachments: None,
+                tool_usages,
+            };
+            
+            cached_messages.push(message);
+        }
+        
+        // Update cache
+        let mut cache = self.conversation_cache.write().await;
+        cache.insert(conversation_id.to_string(), ConversationCache {
+            messages: cached_messages.clone(),
+            subscribers: HashSet::new(),
+            last_accessed: Utc::now(),
+        });
+        
+        info!("📝 Cached {} messages for conversation {}", cached_messages.len(), conversation_id);
+        
+        Ok(cached_messages)
+    }
+    
+    /// Get cached messages or load from database
+    pub async fn get_conversation_messages(
+        &self,
+        conversation_id: &str,
+    ) -> Result<Vec<Message>, Box<dyn std::error::Error + Send + Sync>> {
+        // Check cache first
+        {
+            let cache = self.conversation_cache.read().await;
+            if let Some(cached) = cache.get(conversation_id) {
+                // If messages are not empty, return them
+                if !cached.messages.is_empty() {
+                    // Update last accessed time
+                    drop(cache);
+                    let mut cache_write = self.conversation_cache.write().await;
+                    if let Some(cached_mut) = cache_write.get_mut(conversation_id) {
+                        cached_mut.last_accessed = Utc::now();
+                        return Ok(cached_mut.messages.clone());
+                    }
+                }
+                // Messages are empty, need to load from database
+            }
+        }
+        
+        // Not in cache or cache is empty, load from database
+        self.load_conversation_cache(conversation_id).await
+    }
+    
+    /// Add a subscriber to a conversation
+    pub async fn add_conversation_subscriber(
+        &self,
+        conversation_id: &str,
+        client_id: &str,
+    ) {
+        let mut cache = self.conversation_cache.write().await;
+        
+        if let Some(cached) = cache.get_mut(conversation_id) {
+            cached.subscribers.insert(client_id.to_string());
+            cached.last_accessed = Utc::now();
+            info!("➕ Added subscriber {} to conversation {} (total: {})", 
+                  client_id, conversation_id, cached.subscribers.len());
+        } else {
+            // Create new cache entry with this subscriber
+            let mut subscribers = HashSet::new();
+            subscribers.insert(client_id.to_string());
+            
+            cache.insert(conversation_id.to_string(), ConversationCache {
+                messages: Vec::new(), // Will be loaded on first access
+                subscribers,
+                last_accessed: Utc::now(),
+            });
+            info!("➕ Created cache for conversation {} with subscriber {}", 
+                  conversation_id, client_id);
+        }
+    }
+    
+    /// Remove a subscriber from a conversation
+    pub async fn remove_conversation_subscriber(
+        &self,
+        conversation_id: &str,
+        client_id: &str,
+    ) {
+        let mut cache = self.conversation_cache.write().await;
+        
+        if let Some(cached) = cache.get_mut(conversation_id) {
+            cached.subscribers.remove(client_id);
+            info!("➖ Removed subscriber {} from conversation {} (remaining: {})", 
+                  client_id, conversation_id, cached.subscribers.len());
+            
+            // Remove cache entry if no subscribers remain
+            if cached.subscribers.is_empty() {
+                cache.remove(conversation_id);
+                info!("🗑️ Removed cache for conversation {} (no subscribers)", conversation_id);
+            }
+        }
+    }
+    
+    /// Add or update a message in the cache
+    pub async fn update_conversation_cache(
+        &self,
+        conversation_id: &str,
+        message: Message,
+    ) {
+        let mut cache = self.conversation_cache.write().await;
+        
+        if let Some(cached) = cache.get_mut(conversation_id) {
+            // Check if message already exists (update) or is new (add)
+            if let Some(existing) = cached.messages.iter_mut().find(|m| m.id == message.id) {
+                *existing = message;
+            } else {
+                cached.messages.push(message);
+            }
+            cached.last_accessed = Utc::now();
+        }
     }
 }

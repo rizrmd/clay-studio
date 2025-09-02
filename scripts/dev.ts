@@ -8,7 +8,7 @@ const rootDir = join(import.meta.dir, "..");
 const frontendDir = join(rootDir, "frontend");
 const backendDir = join(rootDir, "backend");
 
-// Helper function to clean up a specific port
+// Helper function to clean up a specific port with proper waiting
 const cleanupPort = (port: number) => {
   const result = spawnSync({
     cmd: ["lsof", "-ti:" + port],
@@ -16,16 +16,35 @@ const cleanupPort = (port: number) => {
     stderr: "pipe",
   });
   
-  result.stdout?.toString()
+  const pids = result.stdout?.toString()
     .trim()
     .split("\n")
-    .filter(Boolean)
-    .forEach((pid) => {
+    .filter(Boolean);
+    
+  if (pids && pids.length > 0) {
+    pids.forEach((pid) => {
       if (pid) {
         spawnSync({ cmd: ["kill", "-9", pid] });
         console.log(`  🧹 Cleaned up process ${pid} on port ${port}`);
       }
     });
+    // Wait longer to ensure cleanup is complete and port is released
+    spawnSync({ cmd: ["sleep", "0.5"] });
+    
+    // Verify port is actually free
+    const verifyResult = spawnSync({
+      cmd: ["lsof", "-ti:" + port],
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    
+    if (verifyResult.stdout?.toString().trim()) {
+      console.log(`  ⚠️  Port ${port} still in use after cleanup, waiting more...`);
+      spawnSync({ cmd: ["sleep", "1"] });
+    } else {
+      console.log(`  ✅ Port ${port} is now free`);
+    }
+  }
 };
 
 // Initial cleanup - kill processes on ports 7680 and 7690
@@ -48,9 +67,9 @@ if (mcpBuildResult.exitCode === 0) {
   console.error("❌ MCP server build failed:", new TextDecoder().decode(mcpBuildResult.stderr));
 }
 
-// Build and start backend with watching
-const backendProcess = spawn({
-  cmd: ["cargo", "watch", "-x", "run"],
+// Build and start backend with watching - ignore target directory and only watch src files
+let backendProcess = spawn({
+  cmd: ["cargo", "watch", "--ignore", "target/*", "--ignore", "**/.DS_Store", "--ignore", "**/*.tmp", "--delay", "1", "-w", "src", "-w", "Cargo.toml", "-w", "migration", "-x", "run"],
   cwd: backendDir,
   stdout: "pipe",
   stderr: "pipe",
@@ -63,6 +82,41 @@ const backendProcess = spawn({
 // Track backend state
 let backendRunning = false;
 let frontendStarted = false;
+let restartAttempts = 0;
+const MAX_RESTART_ATTEMPTS = 5;
+
+// Function to restart backend
+const restartBackend = async () => {
+  console.log(`🔄 Restarting backend (attempt ${restartAttempts + 1}/${MAX_RESTART_ATTEMPTS})...`);
+  
+  // Kill existing process
+  if (backendProcess) {
+    backendProcess.kill();
+  }
+  
+  // Clean up port
+  cleanupPort(7680);
+  
+  // Wait a bit for cleanup
+  await new Promise(resolve => setTimeout(resolve, 1000));
+  
+  // Restart cargo watch
+  backendProcess = spawn({
+    cmd: ["cargo", "watch", "--ignore", "target/*", "--ignore", "**/.DS_Store", "--ignore", "**/*.tmp", "--delay", "1", "-w", "src", "-w", "Cargo.toml", "-w", "migration", "-x", "run"],
+    cwd: backendDir,
+    stdout: "pipe",
+    stderr: "pipe",
+    env: {
+      ...process.env,
+      RUST_LOG: "warn",
+    },
+  });
+  
+  restartAttempts++;
+  
+  // Re-attach monitoring
+  monitorBackend();
+};
 
 // Monitor backend output continuously
 const monitorBackend = async () => {
@@ -78,6 +132,7 @@ const monitorBackend = async () => {
         if (text.includes("listening") && text.includes("7680")) {
           if (!backendRunning) {
             backendRunning = true;
+            restartAttempts = 0; // Reset restart counter on successful start
             console.log("✅ Backend started successfully");
             
             // Start frontend if not already started
@@ -114,6 +169,10 @@ const monitorBackend = async () => {
           if (backendRunning) {
             console.log("🔄 Recompiling backend...");
             backendRunning = false;
+            // Clean up port immediately when recompilation starts
+            cleanupPort(7680);
+          } else {
+            console.log("🔧 Compiling backend...");
           }
         }
         
@@ -128,6 +187,9 @@ const monitorBackend = async () => {
         if (compilationInProgress && text.includes("Finished") && !hasErrors) {
           compilationInProgress = false;
           console.log("✅ Backend compiled successfully - starting...");
+          
+          // Reset backend running state - let the "listening" detection handle startup
+          backendRunning = false;
           
           // Also rebuild MCP server when backend recompiles
           console.log("🔧 Rebuilding MCP server debug binary...");
@@ -159,15 +221,27 @@ const monitorBackend = async () => {
           }
         }
         
-        // Detect process crashes at runtime
-        if (text.includes("thread 'main' panicked") || text.includes("error: process didn't exit successfully") || text.includes("Address already in use")) {
+        // Detect process crashes and kills at runtime
+        if (text.includes("thread 'main' panicked") || text.includes("error: process didn't exit successfully") || text.includes("Address already in use") || text.includes("Killed: 9")) {
           backendRunning = false;
-          console.error("💥 Backend crashed - cleaning up ports and restarting...");
-          
-          // Clean up port 7680 when we detect a crash
-          setTimeout(() => {
+          if (text.includes("Killed: 9")) {
+            console.log("🔄 Backend process restarted by cargo watch");
+          } else {
+            console.error("💥 Backend crashed - cleaning up and restarting...");
+            
+            // Clean up port 7680 immediately when we detect a crash
             cleanupPort(7680);
-          }, 500);
+            
+            // Restart backend if we haven't exceeded max attempts
+            if (restartAttempts < MAX_RESTART_ATTEMPTS) {
+              setTimeout(() => {
+                restartBackend();
+              }, 2000); // Wait 2 seconds before restart
+            } else {
+              console.error(`❌ Backend crashed ${MAX_RESTART_ATTEMPTS} times. Please check for issues.`);
+              process.exit(1);
+            }
+          }
         }
       }
     }

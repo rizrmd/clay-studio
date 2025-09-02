@@ -7,6 +7,7 @@ use tokio::sync::{mpsc, Mutex};
 use std::sync::Arc;
 use tracing::info;
 use std::sync::atomic::{AtomicBool, Ordering};
+use sqlx::Row;
 
 #[derive(Debug, Clone)]
 pub struct ClaudeSetup {
@@ -617,6 +618,34 @@ impl ClaudeSetup {
     pub async fn get_oauth_token(&self) -> Option<String> {
         let guard = self.oauth_token.lock().await;
         guard.clone()
+    }
+    
+    pub async fn get_oauth_token_with_db(&self, db_pool: &sqlx::PgPool) -> Option<String> {
+        // First check in-memory token
+        let guard = self.oauth_token.lock().await;
+        if let Some(token) = guard.clone() {
+            return Some(token);
+        }
+        drop(guard);
+        
+        // If no in-memory token, check database
+        if let Ok(row) = sqlx::query("SELECT claude_token FROM clients WHERE id = $1")
+            .bind(self.client_id)
+            .fetch_optional(db_pool)
+            .await 
+        {
+            if let Some(row) = row {
+                let db_token: Option<String> = row.get("claude_token");
+                if let Some(token) = db_token {
+                    // Cache the token in memory for future use
+                    let mut guard = self.oauth_token.lock().await;
+                    *guard = Some(token.clone());
+                    return Some(token);
+                }
+            }
+        }
+        
+        None
     }
     
     async fn save_env_file(&self, oauth_token: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {

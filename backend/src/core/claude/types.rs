@@ -36,7 +36,7 @@ pub enum ClaudeMessage {
     #[serde(rename = "start")]
     Start { session_id: String },
     #[serde(rename = "progress")]
-    Progress { content: String },
+    Progress { content: serde_json::Value },
     #[serde(rename = "tool_use")]
     ToolUse { tool: String, args: Value, tool_use_id: Option<String> },
     #[serde(rename = "tool_result")]

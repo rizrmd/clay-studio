@@ -22,6 +22,15 @@ export interface ContextUsageInfo {
   needsCompaction: boolean;
 }
 
+export interface ActiveToolInfo {
+  tool_name: string;
+  tool_usage_id?: string;
+  status: 'executing' | 'completed';
+  execution_time_ms?: number;
+  started_at: string;
+  completed_at?: string;
+}
+
 export interface ConversationState {
   id: string;
   status: ConversationStatus;
@@ -31,7 +40,7 @@ export interface ConversationState {
   forgottenAfterMessageId: string | null;
   forgottenCount: number;
   messageQueue: QueuedMessage[];
-  activeTools: string[];
+  activeTools: ActiveToolInfo[];
   context?: ConversationContext;
   contextUsage?: ContextUsageInfo;
   lastUpdated: number;
@@ -55,6 +64,7 @@ export interface InputState {
 export type ConversationEvent = 
   | { type: 'CONVERSATION_CREATED'; conversationId: string; projectId: string }
   | { type: 'CONVERSATION_SWITCHED'; from: string | null; to: string }
+  | { type: 'CONVERSATION_REDIRECT'; oldConversationId: string; newConversationId: string }
   | { type: 'MESSAGE_SENT'; conversationId: string; messageId: string }
   | { type: 'STREAMING_STARTED'; conversationId: string }
   | { type: 'STREAMING_STOPPED'; conversationId: string }

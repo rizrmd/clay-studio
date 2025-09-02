@@ -5,7 +5,7 @@ use tokio::sync::{mpsc, Mutex};
 use std::sync::Arc;
 use tokio::process::Command as TokioCommand;
 
-use super::types::{QueryRequest, ClaudeMessage};
+use super::types::{QueryRequest, ClaudeMessage, AskUserOption};
 
 #[derive(Debug, Clone)]
 pub struct ClaudeSDK {
@@ -140,7 +140,7 @@ impl ClaudeSDK {
             tracing::info!("Claude CLI not found for client {}, installing...", self.client_id);
             
             let _ = tx.send(ClaudeMessage::Progress { 
-                content: "Setting up client environment - Installing Claude CLI package...".to_string() 
+                content: serde_json::Value::String("Setting up client environment - Installing Claude CLI package...".to_string())
             }).await;
             
             use crate::core::claude::setup::ClaudeSetup;
@@ -149,7 +149,7 @@ impl ClaudeSDK {
             setup.install_claude_code(None).await?;
             
             let _ = tx.send(ClaudeMessage::Progress { 
-                content: "Client environment setup complete!".to_string() 
+                content: serde_json::Value::String("Client environment setup complete!".to_string())
             }).await;
             
             tracing::info!("Claude CLI installation completed for client {}", self.client_id);
@@ -183,7 +183,7 @@ impl ClaudeSDK {
         let bun_executable = self.bun_path.join("bin/bun");
         // Claude CLI is installed at the client level, not project level
         let claude_cli_path = self.client_dir.join("node_modules/@anthropic-ai/claude-code/cli.js");
-        let command_debug = format!("{} {} -p --verbose --dangerously-skip-permissions --output-format stream-json [prompt]", bun_executable.display(), claude_cli_path.display());
+        let command_debug = format!("{} {} -p --verbose --dangerously-skip-permissions --disallowedTools \"Bash\" --output-format stream-json [prompt]", bun_executable.display(), claude_cli_path.display());
         let command_debug_clone = command_debug.clone();
         let command_debug_clone2 = command_debug.clone();
         let command_debug_clone3 = command_debug.clone();
@@ -219,14 +219,14 @@ impl ClaudeSDK {
                 };
                 
                 let full_command = format!(
-                    "cd '{}' && HOME='{}' CLAUDE_CODE_OAUTH_TOKEN='{}' {} {}{} -p --verbose --dangerously-skip-permissions --output-format stream-json '{}'",
+                    "cd '{}' && HOME='{}' CLAUDE_CODE_OAUTH_TOKEN='{}' echo '{}' | {} {}{} -p - --verbose --dangerously-skip-permissions --disallowedTools \"Bash\" --output-format stream-json",
                     working_dir_clone.display(),
                     working_dir_clone.display(),
                     oauth_token,
+                    prompt.replace("'", "'\\''"),
                     bun_executable.display(),
                     claude_cli_path_clone.display(),
-                    mcp_arg,
-                    prompt.replace("'", "'\\''")
+                    mcp_arg
                 );
                 
                 // Use su to run as nobody user
@@ -253,11 +253,13 @@ impl ClaudeSDK {
                 }
                 
                 cmd.arg("-p")
+                   .arg("-")  // Read from stdin
                    .arg("--verbose")
                    .arg("--dangerously-skip-permissions")
+                   .arg("--disallowedTools")
+                   .arg("Bash")
                    .arg("--output-format")
                    .arg("stream-json")
-                   .arg(&prompt)
                    .current_dir(&working_dir_clone)
                    .env("HOME", &working_dir_clone)
                    .env("CLAUDE_CODE_OAUTH_TOKEN", oauth_token);
@@ -266,6 +268,7 @@ impl ClaudeSDK {
             
             // Set stdio for both paths
             cmd_builder
+                .stdin(std::process::Stdio::piped())
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped());
             
@@ -284,6 +287,22 @@ impl ClaudeSDK {
                     return;
                 }
             };
+            
+            // Write prompt to stdin (only for non-su path, su path uses echo in the command)
+            if !use_su_workaround {
+                if let Some(mut stdin) = cmd.stdin.take() {
+                    use tokio::io::AsyncWriteExt;
+                    if let Err(e) = stdin.write_all(prompt.as_bytes()).await {
+                        tracing::error!("Failed to write prompt to stdin: {}", e);
+                        let _ = tx.send(ClaudeMessage::Error {
+                            error: format!("Failed to write prompt to stdin: {}", e),
+                        }).await;
+                        return;
+                    }
+                    // Close stdin to signal EOF
+                    drop(stdin);
+                }
+            }
             
             // Also capture stderr for debugging
             if let Some(stderr) = cmd.stderr.take() {
@@ -314,208 +333,178 @@ impl ClaudeSDK {
                                 line_count += 1;
                         
                         if !line.trim().is_empty() {
-                            // Always send raw line as Progress for debugging
-                            if let Err(e) = tx_clone.send(ClaudeMessage::Progress {
-                                content: line.clone()
-                            }).await {
-                                tracing::error!("Failed to send Progress message: {}. Breaking stdout loop.", e);
-                                break;
-                            }
+                            // Parse line as JSON or create a string value
+                            let mut json_value = if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
+                                json
+                            } else {
+                                // If not valid JSON, wrap as string
+                                serde_json::Value::String(line.clone())
+                            };
                             
-                            // Try to parse the line as JSON to determine message type
-                            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
-                                // Log ALL message types to understand what Claude sends
-                                if let Some(msg_type) = json.get("type").and_then(|v| v.as_str()) {
-                                    
-                                    // Handle tool_result messages
-                                    if msg_type == "tool_result" {
+                            // Check for tool use and tool results in addition to sending progress
+                            if let Some(msg_type) = json_value.get("type").and_then(|v| v.as_str()) {
+                                match msg_type {
+                                    "assistant" => {
+                                        // Check for tool use blocks in assistant messages
+                                        if let Some(message) = json_value.get("message") {
+                                            if let Some(content) = message.get("content") {
+                                                if let Some(blocks) = content.as_array() {
+                                                    for block in blocks {
+                                                        if block.get("type").and_then(|t| t.as_str()) == Some("tool_use") {
+                                                            if let Some(name) = block.get("name").and_then(|n| n.as_str()) {
+                                                                // Skip TodoWrite - it's not a real tool, just task tracking
+                                                                if name != "TodoWrite" {
+                                                                    let tool_use_id = block.get("id").and_then(|id| id.as_str()).map(|s| s.to_string());
+                                                                    let args = block.get("input")
+                                                                        .or_else(|| block.get("arguments"))
+                                                                        .cloned()
+                                                                        .unwrap_or(json!({}));
+                                                                    
+                                                                    tracing::info!("Detected tool usage: {} with id: {:?}", name, tool_use_id);
+                                                                    let _ = tx_clone.send(ClaudeMessage::ToolUse {
+                                                                        tool: name.to_string(),
+                                                                        args,
+                                                                        tool_use_id,
+                                                                    }).await;
+                                                                } else {
+                                                                    // TodoWrite is handled separately - just log it
+                                                                    tracing::info!("Detected TodoWrite update (not counted as tool use)");
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    "tool_result" => {
+                                        // Handle explicit tool_result messages
                                         if let (Some(tool_name), Some(result)) = 
-                                            (json.get("tool_name").and_then(|v| v.as_str()),
-                                             json.get("result")) {
-                                            tracing::info!("Detected tool result for {}: {:?}", tool_name, result);
+                                            (json_value.get("tool_name").and_then(|v| v.as_str()),
+                                             json_value.get("result")) {
+                                            tracing::info!("Detected tool result for {}", tool_name);
                                             let _ = tx_clone.send(ClaudeMessage::ToolResult {
                                                 tool: tool_name.to_string(),
                                                 result: result.clone(),
                                             }).await;
                                         }
-                                    } else if msg_type == "assistant" {
-                                        // This is the assistant message with content
-                                        if let Some(message) = json.get("message") {
-                                            if let Some(content) = message.get("content") {
-                                                // Check for tool use blocks in the content array
-                                                if content.is_array() {
-                                                    if let Some(blocks) = content.as_array() {
-                                                        for block in blocks {
-                                                            // Check for tool_use blocks
-                                                            if let Some(block_type) = block.get("type").and_then(|t| t.as_str()) {
-                                                                if block_type == "tool_use" {
-                                                                    // Extract tool name, tool_use_id and send ToolUse event
-                                                                    if let Some(name) = block.get("name").and_then(|n| n.as_str()) {
-                                                                        let tool_use_id = block.get("id").and_then(|id| id.as_str()).map(|s| s.to_string());
-                                                                        tracing::info!("Detected tool usage: {} with id: {:?}", name, tool_use_id);
-                                                                        // Try both "input" and "arguments" fields for compatibility
-                                                                        let args = block.get("input")
-                                                                            .or_else(|| block.get("arguments"))
-                                                                            .cloned()
-                                                                            .unwrap_or(json!({}));
-                                                                        tracing::debug!("Tool input/args extracted: {:?}", args);
-                                                                        tracing::info!("Sending ToolUse event: {}", name);
-                                                                        if let Err(e) = tx_clone.send(ClaudeMessage::ToolUse {
-                                                                            tool: name.to_string(),
-                                                                            args,
-                                                                            tool_use_id,
-                                                                        }).await {
-                                                                            tracing::error!("Failed to send ToolUse event: {}", e);
-                                                                        } else {
-                                                                            tracing::info!("Successfully sent ToolUse event for: {}", name);
-                                                                        }
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-                                                        
-                                                        // Extract text from content blocks
-                                                        let text = blocks.iter()
-                                                            .filter_map(|block| {
-                                                                if block.get("type").and_then(|t| t.as_str()) == Some("text") {
-                                                                    block.get("text").and_then(|t| t.as_str())
-                                                                } else {
-                                                                    None
-                                                                }
-                                                            })
-                                                            .collect::<Vec<_>>()
-                                                            .join("");
-                                                        
-                                                        if !text.is_empty() {
-                                                            let _ = tx_clone.send(ClaudeMessage::Result {
-                                                                result: text
-                                                            }).await;
-                                                        }
-                                                    }
-                                                } else if content.is_string() {
-                                                    let text = content.as_str().unwrap_or("").to_string();
-                                                    if !text.is_empty() {
-                                                        let _ = tx_clone.send(ClaudeMessage::Result {
-                                                            result: text
-                                                        }).await;
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    } else if msg_type == "user" {
+                                    }
+                                    "user" => {
                                         // Handle user messages that contain tool_result content
-                                        if let Some(message) = json.get("message") {
+                                        if let Some(message) = json_value.get("message") {
                                             if let Some(content) = message.get("content") {
-                                                if content.is_array() {
-                                                    if let Some(blocks) = content.as_array() {
-                                                        for block in blocks {
-                                                            if let Some(block_type) = block.get("type").and_then(|t| t.as_str()) {
-                                                                if block_type == "tool_result" {
-                                                                    // Extract tool_use_id and content
-                                                                    if let Some(tool_use_id) = block.get("tool_use_id").and_then(|id| id.as_str()) {
-                                                                        // Try to extract the tool name from the ID or content
-                                                                        let tool_name = if let Some(content_array) = block.get("content").and_then(|c| c.as_array()) {
-                                                                            // Extract tool name from the content if possible
-                                                                            if let Some(first_content) = content_array.first() {
-                                                                                if let Some(text) = first_content.get("text").and_then(|t| t.as_str()) {
-                                                                                    // Use the modular tool registry to identify the tool
-                                                                                    crate::utils::mcp_tools::identify_tool_from_result(text)
-                                                                                        .unwrap_or_else(|| tool_use_id.to_string())
-                                                                                } else {
-                                                                                    tool_use_id.to_string()
-                                                                                }
-                                                                            } else {
-                                                                                tool_use_id.to_string()
-                                                                            }
-                                                                        } else {
-                                                                            tool_use_id.to_string()
-                                                                        };
-                                                                        
-                                                                        tracing::info!("Detected tool result in user message with tool_use_id: {} -> mapped to tool: {}", tool_use_id, tool_name);
-                                                                        
-                                                                        // Send the tool_use_id, not the mapped tool name, for proper lookup
-                                                                        let _ = tx_clone.send(ClaudeMessage::ToolResult {
-                                                                            tool: tool_use_id.to_string(), // Use the tool_use_id for lookup
-                                                                            result: block.get("content").cloned().unwrap_or(json!([])),
-                                                                        }).await;
-                                                                    }
-                                                                }
+                                                if let Some(blocks) = content.as_array() {
+                                                    for block in blocks {
+                                                        if block.get("type").and_then(|t| t.as_str()) == Some("tool_result") {
+                                                            if let Some(tool_use_id) = block.get("tool_use_id").and_then(|id| id.as_str()) {
+                                                                tracing::info!("Detected tool result in user message with tool_use_id: {}", tool_use_id);
+                                                                let _ = tx_clone.send(ClaudeMessage::ToolResult {
+                                                                    tool: tool_use_id.to_string(),
+                                                                    result: block.get("content").cloned().unwrap_or(json!([])),
+                                                                }).await;
                                                             }
                                                         }
                                                     }
                                                 }
                                             }
                                         }
-                                    } else if msg_type == "result" {
-                                        // Also handle the explicit result message
-                                        if let Some(result) = json.get("result").and_then(|v| v.as_str()) {
+                                    }
+                                    "result" => {
+                                        // Handle final result messages
+                                        if let Some(result) = json_value.get("result").and_then(|v| v.as_str()) {
                                             if !result.is_empty() {
+                                                tracing::info!("Detected final result message");
                                                 let _ = tx_clone.send(ClaudeMessage::Result {
                                                     result: result.to_string()
                                                 }).await;
                                             }
                                         }
-                                    } else if msg_type == "tool_call" || msg_type == "tool_execution" {
-                                        // Handle standalone tool execution messages
-                                        if let Some(tool_name) = json.get("tool").and_then(|t| t.as_str()) {
-                                            let tool_use_id = json.get("id").and_then(|id| id.as_str()).map(|s| s.to_string());
-                                            tracing::info!("Detected standalone tool call: {} with id: {:?}", tool_name, tool_use_id);
-                                            let args = json.get("arguments").cloned().unwrap_or(json!({}));
-                                            tracing::info!("Sending standalone ToolUse event: {}", tool_name);
-                                            if let Err(e) = tx_clone.send(ClaudeMessage::ToolUse {
-                                                tool: tool_name.to_string(),
-                                                args,
-                                                tool_use_id,
-                                            }).await {
-                                                tracing::error!("Failed to send standalone ToolUse event: {}", e);
-                                            } else {
-                                                tracing::info!("Successfully sent standalone ToolUse event for: {}", tool_name);
-                                            }
-                                        }
                                     }
-                                }
-                                
-                                // Check for JSON-RPC result patterns (MCP server responses)
-                                if let Some(jsonrpc) = json.get("jsonrpc") {
-                                    if jsonrpc.as_str() == Some("2.0") {
-                                        if let Some(result) = json.get("result") {
-                                            if let Some(content) = result.get("content") {
-                                                if content.is_array() {
-                                                    // This is definitely an MCP tool result
-                                                    // Infer tool name from content pattern
-                                                    let tool_name = if let Some(first_content) = content.as_array()
-                                                        .and_then(|arr| arr.first()) 
-                                                        .and_then(|item| item.get("text"))
-                                                        .and_then(|text| text.as_str()) {
-                                                        
-                                                        if first_content.contains("Data sources") {
-                                                            "mcp__data-analysis__datasource_list"
-                                                        } else if first_content.contains("Database statistics") {
-                                                            "mcp__data-analysis__schema_stats"
-                                                        } else if first_content.contains("Database compatibility") || first_content.contains("MCP Server Error") {
-                                                            "mcp__data-analysis__datasource_inspect"
-                                                        } else {
-                                                            "mcp_tool"
-                                                        }
+                                    "ask_user" => {
+                                        // Handle ask_user interaction events
+                                        tracing::info!("Detected ask_user event");
+                                        
+                                        let prompt_type = json_value.get("prompt_type")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("input")
+                                            .to_string();
+                                        
+                                        let title = json_value.get("title")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("")
+                                            .to_string();
+                                        
+                                        let options = if let Some(opts_array) = json_value.get("options").and_then(|v| v.as_array()) {
+                                            let parsed_options: Vec<AskUserOption> = opts_array.iter()
+                                                .filter_map(|opt| {
+                                                    if let (Some(value), Some(label)) = 
+                                                        (opt.get("value").and_then(|v| v.as_str()),
+                                                         opt.get("label").and_then(|l| l.as_str())) {
+                                                        Some(AskUserOption {
+                                                            value: value.to_string(),
+                                                            label: label.to_string(),
+                                                            description: opt.get("description")
+                                                                .and_then(|d| d.as_str())
+                                                                .map(|s| s.to_string()),
+                                                        })
                                                     } else {
-                                                        "mcp_tool"
-                                                    };
-                                                    
-                                                    tracing::info!("Detected MCP JSON-RPC tool result for: {}", tool_name);
-                                                    let _ = tx_clone.send(ClaudeMessage::ToolResult {
-                                                        tool: tool_name.to_string(),
-                                                        result: result.clone(),
-                                                    }).await;
-                                                }
-                                            }
+                                                        None
+                                                    }
+                                                })
+                                                .collect();
+                                            if parsed_options.is_empty() { None } else { Some(parsed_options) }
+                                        } else {
+                                            None
+                                        };
+                                        
+                                        let input_type = json_value.get("input_type")
+                                            .and_then(|v| v.as_str())
+                                            .map(|s| s.to_string());
+                                        
+                                        let placeholder = json_value.get("placeholder")
+                                            .and_then(|v| v.as_str())
+                                            .map(|s| s.to_string());
+                                        
+                                        let tool_use_id = json_value.get("tool_use_id")
+                                            .and_then(|v| v.as_str())
+                                            .map(|s| s.to_string());
+                                        
+                                        let _ = tx_clone.send(ClaudeMessage::AskUser {
+                                            prompt_type,
+                                            title,
+                                            options,
+                                            input_type,
+                                            placeholder,
+                                            tool_use_id,
+                                        }).await;
+                                    }
+                                    "error" => {
+                                        // Handle error messages
+                                        if let Some(error) = json_value.get("error").and_then(|v| v.as_str()) {
+                                            tracing::error!("Detected error message: {}", error);
+                                            let _ = tx_clone.send(ClaudeMessage::Error {
+                                                error: error.to_string()
+                                            }).await;
                                         }
                                     }
+                                    "show_table" | "show_chart" => {
+                                        // These are visualization events that should be passed through progress
+                                        // They contain structured data for rendering tables/charts
+                                        tracing::info!("Detected {} event", msg_type);
+                                        // These will be handled via the progress message with their full JSON
+                                    }
+                                    _ => {} // Other message types
                                 }
                             }
                             
-                            // Always send as progress for frontend streaming
+                            // Remove cwd field if it exists
+                            if let Some(obj) = json_value.as_object_mut() {
+                                obj.remove("cwd");
+                            }
+                            
+                            // Send the cleaned JSON as progress
                             let _ = tx_clone.send(ClaudeMessage::Progress {
-                                content: line
+                                content: json_value
                             }).await;
                         }
                             }

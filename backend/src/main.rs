@@ -17,13 +17,51 @@ use tokio::signal;
 
 use crate::utils::{Config, AppState};
 use crate::api::{
-    admin, auth, chat_ws, clients, client_management,
+    admin, auth, clients, client_management,
     conversations, conversations_forget, projects, prompt, tool_usage, upload, user_management, websocket
 };
 use crate::utils::middleware::{inject_state, client_scoped, auth::{auth_required, admin_required, root_required}};
 use crate::core::sessions::PostgresSessionStore;
 
-/// Bind to address with retry logic by adding delay before binding
+/// Kill process using the specified port
+async fn kill_process_using_port(port: u16) -> Result<(), Box<dyn std::error::Error>> {
+    use std::process::Command;
+    
+    eprintln!("🔪 Killing process using port {}...", port);
+    
+    // Find the PID using the port
+    let output = Command::new("lsof")
+        .arg("-ti")
+        .arg(format!(":{}", port))
+        .output()?;
+    
+    if output.status.success() {
+        let pid_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !pid_str.is_empty() {
+            eprintln!("📍 Found process {} using port {}", pid_str, port);
+            
+            // Kill the process
+            let kill_output = Command::new("kill")
+                .arg("-9")
+                .arg(&pid_str)
+                .output()?;
+            
+            if kill_output.status.success() {
+                eprintln!("✅ Successfully killed process {} using port {}", pid_str, port);
+                // Give the process time to fully release the port
+                tokio::time::sleep(Duration::from_millis(1000)).await;
+            } else {
+                let stderr = String::from_utf8_lossy(&kill_output.stderr);
+                eprintln!("❌ Failed to kill process {}: {}", pid_str, stderr);
+                return Err(format!("Failed to kill process {}: {}", pid_str, stderr).into());
+            }
+        }
+    }
+    
+    Ok(())
+}
+
+/// Bind to address with port conflict resolution
 async fn bind_with_retry(address: &str, max_retries: u32) -> TcpAcceptor {
     // Add a small initial delay to allow any previous process to fully release the port
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -52,11 +90,19 @@ async fn bind_with_retry(address: &str, max_retries: u32) -> TcpAcceptor {
             }
             Err(e) => {
                 if e.kind() == std::io::ErrorKind::AddrInUse {
-                    eprintln!("⚠️  Port {} is in use (attempt {}/{}), retrying in 1 second...", 
-                             socket_addr.port(), attempt, max_retries);
+                    eprintln!("⚠️  Port {} is in use (attempt {}/{})", socket_addr.port(), attempt, max_retries);
                     
-                    if attempt < max_retries {
-                        tokio::time::sleep(Duration::from_secs(1)).await;
+                    // Try to kill the process using the port
+                    if let Err(kill_err) = kill_process_using_port(socket_addr.port()).await {
+                        eprintln!("⚠️  Failed to kill process using port {}: {}", socket_addr.port(), kill_err);
+                        
+                        if attempt < max_retries {
+                            eprintln!("⚠️  Retrying in 1 second...");
+                            tokio::time::sleep(Duration::from_secs(1)).await;
+                            continue;
+                        }
+                    } else {
+                        // Successfully killed process, try binding again immediately
                         continue;
                     }
                 }
@@ -225,7 +271,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .hoop(auth_required)
         .hoop(client_scoped)
         .push(Router::with_path("/auth").push(auth::auth_protected_routes()))
-        .push(Router::with_path("/chat/stream").post(chat_ws::handle_chat_stream_ws))
         .push(Router::with_path("/prompt/stream").post(prompt::handle_prompt_stream))
         .push(
             Router::with_path("/projects")

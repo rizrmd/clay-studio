@@ -314,12 +314,57 @@ export class ConversationManager {
     });
   }
 
-  // Handle active tools
-  async addActiveTool(conversationId: string, tool: string): Promise<void> {
+  // Handle active tools with detailed tracking
+  async addActiveTool(conversationId: string, toolName: string, toolUsageId?: string): Promise<void> {
     return this.atomicOperation(conversationId, () => {
       const state = getOrCreateConversationState(conversationId);
-      if (!state.activeTools.includes(tool)) {
-        state.activeTools.push(tool);
+      
+      // Check if tool already exists
+      const exists = state.activeTools.some(t => t.tool_name === toolName && t.status === 'executing');
+      if (!exists) {
+        state.activeTools.push({
+          tool_name: toolName,
+          tool_usage_id: toolUsageId,
+          status: 'executing',
+          started_at: new Date().toISOString(),
+        });
+        state.lastUpdated = Date.now();
+        state.version++;
+      }
+    });
+  }
+
+  async updateToolCompleted(
+    conversationId: string, 
+    toolName: string, 
+    toolUsageId: string,
+    executionTimeMs: number
+  ): Promise<void> {
+    return this.atomicOperation(conversationId, () => {
+      const state = getOrCreateConversationState(conversationId);
+      
+      // Find the tool and update it
+      const tool = state.activeTools.find(t => 
+        t.tool_name === toolName && t.status === 'executing'
+      );
+      
+      if (tool) {
+        tool.status = 'completed';
+        tool.tool_usage_id = toolUsageId;
+        tool.execution_time_ms = executionTimeMs;
+        tool.completed_at = new Date().toISOString();
+        state.lastUpdated = Date.now();
+        state.version++;
+      }
+    });
+  }
+
+  async removeActiveTool(conversationId: string, tool: string): Promise<void> {
+    return this.atomicOperation(conversationId, () => {
+      const state = getOrCreateConversationState(conversationId);
+      const index = state.activeTools.findIndex(t => t.tool_name === tool);
+      if (index > -1) {
+        state.activeTools.splice(index, 1);
         state.lastUpdated = Date.now();
         state.version++;
       }
@@ -403,5 +448,31 @@ export class ConversationManager {
   getConversationSnapshot(conversationId: string): ConversationState | null {
     const state = conversationStore.conversations[conversationId];
     return state ? JSON.parse(JSON.stringify(snapshot(state))) : null;
+  }
+
+  // Add a tool usage to the last assistant message atomically
+  async addToolUsage(conversationId: string, toolUsage: any): Promise<void> {
+    return this.atomicOperation(conversationId, () => {
+      const state = getOrCreateConversationState(conversationId);
+      
+      // Find the last assistant message
+      for (let i = state.messages.length - 1; i >= 0; i--) {
+        if (state.messages[i].role === 'assistant') {
+          const message = state.messages[i];
+          const currentToolUsages = message.tool_usages || [];
+          
+          // Set the message_id on the tool usage
+          toolUsage.message_id = message.id;
+          
+          // Add the new tool usage
+          message.tool_usages = [...currentToolUsages, toolUsage];
+          state.lastUpdated = Date.now();
+          state.version++;
+          
+          logger.debug('ConversationManager: Added tool usage', toolUsage.tool_name, 'Total:', message.tool_usages.length);
+          break;
+        }
+      }
+    });
   }
 }

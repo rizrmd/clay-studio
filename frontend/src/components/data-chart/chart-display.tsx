@@ -143,7 +143,7 @@ export function ChartDisplay({
       className={cn(
         "w-full space-y-2",
         isMaximized &&
-          "fixed inset-0 flex flex-col z-[100] bottom-[70px] bg-background px-4",
+          "fixed inset-0 flex flex-col z-[100] pb-[20px] bg-background px-4",
         className
       )}
       data-interaction-id={interactionId}
@@ -211,7 +211,7 @@ export function ChartDisplay({
             echarts={getEChartsCore()}
             option={chartOptions}
             style={{
-              height: isMaximized ? "100%" : "400px",
+              height: isMaximized ? "calc(100vh-140px)" : "400px",
               width: "100%",
             }}
             opts={{ renderer: "canvas" }}

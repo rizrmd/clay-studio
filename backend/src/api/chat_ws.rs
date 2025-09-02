@@ -1,88 +1,15 @@
-use salvo::prelude::*;
-use serde::Deserialize;
-use serde_json::json;
 use crate::models::{Message, MessageRole};
 use crate::utils::{AppState, StreamingState};
 use crate::utils::AppError;
 use crate::core::claude::{ClaudeManager, QueryOptions, ClaudeMessage};
 use chrono::Utc;
-use uuid::Uuid;
-use sqlx::{Row, PgPool};
+use sqlx::PgPool;
 
 use crate::api::websocket::{broadcast_to_subscribers, ServerMessage};
+use uuid;
 
-// Generate a concise title from the user's first message
-fn generate_conversation_title(content: &str) -> String {
-    let content = content.trim();
-    
-    // Remove file attachment mentions
-    let content = if let Some(idx) = content.find("\n\nAttached files:") {
-        &content[..idx]
-    } else {
-        content
-    };
-    
-    // Take first line or sentence
-    let title = content
-        .lines()
-        .next()
-        .unwrap_or(content)
-        .trim();
-    
-    // Truncate to reasonable length (50 chars)
-    if title.len() > 50 {
-        let truncated = &title[..47];
-        // Find last word boundary to avoid cutting mid-word
-        if let Some(last_space) = truncated.rfind(' ') {
-            format!("{}...", &title[..last_space])
-        } else {
-            format!("{}...", truncated)
-        }
-    } else if title.is_empty() {
-        "New Conversation".to_string()
-    } else {
-        title.to_string()
-    }
-}
 
-#[derive(Debug, Deserialize)]
-pub struct ChatRequest {
-    pub messages: Vec<Message>,
-    pub project_id: String,
-    pub conversation_id: Option<String>,
-}
 
-// Helper function to ensure conversation exists
-async fn ensure_conversation(
-    pool: &PgPool,
-    conversation_id: &str,
-    project_id: &str,
-) -> Result<(), AppError> {
-    let exists = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM conversations WHERE id = $1 AND project_id = $2)"
-    )
-    .bind(conversation_id)
-    .bind(project_id)
-    .fetch_one(pool)
-    .await
-    .unwrap_or(false);
-
-    if !exists {
-        sqlx::query(
-            "INSERT INTO conversations (id, project_id, title, created_at, is_title_manually_set) VALUES ($1, $2, $3, $4, $5)"
-        )
-        .bind(conversation_id)
-        .bind(project_id)
-        .bind("New Conversation")
-        .bind(Utc::now())
-        .bind(false) // Auto-generated title, not manually set
-        .execute(pool)
-        .await
-        .map_err(|e| AppError::InternalServerError(format!("Failed to create conversation: {}", e)))?;
-    }
-
-    Ok(())
-}
 
 async fn save_message(
     pool: &PgPool,
@@ -140,764 +67,456 @@ async fn save_message(
     Ok(())
 }
 
-#[handler]
-pub async fn handle_chat_stream_ws(
-    req: &mut Request,
-    depot: &mut Depot,
-    res: &mut Response,
-) -> Result<(), AppError> {
-    let state = depot.obtain::<AppState>().unwrap();
-    let chat_request: ChatRequest = req.parse_json().await
-        .map_err(|_| AppError::BadRequest("Invalid request body".to_string()))?;
-
-    // Get the first active client from the database
-    let client_row = sqlx::query(
-        "SELECT id, claude_token FROM clients WHERE status = 'active' AND claude_token IS NOT NULL LIMIT 1"
-    )
-    .fetch_optional(&state.db_pool)
-    .await
-    .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
-
-    let (client_id, claude_token) = if let Some(row) = client_row {
-        let id: Uuid = row.get("id");
-        let token: Option<String> = row.get("claude_token");
-        (id, token)
-    } else {
-        return Err(AppError::ServiceUnavailable(
-            "No active Claude client available. Please set up a client first.".to_string()
-        ));
-    };
-
-    tracing::info!(
-        "Using client {} for WebSocket streaming chat request with project {} (conversation: {:?})", 
-        client_id, 
-        chat_request.project_id,
-        chat_request.conversation_id
-    );
-
-    // Generate conversation ID
-    let conversation_id = match chat_request.conversation_id.as_deref() {
-        Some("new") | None => format!("conv-{}-{}", chrono::Utc::now().timestamp_millis(), Uuid::new_v4()),
-        Some(id) => id.to_string(),
-    };
-
-    let _is_new_conversation = conversation_id.starts_with("conv-") || conversation_id == "new";
-
-    // Ensure conversation exists
-    ensure_conversation(&state.db_pool, &conversation_id, &chat_request.project_id).await?;
-
-    // Generate assistant message ID
-    let assistant_message_id = Uuid::new_v4().to_string();
+// WebSocket-only message handler (replaces SSE streaming)
+pub async fn handle_chat_message_ws(
+    project_id: String,
+    conversation_id: String,
+    content: String,
+    _uploaded_file_paths: Vec<String>,
+    client_id_str: String,
+    state: AppState,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     
-    // Track tool usages for this message
-    let _tracked_tool_usages: Vec<crate::models::tool_usage::ToolUsage> = Vec::new();
-
-    // Save user message if provided
-    if let Some(last_msg) = chat_request.messages.last() {
-        if last_msg.role == MessageRole::User {
-            let existing_user_msg = sqlx::query_scalar::<_, bool>(
-                "SELECT EXISTS(
-                    SELECT 1 FROM messages 
-                    WHERE conversation_id = $1 
-                    AND role = 'user' 
-                    AND content = $2 
-                    AND created_at > NOW() - INTERVAL '30 seconds'
-                )"
-            )
-            .bind(&conversation_id)
-            .bind(&last_msg.content)
-            .fetch_one(&state.db_pool)
-            .await
-            .unwrap_or(false);
-            
-            if !existing_user_msg {
-                let user_msg_with_id = Message {
-                    id: Uuid::new_v4().to_string(),
-                    content: last_msg.content.clone(),
-                    role: last_msg.role.clone(),
-                    created_at: Some(Utc::now().to_rfc3339()),
-                    processing_time_ms: None,
-                    file_attachments: None,
-                    tool_usages: None,
-                };
-                save_message(&state.db_pool, &conversation_id, &user_msg_with_id).await?;
-            }
-        }
-    }
-
-    // Create assistant message stub
-    if let Err(e) = sqlx::query(
-        "INSERT INTO messages (id, conversation_id, content, role, created_at) 
-         VALUES ($1, $2, $3, $4, $5)
-         ON CONFLICT (id) DO NOTHING"
-    )
-    .bind(&assistant_message_id)
-    .bind(&conversation_id)
-    .bind("")
-    .bind("assistant")
-    .bind(Utc::now())
-    .execute(&state.db_pool)
-    .await {
-        tracing::error!("Failed to create assistant message stub: {}", e);
-    }
-
-    // Prepare conversation string for Claude
-    // Claude Code SDK handles message compaction internally to stay within context limits
-    let mut conversation_text = String::new();
+    tracing::info!("handle_chat_message_ws started: project={}, conversation={}, client={}", 
+                   project_id, conversation_id, client_id_str);
     
-    // System message (always included)
-    let system_message = format!("System: You are Claude Code, Anthropic's CLI tool for developers. Project: {}\n", chat_request.project_id);
-    conversation_text.push_str(&system_message);
-    
-    // Track context usage
-    let mut total_chars = system_message.len();
-    let mut message_count = 0;
-    
-    // Load existing messages from database unless this is a brand new conversation
-    // We should load messages for all existing conversations
-    if conversation_id != "new" {
-        let existing_messages = sqlx::query_as::<_, (String, String, chrono::DateTime<Utc>)>(
-            "SELECT content, role, created_at FROM messages 
-             WHERE conversation_id = $1 
-             ORDER BY created_at ASC"
-        )
-        .bind(&conversation_id)
-        .fetch_all(&state.db_pool)
-        .await
-        .unwrap_or_else(|e| {
-            tracing::error!("Failed to load conversation history: {}", e);
-            Vec::new()
-        });
-        
-        message_count = existing_messages.len();
-        
-        tracing::info!(
-            "Found {} existing messages in database for conversation {}",
-            message_count,
-            conversation_id
-        );
-        
-        // Add all historical messages - Claude SDK will handle compaction
-        for (content, role, _created_at) in &existing_messages {
-            let formatted = match role.as_str() {
-                "user" => format!("User: {}\n", content),
-                "assistant" => format!("Assistant: {}\n", content),
-                "system" => format!("System: {}\n", content),
-                _ => continue,
-            };
-            total_chars += formatted.len();
-            conversation_text.push_str(&formatted);
-        }
-        
-    }
-    
-    // Add new message from request (only the last user message if it's new)
-    if let Some(last_msg) = chat_request.messages.last() {
-        if last_msg.role == MessageRole::User {
-            // Check if this message is already in the database (avoid duplicates)
-            let is_duplicate = if conversation_id != "new" {
-                sqlx::query_scalar::<_, bool>(
-                    "SELECT EXISTS(
-                        SELECT 1 FROM messages 
-                        WHERE conversation_id = $1 
-                        AND role = 'user' 
-                        AND content = $2 
-                        AND created_at > NOW() - INTERVAL '5 seconds'
-                    )"
-                )
-                .bind(&conversation_id)
-                .bind(&last_msg.content)
-                .fetch_one(&state.db_pool)
-                .await
-                .unwrap_or(false)
-            } else {
-                false
-            };
-            
-            if !is_duplicate {
-                let new_msg = format!("User: {}\n", last_msg.content);
-                total_chars += new_msg.len();
-                message_count += 1;
-                conversation_text.push_str(&new_msg);
-            }
-        }
-    }
-    
-    // Calculate context usage (Claude has ~200k token limit, roughly 800k chars)
-    const MAX_CONTEXT_CHARS: usize = 800_000;
-    let context_percentage = ((total_chars as f64 / MAX_CONTEXT_CHARS as f64) * 100.0).min(100.0);
-    
-    // Estimate if compaction will be needed
-    let needs_compaction = total_chars > MAX_CONTEXT_CHARS / 2; // Over 50% means compaction likely
-    
-    tracing::info!(
-        "Context usage: {}% ({}/{} chars, {} messages){}",
-        context_percentage as u32,
-        total_chars,
-        MAX_CONTEXT_CHARS,
-        message_count,
-        if needs_compaction { " - compaction will be applied" } else { "" }
-    );
-    
-    // Log first 500 chars of conversation for debugging
-    let _preview = if conversation_text.len() > 500 {
-        format!("{}...", &conversation_text[..500])
-    } else {
-        conversation_text.clone()
-    };
-
-    let options = QueryOptions {
-        max_turns: Some(1),
-        allowed_tools: None,
-        permission_mode: None,
-        resume_session_id: None,
-        output_format: None,
-    };
-
-    // Clone necessary data for the spawned task
-    let project_id = chat_request.project_id.clone();
-    let conversation_id_clone = conversation_id.clone();
     let db_pool = state.db_pool.clone();
     let active_claude_streams = state.active_claude_streams.clone();
-    let context_info = (total_chars, MAX_CONTEXT_CHARS, context_percentage, message_count, needs_compaction);
     
-    // Register this stream as active
-    {
-        let mut streams = active_claude_streams.write().await;
-        streams.insert(conversation_id.clone(), StreamingState {
-            message_id: assistant_message_id.clone(),
-            partial_content: String::new(),
-            last_updated: Utc::now(),
-            active_tools: Vec::new(),
-        });
+    // Handle "new" conversation ID by creating in database and getting the ID
+    let actual_conversation_id = if conversation_id == "new" {
+        tracing::info!("Creating new conversation in database");
+        let new_id = uuid::Uuid::new_v4().to_string();
+        
+        sqlx::query(
+            "INSERT INTO conversations (id, project_id, title, created_at, is_title_manually_set) VALUES ($1, $2, $3, $4, $5)"
+        )
+        .bind(&new_id)
+        .bind(&project_id)
+        .bind("New Conversation")
+        .bind(Utc::now())
+        .bind(false)
+        .execute(&db_pool)
+        .await
+        .map_err(|e| format!("Failed to create conversation: {}", e))?;
+        
+        tracing::info!("Created new conversation with ID: {}", new_id);
+        
+        // Send redirect message to frontend
+        broadcast_to_subscribers(
+            &project_id,
+            "new", // Send to the original "new" subscription
+            ServerMessage::ConversationRedirect {
+                old_conversation_id: "new".to_string(),
+                new_conversation_id: new_id.clone(),
+            }
+        ).await;
+        
+        new_id
+    } else {
+        conversation_id.clone()
+    };
+    
+    let conversation_id_clone = actual_conversation_id.clone();
+    
+    // Insert user message first
+    tracing::info!("Creating user message");
+    let user_message = Message {
+        id: uuid::Uuid::new_v4().to_string(),
+        content: content.clone(),
+        role: MessageRole::User,
+        created_at: Some(Utc::now().to_rfc3339()),
+        processing_time_ms: None,
+        file_attachments: None, // WebSocket doesn't handle file attachments in this way
+        tool_usages: None,
+    };
+    
+    tracing::info!("Saving user message");
+    if let Err(e) = save_message(&db_pool, &actual_conversation_id, &user_message).await {
+        tracing::error!("Failed to save user message: {}", e);
+        return Err(e.into());
     }
-
-    // Spawn task to process Claude messages
-    tokio::spawn(async move {
-        let start_time = std::time::Instant::now();
-        let message_id = assistant_message_id;
-        let mut tool_usages: Vec<crate::models::tool_usage::ToolUsage> = Vec::new();
-        let mut pending_tools: std::collections::HashMap<String, (String, serde_json::Value, std::time::Instant, uuid::Uuid)> = std::collections::HashMap::new();
-        let mut assistant_content = String::new();
-        
-        // Send context usage info
-        let (total_chars, max_chars, percentage, message_count, needs_compaction) = context_info;
-        broadcast_to_subscribers(
-            &project_id,
-            &conversation_id_clone,
-            ServerMessage::ContextUsage {
-                conversation_id: conversation_id_clone.clone(),
-                total_chars,
-                max_chars,
-                percentage: percentage as f32,
-                message_count,
-                needs_compaction,
+    tracing::info!("User message saved successfully");
+    
+    // Update the conversation cache with the new user message
+    state.update_conversation_cache(&actual_conversation_id, user_message.clone()).await;
+    
+    // Get conversation history from cache (fast) or database (slow)
+    tracing::info!("Getting conversation history for context");
+    let cached_messages = state.get_conversation_messages(&actual_conversation_id)
+        .await
+        .map_err(|e| format!("Failed to get conversation history: {}", e))?;
+    
+    // Build the full prompt with conversation history
+    let mut full_prompt = String::new();
+    let mut history_count = 0;
+    if !cached_messages.is_empty() {
+        full_prompt.push_str("Previous conversation:\n\n");
+        for msg in cached_messages.iter() {
+            // Skip the current message we just added
+            if msg.role == crate::models::MessageRole::User && msg.content == content {
+                continue;
             }
-        ).await;
-        
-        // Send start event via WebSocket
-        broadcast_to_subscribers(
-            &project_id,
-            &conversation_id_clone,
-            ServerMessage::Start { 
-                id: message_id.clone(),
-                conversation_id: conversation_id_clone.clone(),
-            }
-        ).await;
-        
-        // Execute the Claude query with project context
-        match ClaudeManager::query_claude_with_project_and_token(
-            client_id, 
-            &project_id,
-            conversation_text,
-            Some(options),
-            claude_token
-        ).await {
-            Ok(mut receiver) => {
-                let mut accumulated_text = String::new();
-                
-                tracing::info!("Starting to receive messages from Claude SDK");
-                while let Some(message) = receiver.recv().await {
-                    // Check if streaming was cancelled for this conversation
-                    {
-                        let streams = active_claude_streams.read().await;
-                        if !streams.contains_key(&conversation_id_clone) {
-                            tracing::info!("Streaming cancelled for conversation: {}", conversation_id_clone);
-                            break;
+            
+            match msg.role {
+                crate::models::MessageRole::User => {
+                    full_prompt.push_str(&format!("User: {}\n\n", msg.content));
+                    history_count += 1;
+                },
+                crate::models::MessageRole::Assistant => {
+                    full_prompt.push_str(&format!("Assistant: {}\n", msg.content));
+                    
+                    // Include tool usages if present (already in cached message)
+                    if let Some(ref tool_usages) = msg.tool_usages {
+                        if !tool_usages.is_empty() {
+                            full_prompt.push_str("\n[Tool Usage Details]:\n");
+                            for tool in tool_usages {
+                                full_prompt.push_str(&format!("- Tool: {}\n", tool.tool_name));
+                                if let Some(ref params) = tool.parameters {
+                                    full_prompt.push_str(&format!("  Parameters: {}\n", params));
+                                }
+                                if let Some(ref out) = tool.output {
+                                    // Convert JSON to string and truncate if very long
+                                    let output_str = if out.is_string() {
+                                        out.as_str().unwrap_or("").to_string()
+                                    } else {
+                                        serde_json::to_string(&out).unwrap_or_else(|_| out.to_string())
+                                    };
+                                    
+                                    let truncated_output = if output_str.len() > 500 {
+                                        format!("{}... [truncated]", output_str.chars().take(497).collect::<String>())
+                                    } else {
+                                        output_str
+                                    };
+                                    full_prompt.push_str(&format!("  Output: {}\n", truncated_output));
+                                }
+                            }
                         }
                     }
-                    
-                    // Log all received messages for debugging
-                    tracing::debug!("chat_ws received message type: {:?}", std::mem::discriminant(&message));
-                    
-                    match message {
-                        ClaudeMessage::Progress { content } => {
-                            // Log the raw content for debugging
-                            tracing::debug!("Received progress message: {}", content);
-                            
-                            // Parse the stream-json to extract text content
-                            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&content) {
-                                // Check various message formats from Claude
-                                if let Some(msg_type) = parsed.get("type").and_then(|v| v.as_str()) {
-                                    tracing::debug!("Message type: {}", msg_type);
-                                    
-                                    // Handle text delta messages
-                                    if msg_type == "text" {
-                                        if let Some(text) = parsed.get("text").and_then(|v| v.as_str()) {
-                                            accumulated_text.push_str(text);
-                                            tracing::debug!("Accumulated text from 'text' type: {}", text);
-                                            
-                                            // Update active stream with partial content
-                                            if let Ok(mut streams) = active_claude_streams.try_write() {
-                                                if let Some(stream_state) = streams.get_mut(&conversation_id_clone) {
-                                                    stream_state.partial_content = accumulated_text.clone();
-                                                    stream_state.last_updated = Utc::now();
-                                                }
-                                            }
-                                            
-                                            // Send accumulated text as progress
-                                            broadcast_to_subscribers(
-                                                &project_id,
-                                                &conversation_id_clone,
-                                                ServerMessage::Progress { 
-                                                    content: accumulated_text.clone(),
-                                                    conversation_id: conversation_id_clone.clone()
-                                                }
-                                            ).await;
-                                        }
-                                    }
-                                    // Handle content_block_delta messages
-                                    else if msg_type == "content_block_delta" {
-                                        if let Some(delta) = parsed.get("delta") {
-                                            if let Some(text) = delta.get("text").and_then(|v| v.as_str()) {
-                                                accumulated_text.push_str(text);
-                                                tracing::debug!("Accumulated text from 'content_block_delta': {}", text);
-                                                
-                                                // Update active stream with partial content
-                                                if let Ok(mut streams) = active_claude_streams.try_write() {
-                                                    if let Some(stream_state) = streams.get_mut(&conversation_id_clone) {
-                                                        stream_state.partial_content = accumulated_text.clone();
-                                                        stream_state.last_updated = Utc::now();
-                                                    }
-                                                }
-                                                
-                                                // Send accumulated text as progress
-                                                broadcast_to_subscribers(
-                                                    &project_id,
-                                                    &conversation_id_clone,
-                                                    ServerMessage::Progress { 
-                                                        content: accumulated_text.clone(),
-                                                        conversation_id: conversation_id_clone.clone()
-                                                    }
-                                                ).await;
-                                            }
-                                        }
-                                    }
-                                    else if msg_type == "assistant" {
-                                        // Handle assistant messages - extract text from message.content[0].text
-                                        if let Some(message) = parsed.get("message") {
-                                            if let Some(content_array) = message.get("content").and_then(|c| c.as_array()) {
-                                                for content_item in content_array {
-                                                    if let Some(item_type) = content_item.get("type").and_then(|t| t.as_str()) {
-                                                        if item_type == "text" {
-                                                            if let Some(text) = content_item.get("text").and_then(|t| t.as_str()) {
-                                                                // This is the assistant's text response
-                                                                accumulated_text = text.to_string();
-                                                                
-                                                                // Update active stream
-                                                                if let Ok(mut streams) = active_claude_streams.try_write() {
-                                                                    if let Some(stream_state) = streams.get_mut(&conversation_id_clone) {
-                                                                        stream_state.partial_content = accumulated_text.clone();
-                                                                        stream_state.last_updated = Utc::now();
-                                                                    }
-                                                                }
-                                                                
-                                                                // Send as progress (full content)
-                                                                broadcast_to_subscribers(
-                                                                    &project_id,
-                                                                    &conversation_id_clone,
-                                                                    ServerMessage::Progress { 
-                                                                        content: accumulated_text.clone(),
-                                                                        conversation_id: conversation_id_clone.clone()
-                                                                    }
-                                                                ).await;
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            } else {
-                                // If not JSON, it might be plain text
-                                tracing::debug!("Content is not JSON, treating as plain text");
+                    full_prompt.push_str("\n");
+                    history_count += 1;
+                },
+                _ => {}
+            }
+        }
+        full_prompt.push_str("Current message:\n");
+    }
+    full_prompt.push_str(&content);
+    
+    tracing::info!("Built prompt with {} historical messages for conversation {}, total length: {} chars", 
+                   history_count, actual_conversation_id, full_prompt.len());
+    tracing::debug!("Full prompt preview (first 500 chars): {}", full_prompt.chars().take(500).collect::<String>());
+    
+    // Warn if prompt is getting too long (approaching OS limits)
+    if full_prompt.len() > 100_000 {
+        tracing::warn!("Prompt length ({} chars) may approach OS command line limits. Consider truncating older messages.", full_prompt.len());
+    }
+    
+    let start_time = std::time::Instant::now();
+    let message_id = uuid::Uuid::new_v4();
+    
+    // Track this conversation as actively streaming
+    {
+        let mut streams = active_claude_streams.write().await;
+        streams.insert(conversation_id_clone.clone(), StreamingState {
+            message_id: message_id.to_string(),
+            partial_content: String::new(),
+            active_tools: Vec::new(),
+            progress_events: Vec::new(),
+        });
+    }
+    
+    // Send start event
+    broadcast_to_subscribers(
+        &project_id,
+        &conversation_id_clone,
+        ServerMessage::Start { 
+            id: message_id.to_string(),
+            conversation_id: conversation_id_clone.clone(),
+        }
+    ).await;
+    
+    // Execute the Claude query with project context
+    tracing::info!("Parsing client ID and starting Claude query");
+    let client_id = client_id_str.parse::<uuid::Uuid>().map_err(|e| format!("Invalid client ID: {}", e))?;
+    tracing::info!("Client ID parsed successfully: {}", client_id);
+    
+    match ClaudeManager::query_claude_with_project_and_db(
+        client_id,
+        &project_id,
+        full_prompt,
+        Some(QueryOptions::default()),
+        &db_pool,
+    ).await {
+        Ok(mut receiver) => {
+            tracing::info!("Claude query successful, starting message loop");
+            let _accumulated_text = String::new();
+            let mut tool_usages = Vec::new();
+            let mut pending_tools = std::collections::HashMap::new();
+            let mut assistant_content = String::new();
+            
+            while let Some(message) = receiver.recv().await {
+                tracing::info!("Received Claude message: {:?}", std::mem::discriminant(&message));
+                
+                match message {
+                    ClaudeMessage::Progress { content } => {
+                        // Store progress event for replay on reconnection
+                        {
+                            let mut streams = active_claude_streams.write().await;
+                            if let Some(stream_state) = streams.get_mut(&conversation_id_clone) {
+                                stream_state.progress_events.push(
+                                    serde_json::json!({
+                                        "type": "progress",
+                                        "content": content
+                                    })
+                                );
                             }
                         }
                         
-                        ClaudeMessage::ToolUse { tool, args, tool_use_id } => {
-                            tracing::info!("Received ClaudeMessage::ToolUse for tool: {}", tool);
-                            tracing::debug!("Tool arguments: {:?}", args);
-                            
-                            // Generate a unique ID for this tool usage
-                            let tool_usage_id = uuid::Uuid::new_v4();
-                            
-                            // Store the tool_usage_id for later matching
-                            let lookup_key = tool_use_id.clone().unwrap_or_else(|| tool.clone());
-                            pending_tools.insert(lookup_key.clone(), (tool.clone(), args.clone(), std::time::Instant::now(), tool_usage_id));
-                            
-                            // Insert into database immediately with NULL output and execution_time_ms
-                            // We'll update these when we get the ToolResult
-                            let params_option = Some(args.clone());
-                            let insert_result = sqlx::query(
-                                "INSERT INTO tool_usages (id, message_id, tool_name, parameters, output, execution_time_ms, tool_use_id, created_at)
-                                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"
-                            )
-                            .bind(&tool_usage_id)
-                            .bind(&message_id)
-                            .bind(&tool)
-                            .bind(&params_option) // Bind the owned Option<Value>
-                            .bind(Option::<serde_json::Value>::None) // output is NULL initially
-                            .bind(Option::<i64>::None) // execution_time_ms is NULL initially
-                            .bind(&tool_use_id) // Store the tool_use_id for matching
-                            .bind(chrono::Utc::now())
-                            .execute(&db_pool)
-                            .await;
-                            
-                            if let Err(e) = insert_result {
-                                tracing::error!("Failed to insert pending tool usage: {}", e);
-                            } else {
-                                tracing::info!("Inserted pending tool usage {} for tool {} with parameters: {:?}", 
-                                    tool_usage_id, tool, args);
+                        // Send progress via WebSocket without any parsing
+                        broadcast_to_subscribers(
+                            &project_id,
+                            &conversation_id_clone,
+                            ServerMessage::Progress { 
+                                content,
+                                conversation_id: conversation_id_clone.clone()
                             }
+                        ).await;
+                    }
+                    
+                    ClaudeMessage::ToolUse { tool, args, tool_use_id } => {
+                        let tool_usage_id = uuid::Uuid::new_v4();
+                        let lookup_key = tool_use_id.clone().unwrap_or_else(|| tool.clone());
+                        pending_tools.insert(lookup_key.clone(), (tool.clone(), args.clone(), std::time::Instant::now(), tool_usage_id));
+                        
+                        // Store tool use event for replay on reconnection
+                        {
+                            let mut streams = active_claude_streams.write().await;
+                            if let Some(stream_state) = streams.get_mut(&conversation_id_clone) {
+                                stream_state.progress_events.push(
+                                    serde_json::json!({
+                                        "type": "tool_use",
+                                        "tool": tool,
+                                        "tool_usage_id": tool_usage_id.to_string()
+                                    })
+                                );
+                            }
+                        }
+                        
+                        // Send ToolUse via WebSocket
+                        broadcast_to_subscribers(
+                            &project_id,
+                            &conversation_id_clone,
+                            ServerMessage::ToolUse { 
+                                tool: tool.clone(),
+                                tool_usage_id: tool_usage_id.to_string(),
+                                conversation_id: conversation_id_clone.clone()
+                            }
+                        ).await;
+                    }
+                    
+                    ClaudeMessage::ToolResult { tool, result } => {
+                        // Handle tool completion and send ToolComplete event
+                        if let Some((name, params, start_time, tool_usage_id)) = pending_tools.remove(&tool) {
+                            let execution_time = start_time.elapsed().as_millis() as u64;
                             
-                            // Update active tools in streaming state
+                            // Store tool complete event for replay on reconnection
                             {
                                 let mut streams = active_claude_streams.write().await;
                                 if let Some(stream_state) = streams.get_mut(&conversation_id_clone) {
-                                    // Only add tool if it's not already in the list (prevent duplicates)
-                                    if !stream_state.active_tools.contains(&tool) {
-                                        stream_state.active_tools.push(tool.clone());
-                                    }
-                                    stream_state.last_updated = Utc::now();
+                                    stream_state.progress_events.push(
+                                        serde_json::json!({
+                                            "type": "tool_complete",
+                                            "tool": name,
+                                            "tool_usage_id": tool_usage_id.to_string(),
+                                            "execution_time_ms": execution_time as i64,
+                                            "output": result
+                                        })
+                                    );
                                 }
                             }
                             
-                            // Send tool_use via WebSocket
-                            tracing::info!("Broadcasting ToolUse message for tool: {}", tool);
+                            // Send ToolComplete event
                             broadcast_to_subscribers(
                                 &project_id,
                                 &conversation_id_clone,
-                                ServerMessage::ToolUse { 
-                                    tool: tool.clone(),
-                                    conversation_id: conversation_id_clone.clone()
-                                }
-                            ).await;
-                        }
-                        
-                        ClaudeMessage::ToolResult { tool, result } => {
-                            tracing::info!("Received ToolResult for: {}", tool);
-                            
-                            // Try to find the pending tool by either tool_use_id or tool name
-                            let pending_tool = if crate::utils::mcp_tools::is_tool_use_id(&tool) {
-                                // It's a tool_use_id, try to find by ID
-                                pending_tools.remove(&tool)
-                            } else {
-                                // It's a tool name, try to find by name
-                                pending_tools.remove(&tool)
-                            };
-                            
-                            if let Some((name, params, start_time, tool_usage_id)) = pending_tool {
-                                // We found the pending tool, calculate execution time
-                                let execution_time = start_time.elapsed().as_millis() as i64;
-                                
-                                // Update the existing record in the database
-                                let update_result = sqlx::query(
-                                    "UPDATE tool_usages 
-                                     SET output = $1, 
-                                         execution_time_ms = $2 
-                                     WHERE id = $3"
-                                )
-                                .bind(&result)
-                                .bind(execution_time)
-                                .bind(&tool_usage_id)
-                                .execute(&db_pool)
-                                .await;
-                                
-                                if let Err(e) = update_result {
-                                    tracing::error!("Failed to update tool usage: {}", e);
-                                } else {
-                                    tracing::info!("Tool {} (id: {}) completed in {}ms", name, tool_usage_id, execution_time);
-                                }
-                                
-                                // Add to tool_usages vector for the message
-                                let tool_usage = crate::models::tool_usage::ToolUsage {
-                                    id: tool_usage_id,
-                                    message_id: message_id.clone(),
-                                    tool_name: name.clone(),
-                                    tool_use_id: Some(tool.clone()), // Store the tool_use_id
-                                    parameters: Some(params), // Keep the parameters from the pending tool
+                                ServerMessage::ToolComplete {
+                                    tool: name.clone(),
+                                    tool_usage_id: tool_usage_id.to_string(),
+                                    execution_time_ms: execution_time as i64,
                                     output: Some(result.clone()),
-                                    execution_time_ms: Some(execution_time),
-                                    created_at: None, // We don't need to fetch this again
-                                };
-                                tool_usages.push(tool_usage);
-                            } else {
-                                // No pending tool found - this could be a tool result without a corresponding ToolUse
-                                // This shouldn't happen in normal flow, but we'll handle it gracefully
-                                // Insert a new record with NULL execution_time_ms
-                                let tool_usage_id = uuid::Uuid::new_v4();
-                                
-                                let insert_result = sqlx::query(
-                                    "INSERT INTO tool_usages (id, message_id, tool_name, tool_use_id, parameters, output, execution_time_ms, created_at)
-                                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"
-                                )
-                                .bind(&tool_usage_id)
-                                .bind(&message_id)
-                                .bind(&tool)
-                                .bind(&tool) // Use tool as tool_use_id for orphan results
-                                .bind(Option::<serde_json::Value>::None)
-                                .bind(&result)
-                                .bind(Option::<i64>::None) // No execution time available
-                                .bind(chrono::Utc::now())
-                                .execute(&db_pool)
-                                .await;
-                                
-                                if let Err(e) = insert_result {
-                                    tracing::error!("Failed to insert orphan tool result: {}", e);
-                                } else {
-                                    tracing::warn!("Inserted orphan tool result for tool: {} (no corresponding ToolUse found)", tool);
-                                }
-                                
-                                // Add to tool_usages vector
-                                let tool_usage = crate::models::tool_usage::ToolUsage {
-                                    id: tool_usage_id,
-                                    message_id: message_id.clone(),
-                                    tool_name: tool.clone(),
-                                    tool_use_id: Some(tool.clone()), // Store the tool_use_id for orphan results
-                                    parameters: None,
-                                    output: Some(result.clone()),
-                                    execution_time_ms: None,
-                                    created_at: Some(chrono::Utc::now().to_rfc3339()),
-                                };
-                                tool_usages.push(tool_usage);
-                            };
-                            
-                            // Extract text content from the result if it's in the expected format
-                            let result_text = if result.is_array() {
-                                result.as_array()
-                                    .and_then(|arr| arr.first())
-                                    .and_then(|item| item.get("text"))
-                                    .and_then(|text| text.as_str())
-                                    .unwrap_or("")
-                                    .to_string()
-                            } else if result.is_object() {
-                                if let Some(text) = result.get("text").and_then(|t| t.as_str()) {
-                                    text.to_string()
-                                } else {
-                                    serde_json::to_string_pretty(&result).unwrap_or_default()
-                                }
-                            } else if result.is_string() {
-                                result.as_str().unwrap_or("").to_string()
-                            } else {
-                                result.to_string()
-                            };
-                            
-                            // Log tool results for debugging
-                            tracing::debug!("Tool {} returned result: {}", tool, result_text);
-                        }
-                        
-                        ClaudeMessage::Result { result } => {
-                            // If we get an explicit result, use it instead of accumulated
-                            tracing::debug!("Received Result message with content: {}", result);
-                            assistant_content = result.clone();
-                            accumulated_text.clear();
-                            
-                            // Send final content via WebSocket
-                            broadcast_to_subscribers(
-                                &project_id,
-                                &conversation_id_clone,
-                                ServerMessage::Content { 
-                                    content: result,
-                                    conversation_id: conversation_id_clone.clone()
-                                }
-                            ).await;
-                            // Don't break here - continue processing messages (like tool usage events)
-                            // The channel will close naturally when the SDK is done
-                        }
-                        
-                        ClaudeMessage::Error { error } => {
-                            broadcast_to_subscribers(
-                                &project_id,
-                                &conversation_id_clone,
-                                ServerMessage::Error { 
-                                    error,
-                                    conversation_id: conversation_id_clone.clone()
-                                }
-                            ).await;
-                            break;
-                        }
-                        
-                        ClaudeMessage::AskUser { 
-                            prompt_type, 
-                            title, 
-                            options, 
-                            input_type, 
-                            placeholder, 
-                            tool_use_id 
-                        } => {
-                            tracing::info!("Received AskUser message with prompt_type: {}", prompt_type);
-                            
-                            // Convert AskUserOption to serde_json::Value for the ServerMessage
-                            let options_value = options.map(|opts| {
-                                opts.into_iter()
-                                    .map(|opt| serde_json::to_value(opt).unwrap_or(serde_json::Value::Null))
-                                    .collect::<Vec<_>>()
-                            });
-                            
-                            broadcast_to_subscribers(
-                                &project_id,
-                                &conversation_id_clone,
-                                ServerMessage::AskUser {
-                                    prompt_type,
-                                    title,
-                                    options: options_value,
-                                    input_type,
-                                    placeholder,
-                                    tool_use_id,
                                     conversation_id: conversation_id_clone.clone(),
                                 }
                             ).await;
+                            
+                            // Add to tool_usages for final message
+                            let tool_usage = crate::models::tool_usage::ToolUsage {
+                                id: tool_usage_id,
+                                message_id: message_id.to_string(),
+                                tool_name: name.clone(),
+                                tool_use_id: Some(tool.clone()),
+                                parameters: Some(params),
+                                output: Some(result.clone()),
+                                execution_time_ms: Some(execution_time as i64),
+                                created_at: None,
+                            };
+                            tool_usages.push(tool_usage);
                         }
-                        
-                        _ => continue,
                     }
-                }
-                
-                // Use accumulated text if no explicit result was received
-                if assistant_content.is_empty() && !accumulated_text.is_empty() {
-                    assistant_content = accumulated_text;
-                }
-                
-                // Save final assistant message (even if partial due to abort)
-                if !assistant_content.is_empty() {
-                    let assistant_message = Message {
-                        id: message_id.clone(),
-                        content: assistant_content,
-                        role: MessageRole::Assistant,
-                        created_at: Some(Utc::now().to_rfc3339()),
-                        processing_time_ms: Some(start_time.elapsed().as_millis() as i64),
-                        file_attachments: None,
-                        tool_usages: if tool_usages.is_empty() { None } else { Some(tool_usages.clone()) },
-                    };
                     
-                    if let Err(e) = save_message(&db_pool, &conversation_id_clone, &assistant_message).await {
-                        tracing::error!("Failed to save assistant message: {}", e);
-                    } else if !tool_usages.is_empty() {
-                        // If we have tool_usages, the frontend needs to reload the message to see them
-                        tracing::info!("Message saved with {} tool_usages - frontend will need to reload", tool_usages.len());
-                    }
-                }
-                
-                // Generate title if this is the first exchange and title is not manually set
-                if let Ok(is_first_exchange) = sqlx::query_scalar::<_, bool>(
-                    "SELECT (COUNT(*) = 2 AND is_title_manually_set = false) 
-                     FROM conversations c 
-                     JOIN messages m ON m.conversation_id = c.id 
-                     WHERE c.id = $1 
-                     GROUP BY c.is_title_manually_set"
-                )
-                .bind(&conversation_id_clone)
-                .fetch_optional(&db_pool)
-                .await {
-                    if is_first_exchange.unwrap_or(false) {
-                        // Get the first user message for title generation
-                        if let Ok(first_user_message) = sqlx::query_scalar::<_, String>(
-                            "SELECT content FROM messages 
-                             WHERE conversation_id = $1 AND role = 'user' 
-                             ORDER BY created_at ASC LIMIT 1"
-                        )
-                        .bind(&conversation_id_clone)
-                        .fetch_optional(&db_pool)
-                        .await {
-                            if let Some(user_content) = first_user_message {
-                                // Generate a concise title from the user's message
-                                let generated_title = generate_conversation_title(&user_content);
-                                
-                                // Update the conversation title
-                                if let Err(e) = sqlx::query(
-                                    "UPDATE conversations 
-                                     SET title = $1, updated_at = $2 
-                                     WHERE id = $3 AND is_title_manually_set = false"
-                                )
-                                .bind(&generated_title)
-                                .bind(Utc::now())
-                                .bind(&conversation_id_clone)
-                                .execute(&db_pool)
-                                .await {
-                                    tracing::error!("Failed to update conversation title: {}", e);
-                                } else {
-                                    tracing::info!("Auto-generated title for conversation {}: {}", conversation_id_clone, generated_title);
-                                    
-                                    // Broadcast title update via WebSocket
-                                    broadcast_to_subscribers(
-                                        &project_id,
-                                        &conversation_id_clone,
-                                        ServerMessage::TitleUpdated { 
-                                            conversation_id: conversation_id_clone.clone(),
-                                            title: generated_title
+                    
+                    ClaudeMessage::Result { result } => {
+                        tracing::info!("Processing Result message: {} chars", result.len());
+                        tracing::debug!("Result content preview: {}", result.chars().take(100).collect::<String>());
+                        
+                        // Parse JSON content if it's a JSON string
+                        let actual_content = if result.starts_with('{') && result.ends_with('}') {
+                            // Try to parse as JSON to extract readable content
+                            if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&result) {
+                                // For Claude messages, extract the actual text from nested structure
+                                if let Some(message_obj) = json_value.get("message") {
+                                    if let Some(content_array) = message_obj.get("content").and_then(|v| v.as_array()) {
+                                        if let Some(first_content) = content_array.get(0) {
+                                            if let Some(text) = first_content.get("text").and_then(|v| v.as_str()) {
+                                                text.to_string()
+                                            } else {
+                                                serde_json::to_string_pretty(&json_value).unwrap_or(result)
+                                            }
+                                        } else {
+                                            serde_json::to_string_pretty(&json_value).unwrap_or(result)
                                         }
-                                    ).await;
+                                    } else {
+                                        serde_json::to_string_pretty(&json_value).unwrap_or(result)
+                                    }
+                                } else if let Some(content_text) = json_value.get("content").and_then(|v| v.as_str()) {
+                                    // Fallback for simpler JSON structure
+                                    content_text.to_string()
+                                } else {
+                                    // If no extractable content, pretty print the JSON
+                                    serde_json::to_string_pretty(&json_value).unwrap_or(result)
                                 }
+                            } else {
+                                result
                             }
-                        }
+                        } else {
+                            result
+                        };
+                        
+                        assistant_content = actual_content.clone();
+                        broadcast_to_subscribers(
+                            &project_id,
+                            &conversation_id_clone,
+                            ServerMessage::Content { 
+                                content: actual_content,
+                                conversation_id: conversation_id_clone.clone()
+                            }
+                        ).await;
                     }
-                }
-                
-                // Remove from active streams
-                {
-                    let mut streams = active_claude_streams.write().await;
-                    streams.remove(&conversation_id_clone);
-                }
-                
-                // Always send completion event (broadcast handles no connections gracefully)
-                {
-                    // Send completion event
-                    broadcast_to_subscribers(
-                        &project_id,
-                        &conversation_id_clone,
-                        ServerMessage::Complete { 
-                            id: message_id,
-                            conversation_id: conversation_id_clone.clone(),
-                            processing_time_ms: start_time.elapsed().as_millis() as u64,
-                            tool_usages: if tool_usages.is_empty() { None } else { Some(tool_usages.clone()) },
-                        }
-                    ).await;
+                    
+                    ClaudeMessage::Error { error } => {
+                        broadcast_to_subscribers(
+                            &project_id,
+                            &conversation_id_clone,
+                            ServerMessage::Error { 
+                                error,
+                                conversation_id: conversation_id_clone.clone()
+                            }
+                        ).await;
+                        return Err("Claude SDK error".into());
+                    }
+                    
+                    _ => continue,
                 }
             }
             
-            Err(e) => {
-                tracing::error!("Failed to query Claude: {}", e);
+            // Save final assistant message
+            if !assistant_content.is_empty() {
+                let assistant_message = Message {
+                    id: message_id.to_string(),
+                    content: assistant_content,
+                    role: MessageRole::Assistant,
+                    created_at: Some(Utc::now().to_rfc3339()),
+                    processing_time_ms: Some(start_time.elapsed().as_millis() as i64),
+                    file_attachments: None,
+                    tool_usages: if tool_usages.is_empty() { None } else { Some(tool_usages.clone()) },
+                };
                 
-                // Remove from active streams
-                {
-                    let mut streams = active_claude_streams.write().await;
-                    streams.remove(&conversation_id_clone);
+                if let Err(e) = save_message(&db_pool, &actual_conversation_id, &assistant_message).await {
+                    tracing::error!("Failed to save assistant message: {}", e);
+                } else {
+                    // Update the conversation cache with the new assistant message
+                    state.update_conversation_cache(&actual_conversation_id, assistant_message).await;
                 }
-                
-                broadcast_to_subscribers(
-                    &project_id,
-                    &conversation_id_clone,
-                    ServerMessage::Error { 
-                        error: format!("Failed to query Claude: {}", e),
-                        conversation_id: conversation_id_clone.clone()
-                    }
-                ).await;
             }
+            
+            // Generate title if this is the first exchange
+            let message_count = sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM messages WHERE conversation_id = $1"
+            )
+            .bind(&actual_conversation_id)
+            .fetch_one(&db_pool)
+            .await
+            .unwrap_or(0);
+            
+            if message_count == 2 { // User + Assistant message
+                let title = if content.len() > 50 {
+                    format!("{}...", content.chars().take(47).collect::<String>().trim())
+                } else if content.is_empty() {
+                    "New Conversation".to_string()
+                } else {
+                    content.clone()
+                };
+                
+                let _ = sqlx::query(
+                    "UPDATE conversations SET title = $1 WHERE id = $2 AND is_title_manually_set = false"
+                )
+                .bind(&title)
+                .bind(&actual_conversation_id)
+                .execute(&db_pool)
+                .await;
+            }
+            
+            // Send completion event
+            broadcast_to_subscribers(
+                &project_id,
+                &conversation_id_clone,
+                ServerMessage::Complete { 
+                    id: message_id.to_string(),
+                    conversation_id: conversation_id_clone.clone(),
+                    processing_time_ms: start_time.elapsed().as_millis() as u64,
+                    tool_usages: if tool_usages.is_empty() { None } else { Some(tool_usages.clone()) },
+                }
+            ).await;
         }
-    });
-
-    // Return success immediately (WebSocket handles the streaming)
-    res.render(Json(json!({"success": true, "conversation_id": conversation_id})));
+        
+        Err(e) => {
+            let error_msg = e.to_string();
+            tracing::error!("Failed to query Claude: {}", error_msg);
+            
+            // Send appropriate error message to client
+            broadcast_to_subscribers(
+                &project_id,
+                &conversation_id_clone,
+                ServerMessage::Error { 
+                    error: error_msg.clone(),
+                    conversation_id: conversation_id_clone.clone()
+                }
+            ).await;
+            return Err(e.into());
+        }
+    }
+    
+    // Clear progress events from active streams (keep the state for reference)
+    {
+        let mut streams = active_claude_streams.write().await;
+        if let Some(stream_state) = streams.get_mut(&conversation_id_clone) {
+            let event_count = stream_state.progress_events.len();
+            // Clear progress events as the message is complete and they're no longer needed
+            stream_state.progress_events.clear();
+            tracing::info!("Cleared {} progress events for completed message in conversation {}", 
+                event_count, conversation_id_clone);
+        }
+    }
+    
     Ok(())
 }

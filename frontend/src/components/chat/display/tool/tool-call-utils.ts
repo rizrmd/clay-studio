@@ -246,6 +246,6 @@ export function parseMcpToolName(toolName: string): {
     friendlyName: toolName,
     icon: Wrench,
     color: "text-gray-600 bg-gray-50 border-gray-200",
-    description: `Using ${toolName}`,
+    description: `${toolName}`,
   };
 }

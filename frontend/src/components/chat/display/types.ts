@@ -1,4 +1,5 @@
 import { AskUserData } from "@/types/chat";
+import type { ActiveToolInfo } from "@/store/chat/types";
 
 export interface FileAttachment {
   id: string;
@@ -20,6 +21,12 @@ export interface Message {
   clay_tools_used?: string[];
   tool_usages?: any[];
   ask_user?: AskUserData;
+  todoWrite?: {
+    todos: Array<{
+      content: string;
+      status: "pending" | "in_progress" | "completed";
+    }>;
+  };
 }
 
 export interface QueuedMessage {
@@ -47,7 +54,7 @@ export interface MessagesProps {
   isStreaming?: boolean;
   canStop?: boolean;
   onStop?: () => void;
-  activeTools?: string[];
+  activeTools?: ActiveToolInfo[];
   onResendMessage?: (message: Message) => void;
   onNewChatFromHere?: (messageId: string) => void;
   onAskUserSubmit?: (response: string | string[]) => void;

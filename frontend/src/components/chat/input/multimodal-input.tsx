@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useState, useCallback } from "react";
 import {
   Send,
   Paperclip,
@@ -79,19 +79,24 @@ export function MultimodalInput({
     {}
   );
   const dragCounter = useRef(0);
+  const [localInput, setLocalInput] = useState(input);
+  const updateTimeout = useRef<NodeJS.Timeout>();
 
-  // Auto-resize textarea
-  const adjustTextareaHeight = () => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
-    }
-  };
-
-  // Adjust height when input prop changes
+  // Sync local input with prop input when it changes externally
   useEffect(() => {
-    adjustTextareaHeight();
+    setLocalInput(input);
   }, [input]);
+
+  // Debounced update to parent
+  const debouncedSetInput = useCallback((value: string) => {
+    if (updateTimeout.current) {
+      clearTimeout(updateTimeout.current);
+    }
+    updateTimeout.current = setTimeout(() => {
+      setInput(value);
+    }, 100);
+  }, [setInput]);
+
 
   // Focus the textarea when shouldFocus is true
   useEffect(() => {
@@ -289,12 +294,23 @@ export function MultimodalInput({
     e.preventDefault();
 
     // Don't submit if files are uploading or no input
-    if (isUploading || !input.trim()) {
+    if (isUploading || !localInput.trim()) {
       return;
     }
 
+    // Clear any pending debounced updates
+    if (updateTimeout.current) {
+      clearTimeout(updateTimeout.current);
+    }
+
+    // Ensure parent has the latest input value
+    setInput(localInput);
+
     const allFiles = [...selectedFiles, ...externalFiles];
     handleSubmit(e, allFiles);
+    
+    // Clear local input immediately
+    setLocalInput("");
     setSelectedFiles([]);
     onExternalFilesChange?.([]);
   };
@@ -677,11 +693,11 @@ export function MultimodalInput({
       )}
       <Textarea
         ref={textareaRef}
-        value={input}
+        value={localInput}
         autoFocus
         onChange={(e) => {
-          setInput(e.target.value);
-          adjustTextareaHeight();
+          setLocalInput(e.target.value);
+          debouncedSetInput(e.target.value);
         }}
         onEnterSubmit={(e) => handleFormSubmit(e as any)}
         placeholder={
@@ -741,7 +757,7 @@ export function MultimodalInput({
               <TooltipTrigger asChild>
                 <Button
                   variant={
-                    !input.trim() || isUploading
+                    !localInput.trim() || isUploading
                       ? "outline"
                       : isLoading || isStreaming
                       ? "secondary"
@@ -749,7 +765,7 @@ export function MultimodalInput({
                   }
                   type="submit"
                   disabled={
-                    !input.trim() || isUploading
+                    !localInput.trim() || isUploading
                   }
                 >
                   <Send className="h-4 w-4" />
