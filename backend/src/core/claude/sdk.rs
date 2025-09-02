@@ -292,9 +292,16 @@ impl ClaudeSDK {
                 
                 cmd.arg("-p")
                    .arg("-")  // Read from stdin
-                   .arg("--verbose")
-                   .arg("--dangerously-skip-permissions")
-                   .arg("--disallowedTools")
+                   .arg("--verbose");
+                
+                // Only add --dangerously-skip-permissions if we're NOT root
+                // Claude CLI refuses to run with this flag when running as root
+                let is_root = unsafe { libc::getuid() } == 0;
+                if !is_root {
+                    cmd.arg("--dangerously-skip-permissions");
+                }
+                
+                cmd.arg("--disallowedTools")
                    .arg("Bash")
                    .arg("--output-format")
                    .arg("stream-json")
