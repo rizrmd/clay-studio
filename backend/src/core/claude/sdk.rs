@@ -205,14 +205,20 @@ impl ClaudeSDK {
         tokio::spawn(async move {
             // Take ownership of tx
             let tx = tx;
-            // Check if we're running as root AND in production
-            let is_root = unsafe { libc::getuid() } == 0;
-            let is_production = std::env::var("RUST_ENV").unwrap_or_default() == "production";
-            let use_su_workaround = is_root && is_production;
+            // In containerized environments, we don't need the su workaround
+            // The container itself provides isolation
+            let use_su_workaround = false;
             
-            tracing::info!("Using su workaround: {}, is_root: {}, is_production: {}", use_su_workaround, is_root, is_production);
+            tracing::info!("Containerized environment - su workaround disabled");
             
             let mut cmd_builder = if use_su_workaround {
+                
+                // Create a proper home directory for nobody user
+                let nobody_home = PathBuf::from("/var/cache/nobody");
+                let _ = std::fs::create_dir_all(&nobody_home);
+                let _ = std::process::Command::new("chown")
+                    .args(["nobody:nogroup", "/var/cache/nobody"])
+                    .output();
                 
                 // First ensure /app/.clients and project directory are accessible to nobody user
                 let _ = std::process::Command::new("chown")
@@ -243,10 +249,9 @@ impl ClaudeSDK {
                     .args(["-R", "nobody:nogroup", &cache_dir.to_string_lossy()])
                     .output();
                 
-                // Use the project directory as HOME for nobody user
+                // Use a proper home directory for nobody user
                 let full_command = format!(
-                    "cd '{}' && HOME='{}' XDG_CACHE_HOME='{}' CLAUDE_CODE_OAUTH_TOKEN='{}' echo '{}' | {} {}{} -p - --verbose --dangerously-skip-permissions --disallowedTools \"Bash\" --output-format stream-json",
-                    working_dir_clone.display(),
+                    "cd '{}' && HOME='/var/cache/nobody' XDG_CACHE_HOME='{}' CLAUDE_CODE_OAUTH_TOKEN='{}' echo '{}' | {} {}{} -p - --verbose --dangerously-skip-permissions --disallowedTools \"Bash\" --output-format stream-json",
                     working_dir_clone.display(),
                     cache_dir.display(),
                     oauth_token,
