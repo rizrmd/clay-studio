@@ -320,8 +320,12 @@ impl ClaudeSDK {
             
             tracing::debug!("Executing Claude CLI command: {:?}", cmd_builder);
             
+            let spawn_start = std::time::Instant::now();
             let mut cmd = match cmd_builder.spawn() {
-                Ok(child) => child,
+                Ok(child) => {
+                    tracing::info!("Claude CLI process spawned in {:?}", spawn_start.elapsed());
+                    child
+                },
                 Err(e) => {
                     tracing::error!("Failed to spawn Claude CLI process: {}", e);
                     tracing::error!("Command was: {}", command_debug);
@@ -338,6 +342,7 @@ impl ClaudeSDK {
             if !use_su_workaround {
                 if let Some(mut stdin) = cmd.stdin.take() {
                     use tokio::io::AsyncWriteExt;
+                    let stdin_start = std::time::Instant::now();
                     if let Err(e) = stdin.write_all(prompt.as_bytes()).await {
                         tracing::error!("Failed to write prompt to stdin: {}", e);
                         let _ = tx.send(ClaudeMessage::Error {
@@ -345,6 +350,7 @@ impl ClaudeSDK {
                         }).await;
                         return;
                     }
+                    tracing::info!("Prompt written to stdin in {:?}", stdin_start.elapsed());
                     // Close stdin to signal EOF
                     drop(stdin);
                 }
@@ -353,30 +359,97 @@ impl ClaudeSDK {
             // Also capture stderr for debugging
             if let Some(stderr) = cmd.stderr.take() {
                 let _tx_stderr = tx.clone();
+                
+                // Create stderr log file
+                let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
+                let log_dir = working_dir_clone.join(".claude_logs");
+                let _ = std::fs::create_dir_all(&log_dir);
+                let stderr_log_path = log_dir.join(format!("query_{}_stderr.log", timestamp));
+                let mut stderr_log_file = std::fs::File::create(&stderr_log_path).ok();
+                
+                tracing::info!("Claude CLI stderr will be logged to: {:?}", stderr_log_path);
+                
                 tokio::spawn(async move {
                     use tokio::io::{BufReader, AsyncBufReadExt};
                     let reader = BufReader::new(stderr);
                     let mut lines = reader.lines();
                     
+                    let stderr_start = std::time::Instant::now();
+                    let mut first_stderr = true;
                     while let Ok(Some(line)) = lines.next_line().await {
-                        // Log stderr as error so it shows in production
-                        tracing::error!("[CLAUDE_STDERR] {}", line);
+                        if first_stderr {
+                            tracing::info!("[CLAUDE_STDERR] First stderr line after {:?}: {}", stderr_start.elapsed(), line);
+                            first_stderr = false;
+                        } else {
+                            tracing::error!("[CLAUDE_STDERR] {}", line);
+                        }
+                        
+                        // Write to stderr log file
+                        if let Some(ref mut file) = stderr_log_file {
+                            use std::io::Write;
+                            let timestamp = chrono::Utc::now().to_rfc3339();
+                            let _ = writeln!(file, "[{}] {}", timestamp, line);
+                            let _ = file.flush();
+                        }
                     }
                 });
             }
             
             let stdout_handle = if let Some(stdout) = cmd.stdout.take() {
+                tracing::info!("Starting to read from Claude CLI stdout");
                 let tx_clone = tx.clone();
+                
+                // Create debug log file for this query
+                let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
+                let log_dir = working_dir_clone.join(".claude_logs");
+                let _ = std::fs::create_dir_all(&log_dir);
+                let log_file_path = log_dir.join(format!("query_{}.log", timestamp));
+                let mut log_file = std::fs::File::create(&log_file_path).ok();
+                
+                // Write command info to log file
+                if let Some(ref mut file) = log_file {
+                    use std::io::Write;
+                    let _ = writeln!(file, "=== Claude CLI Query Log ===");
+                    let _ = writeln!(file, "Timestamp: {}", chrono::Utc::now().to_rfc3339());
+                    let _ = writeln!(file, "Working Dir: {:?}", working_dir_clone);
+                    let _ = writeln!(file, "Command: {}", command_debug_clone3);
+                    let _ = writeln!(file, "Prompt Length: {} chars", prompt.len());
+                    let _ = writeln!(file, "First 500 chars of prompt: {}...", &prompt.chars().take(500).collect::<String>());
+                    let _ = writeln!(file, "\n=== Output ===");
+                    let _ = file.flush();
+                }
+                
+                tracing::info!("Claude CLI output will be logged to: {:?}", log_file_path);
+                
                 Some(tokio::spawn(async move {
                     use tokio::io::{BufReader, AsyncBufReadExt};
                     let reader = BufReader::new(stdout);
                     let mut lines = reader.lines();
                     
+                    tracing::info!("Claude CLI stdout reader initialized, waiting for first line...");
                     let mut line_count = 0;
+                    let mut first_message_time: Option<std::time::Instant> = None;
+                    let start_time = std::time::Instant::now();
+                    
                     loop {
                         match lines.next_line().await {
                             Ok(Some(line)) => {
                                 line_count += 1;
+                                
+                                // Log timing for first message
+                                if first_message_time.is_none() {
+                                    let elapsed = start_time.elapsed();
+                                    tracing::info!("First message from Claude CLI received after {:?}", elapsed);
+                                    first_message_time = Some(std::time::Instant::now());
+                                }
+                                
+                                // Write to log file
+                                if let Some(ref mut file) = log_file {
+                                    use std::io::Write;
+                                    let timestamp = chrono::Utc::now().to_rfc3339();
+                                    let _ = writeln!(file, "[{}] {}", timestamp, line);
+                                    let _ = file.flush();
+                                }
                         
                         if !line.trim().is_empty() {
                             // Parse line as JSON or create a string value
