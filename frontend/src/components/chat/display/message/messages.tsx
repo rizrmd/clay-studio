@@ -624,25 +624,26 @@ export function Messages({
 
         {/* Show loading or welcome screen as overlay when Virtuoso is hidden or has no data */}
         {(allItems.length === 0 || !showVirtuoso) && (
-          <div className="absolute inset-0 bg-background">
+          <div className="absolute inset-0 bg-background flex justify-center items-center">
             {messages.length === 0 && !isLoading ? (
               <WelcomeScreen />
             ) : (
-              <ChatSkeleton />
+              <>
+                {previousConversationId.current === "new" ? (
+                  <div className="flex absolute items-center justify-center inset-0 z-10">
+                    <Button
+                      size="sm"
+                      disabled
+                      className="rounded-full shadow-lg animate-in fade-in slide-in-from-bottom-2 duration-300"
+                    >
+                      Creating new chat...
+                    </Button>
+                  </div>
+                ) : (
+                  <ChatSkeleton />
+                )}
+              </>
             )}
-          </div>
-        )}
-
-        {/* Show creating new chat indicator */}
-        {previousConversationId.current === "new" && messages.length === 0 && (
-          <div className="flex absolute items-center justify-center inset-0 z-10">
-            <Button
-              size="sm"
-              disabled
-              className="rounded-full shadow-lg animate-in fade-in slide-in-from-bottom-2 duration-300"
-            >
-              Creating new chat...
-            </Button>
           </div>
         )}
 

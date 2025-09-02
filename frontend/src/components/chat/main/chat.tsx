@@ -117,6 +117,11 @@ export function Chat({
     e.preventDefault();
     if (!input.trim() || !projectId) return;
 
+    // If there are forgotten messages, restore them first before sending
+    if (hasForgottenMessages) {
+      await restoreForgottenMessages();
+    }
+
     const messageContent = input.trim();
     setInput("");
     // Include any pending files from drag-drop along with form files
@@ -130,6 +135,11 @@ export function Chat({
 
   const handleResendMessage = async (message: any) => {
     if (!projectId) return;
+
+    // If there are forgotten messages, restore them first before resending
+    if (hasForgottenMessages) {
+      await restoreForgottenMessages();
+    }
 
     // Extract the original content, removing any file attachment mentions
     let content = message.content;

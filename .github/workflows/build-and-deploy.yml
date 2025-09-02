@@ -23,8 +23,10 @@ jobs:
     - name: Cache Rust dependencies
       uses: Swatinem/rust-cache@v2
       with:
-        workspaces: "./backend -> target"
+        workspaces: backend
         cache-all-crates: true
+        cache-on-failure: true
+        key: rust-cache-${{ hashFiles('backend/Cargo.lock') }}
     
     - name: Build backend
       working-directory: ./backend
