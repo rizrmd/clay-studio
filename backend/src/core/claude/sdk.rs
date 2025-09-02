@@ -229,8 +229,10 @@ impl ClaudeSDK {
                     String::new()
                 };
                 
+                // Use the project directory as HOME for nobody user
                 let full_command = format!(
-                    "cd '{}' && CLAUDE_CODE_OAUTH_TOKEN='{}' echo '{}' | {} {}{} -p - --verbose --dangerously-skip-permissions --disallowedTools \"Bash\" --output-format stream-json",
+                    "cd '{}' && HOME='{}' CLAUDE_CODE_OAUTH_TOKEN='{}' echo '{}' | {} {}{} -p - --verbose --dangerously-skip-permissions --disallowedTools \"Bash\" --output-format stream-json",
+                    working_dir_clone.display(),
                     working_dir_clone.display(),
                     oauth_token,
                     prompt.replace("'", "'\\''"),
@@ -271,6 +273,7 @@ impl ClaudeSDK {
                    .arg("--output-format")
                    .arg("stream-json")
                    .current_dir(&working_dir_clone)
+                   .env("HOME", &working_dir_clone)
                    .env("CLAUDE_CODE_OAUTH_TOKEN", oauth_token);
                 cmd
             };
