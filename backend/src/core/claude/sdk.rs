@@ -210,11 +210,18 @@ impl ClaudeSDK {
             let is_production = std::env::var("RUST_ENV").unwrap_or_default() == "production";
             let use_su_workaround = is_root && is_production;
             
+            tracing::info!("Using su workaround: {}, is_root: {}, is_production: {}", use_su_workaround, is_root, is_production);
+            
             let mut cmd_builder = if use_su_workaround {
                 
-                // First ensure /app/.clients is accessible to nobody user
+                // First ensure /app/.clients and project directory are accessible to nobody user
                 let _ = std::process::Command::new("chown")
                     .args(["-R", "nobody:nogroup", "/app/.clients"])
+                    .output();
+                
+                // Also ensure the specific project directory is accessible
+                let _ = std::process::Command::new("chown")
+                    .args(["-R", "nobody:nogroup", &working_dir_clone.to_string_lossy()])
                     .output();
                 
                 // Build the full command as a string for su
@@ -229,17 +236,27 @@ impl ClaudeSDK {
                     String::new()
                 };
                 
+                // Create a cache directory for Claude CLI
+                let cache_dir = working_dir_clone.join(".cache");
+                let _ = std::fs::create_dir_all(&cache_dir);
+                let _ = std::process::Command::new("chown")
+                    .args(["-R", "nobody:nogroup", &cache_dir.to_string_lossy()])
+                    .output();
+                
                 // Use the project directory as HOME for nobody user
                 let full_command = format!(
-                    "cd '{}' && HOME='{}' CLAUDE_CODE_OAUTH_TOKEN='{}' echo '{}' | {} {}{} -p - --verbose --dangerously-skip-permissions --disallowedTools \"Bash\" --output-format stream-json",
+                    "cd '{}' && HOME='{}' XDG_CACHE_HOME='{}' CLAUDE_CODE_OAUTH_TOKEN='{}' echo '{}' | {} {}{} -p - --verbose --dangerously-skip-permissions --disallowedTools \"Bash\" --output-format stream-json",
                     working_dir_clone.display(),
                     working_dir_clone.display(),
+                    cache_dir.display(),
                     oauth_token,
                     prompt.replace("'", "'\\''"),
                     bun_executable.display(),
                     claude_cli_path_clone.display(),
                     mcp_arg
                 );
+                
+                tracing::info!("Su command to execute: {}", full_command);
                 
                 // Use su to run as nobody user
                 let mut su_cmd = TokioCommand::new("su");
@@ -264,6 +281,10 @@ impl ClaudeSDK {
                     }
                 }
                 
+                // Create cache directory for non-su path as well
+                let cache_dir = working_dir_clone.join(".cache");
+                let _ = std::fs::create_dir_all(&cache_dir);
+                
                 cmd.arg("-p")
                    .arg("-")  // Read from stdin
                    .arg("--verbose")
@@ -274,6 +295,7 @@ impl ClaudeSDK {
                    .arg("stream-json")
                    .current_dir(&working_dir_clone)
                    .env("HOME", &working_dir_clone)
+                   .env("XDG_CACHE_HOME", &cache_dir)
                    .env("CLAUDE_CODE_OAUTH_TOKEN", oauth_token);
                 cmd
             };
