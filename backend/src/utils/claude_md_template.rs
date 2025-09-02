@@ -84,11 +84,11 @@ When the user asks any of these questions:
 
 YOU MUST: 
 1. Look at the "Connected Data Sources" section below and tell them what's there
-2. After showing the datasources, ALWAYS use the ask_user tool to present action options as interactive buttons (e.g., "Get more details", "Update credentials", "Test connection", "Add new datasource")
+2. After showing the datasources, suggest relevant actions (e.g., "Get more details", "Update credentials", "Test connection", "Add new datasource")
 
 YOU MUST NOT: Use the datasource_list tool.
 
-If there are no datasources in the "Connected Data Sources" section, simply say "No data sources are currently connected to your project." and then use ask_user to offer the option to "Add a database connection".
+If there are no datasources in the "Connected Data Sources" section, simply say "No data sources are currently connected to your project." and then offer the option to "Add a database connection".
 
 ## MCP Tools Available
 
@@ -96,26 +96,14 @@ This project uses Model Context Protocol (MCP) tools for database operations and
 
 ### Interactive UI Tools
 
-- **ask_user**: Create interactive UI elements for user input
-  - Can create buttons, checkboxes, input fields, charts, and markdown content
-  - Use this when you need user input or selection
-  - CRITICAL: Only include actionable options - NEVER add "cancel", "back", "back to menu", "learn more", "skip", "exit", or ANY navigation/cancellation options
-  - When there's only one actionable option, present just that single option without any navigation alternatives
-  - Note: For displaying tables, use the dedicated `show_table` tool instead
-  - **IMPORTANT**: Always use ask_user with buttons when presenting action options to the user, such as:
-    - After listing datasources, present options like "Get details", "Update credentials", "Test connection", etc.
-    - After showing query results, present options like "Export data", "Visualize", "Run another query", etc.
-    - When offering multiple next steps or actions the user can take
-    - DO NOT just list options in text - use the ask_user tool to make them interactive buttons
-
-- **show_table**: Display interactive data tables (SEPARATE TOOL from ask_user)
-  - This is a dedicated tool specifically for table display (NOT part of ask_user)
+- **show_table**: Display interactive data tables
+  - This is a dedicated tool specifically for table display
   - Use this to present data in a rich, sortable, filterable table format
   - Supports sorting, filtering, pivoting, and column management
   - Better than markdown tables for large datasets or when interactivity is needed
-  - IMPORTANT: This is invoked as `mcp__interaction__show_table`, not through ask_user
+  - IMPORTANT: This is invoked as `mcp__interaction__show_table`
 
-- **show_chart**: Display interactive charts (SEPARATE TOOL from ask_user)
+- **show_chart**: Display interactive charts
   - This is a dedicated tool specifically for chart visualization
   - Supports 20+ chart types: line, bar, pie, scatter, radar, gauge, etc.
   - CRITICAL: Always provide meaningful labels, never use generic "0", "1", "2"
@@ -266,74 +254,7 @@ data_query datasource_id="<id>" query="SELECT * FROM users LIMIT 10" limit=100
 
 ### Interactive UI Elements
 
-**IMPORTANT: Two Separate Tools for Interactions**
-
-1. **ask_user**: For user input (buttons, checkboxes, input fields, charts, markdown)
-2. **show_table**: For displaying data tables (THIS IS A SEPARATE TOOL)
-
-#### Using ask_user Tool
-
-The `ask_user` tool allows you to create interactive elements for user input:
-
-```mcp
-# EXAMPLE: After listing datasources, ALWAYS present options as buttons:
-ask_user interaction_type="buttons" title="What would you like to do with the datasources?" data={{
-  "options": [
-    {{"value": "details", "label": "Get more details", "description": "View connection info (host, port, user, etc.)"}},
-    {{"value": "update", "label": "Update credentials", "description": "Change username/password or connection settings"}},
-    {{"value": "test", "label": "Test connection", "description": "Check if the datasource is working"}},
-    {{"value": "inspect", "label": "Inspect database", "description": "Analyze tables and schema"}},
-    {{"value": "add", "label": "Add new datasource", "description": "Connect a new database"}}
-  ]
-}} requires_response=true
-
-# Create button choices for user selection
-ask_user interaction_type="buttons" title="Choose an action" data={{
-  "options": [
-    {{"value": "analyze", "label": "Analyze Data", "description": "Run detailed analysis"}},
-    {{"value": "export", "label": "Export Results", "description": "Export to CSV"}}
-  ]
-}} requires_response=true
-
-# Create checkboxes for multiple selections
-ask_user interaction_type="checkbox" title="Select tables to analyze" data={{
-  "options": [
-    {{"value": "users", "label": "Users Table"}},
-    {{"value": "orders", "label": "Orders Table"}},
-    {{"value": "products", "label": "Products Table"}}
-  ]
-}} requires_response=true
-
-# Create input field for user text
-ask_user interaction_type="input" title="Enter custom SQL query" data={{
-  "placeholder": "SELECT * FROM ...",
-  "input_type": "text"
-}} requires_response=true
-
-# Create charts with PROPER LABELS (CRITICAL for chart readability)
-# IMPORTANT: Always include categories for x-axis labels or name fields in data
-ask_user interaction_type="chart" title="Sales by Product" data={{
-  "chart_type": "bar",
-  "categories": ["Product A", "Product B", "Product C"],  # CRITICAL: Always provide meaningful labels
-  "series": [
-    {{"name": "Sales", "data": [1200, 1800, 900]}}
-  ]
-}} requires_response=false
-
-# For pie charts, ALWAYS include name field in data
-ask_user interaction_type="chart" title="Market Share" data={{
-  "chart_type": "pie",
-  "series": [{{
-    "data": [
-      {{"name": "Company A", "value": 45}},  # CRITICAL: Use name field, not just values
-      {{"name": "Company B", "value": 30}},
-      {{"name": "Company C", "value": 25}}
-    ]
-  }}]
-}} requires_response=false
-```
-
-#### Using show_table Tool (SEPARATE FROM ask_user)
+#### Using show_table Tool
 
 **🛑 STOP AND CHECK BEFORE USING show_table:**
 1. Is this data from a SUCCESSFUL database query?
@@ -349,8 +270,7 @@ ask_user interaction_type="chart" title="Market Share" data={{
 # ✅ ONLY proceed if you have verified actual data from data_query tool
 
 # Display interactive data table using the DEDICATED show_table tool
-# IMPORTANT: This calls mcp__interaction__show_table, NOT ask_user  
-# DO NOT use ask_user with interaction_type="table" - use show_table instead
+# IMPORTANT: This calls mcp__interaction__show_table
 show_table title="Sales Performance Data" data={{
   "columns": [
     {{"key": "product", "label": "Product", "data_type": "string", "sortable": true, "filterable": true}},
@@ -377,7 +297,7 @@ show_table title="Sales Performance Data" data={{
 }} requires_response=false
 ```
 
-#### Using show_chart Tool (SEPARATE FROM ask_user)
+#### Using show_chart Tool
 
 **🛑 STOP AND CHECK BEFORE USING show_chart:**
 1. Is this data from a SUCCESSFUL database query?
@@ -693,7 +613,7 @@ Missing fields left blank (not filled with examples)
 1. **Use buttons for single choices**: When users need to select one option from a list
 2. **Use checkboxes for multiple selections**: When users can select multiple items
 3. **Use input for free text**: When you need custom user input like SQL queries or search terms
-4. **Use show_table for data display**: When presenting query results or structured data that benefits from sorting, filtering, or pivoting (Note: show_table is a separate tool, not part of ask_user)
+4. **Use show_table for data display**: When presenting query results or structured data that benefits from sorting, filtering, or pivoting
 5. **Set requires_response appropriately**: Set to `true` for user inputs, `false` for display-only elements
 6. **Provide clear descriptions**: Always include helpful descriptions for button and checkbox options
 7. **Choose table vs markdown**: Use `show_table` (separate tool) for interactive data exploration, use markdown tables for small, static data
@@ -773,7 +693,7 @@ If you find yourself about to show data, STOP and ask:
   - The data is the main focus of the response
   
   **CRITICAL**: ONLY use show_table tool with real query results. NEVER create example data tables.
-  **IMPORTANT**: show_table is a separate MCP tool (mcp__interaction__show_table), not a variant of ask_user.
+  **IMPORTANT**: show_table is a separate MCP tool (mcp__interaction__show_table).
 
 - **Use markdown tables when**:
   - ✅ You have ACTUAL data from a successful `data_query` call  
