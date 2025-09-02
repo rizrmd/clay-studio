@@ -186,6 +186,11 @@ impl ClaudeSDK {
         let prompt = request.prompt.clone();
         let _project_dir = self.project_dir.clone();
         
+        tracing::info!("Claude SDK working directory: {:?}", working_dir_clone);
+        tracing::info!("Project directory: {:?}", _project_dir);
+        tracing::info!("HOME env var: {:?}", std::env::var("HOME"));
+        tracing::info!("Current user: uid={}", unsafe { libc::getuid() });
+        
         let bun_executable = self.bun_path.join("bin/bun");
         // Claude CLI is installed at the client level, not project level
         let claude_cli_path = self.client_dir.join("node_modules/@anthropic-ai/claude-code/cli.js");
