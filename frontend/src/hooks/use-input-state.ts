@@ -1,56 +1,46 @@
 import { useCallback } from 'react';
-import { useSnapshot } from 'valtio';
-import { 
-  store, 
-  updateInputDraft,
-  setInputAttachments,
-  addInputAttachment,
-  removeInputAttachment,
-  setInputTyping
-} from '../store/chat-store';
+import { inputActions } from '../store/input-store';
 
 /**
  * Hook for managing input state for a specific conversation
  * This preserves draft messages, attachments, and typing state across conversation switches
  */
 export function useInputState(conversationId: string) {
-  const snapshot = useSnapshot(store);
-  const inputState = snapshot.inputs[conversationId] || {
-    draftMessage: '',
-    attachments: [],
-    isTyping: false
-  };
+  const draftMessage = inputActions.getDraftMessage(conversationId);
+  const attachments = inputActions.getAttachments(conversationId);
+  const isTyping = inputActions.getTyping(conversationId);
 
   const setDraftMessage = useCallback((draft: string) => {
-    updateInputDraft(conversationId, draft);
+    inputActions.setDraftMessage(conversationId, draft);
   }, [conversationId]);
 
   const setAttachments = useCallback((attachments: File[]) => {
-    setInputAttachments(conversationId, attachments);
+    inputActions.setAttachments(conversationId, attachments);
   }, [conversationId]);
 
   const addAttachment = useCallback((attachment: File) => {
-    addInputAttachment(conversationId, attachment);
-  }, [conversationId]);
+    inputActions.setAttachments(conversationId, [...attachments, attachment]);
+  }, [conversationId, attachments]);
 
   const removeAttachment = useCallback((index: number) => {
-    removeInputAttachment(conversationId, index);
-  }, [conversationId]);
+    const newAttachments = attachments.filter((_, i) => i !== index);
+    inputActions.setAttachments(conversationId, newAttachments);
+  }, [conversationId, attachments]);
 
   const setTyping = useCallback((isTyping: boolean) => {
-    setInputTyping(conversationId, isTyping);
+    inputActions.setTyping(conversationId, isTyping);
   }, [conversationId]);
 
   const clearInput = useCallback(() => {
-    updateInputDraft(conversationId, '');
-    setInputAttachments(conversationId, []);
-    setInputTyping(conversationId, false);
+    inputActions.clearDraftMessage(conversationId);
+    inputActions.clearAttachments(conversationId);
+    inputActions.clearTyping(conversationId);
   }, [conversationId]);
 
   return {
-    draftMessage: inputState.draftMessage,
-    attachments: inputState.attachments,
-    isTyping: inputState.isTyping,
+    draftMessage,
+    attachments,
+    isTyping,
     setDraftMessage,
     setAttachments,
     addAttachment,

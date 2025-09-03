@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { logger } from "@/lib/logger";
+import { logger } from "@/lib/utils/logger";
 import {
   X,
   Check,
@@ -18,7 +18,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { api } from "@/lib/api";
+import { api } from "@/lib/utils/api";
 import { cn } from "@/lib/utils";
 
 interface FileUpload {

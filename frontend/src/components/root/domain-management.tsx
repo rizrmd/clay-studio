@@ -1,4 +1,4 @@
-import { rootService } from '@/services/root-service'
+import { rootService } from '@/lib/services/root-service'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Globe } from 'lucide-react'
 import { DomainEditor } from '@/components/domains/domain-editor'

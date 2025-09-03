@@ -1,13 +1,14 @@
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { logger } from "@/lib/logger";
-import { Messages, ChatSkeleton } from "../display";
+import { useSnapshot } from "valtio";
+import { logger } from "@/lib/utils/logger";
+import { Messages, ChatSkeleton, WelcomeScreen } from "../display";
 import { MultimodalInput } from "../input/multimodal-input";
 import { ContextIndicator } from "../display";
 import { useValtioChat } from "@/hooks/use-valtio-chat";
 import { useInputState } from "@/hooks/use-input-state";
 import { useViewportHeight } from "@/hooks/use-viewport-height";
-import { api } from "@/lib/api";
+import { api } from "@/lib/utils/api";
 import {
   AlertTriangle,
   FileText,
@@ -15,7 +16,8 @@ import {
   PanelLeftClose,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { WebSocketService } from "@/lib/services/chat/websocket-service";
+import { uiStore, uiActions } from "@/store/ui-store";
 
 interface ChatProps {
   projectId?: string;
@@ -30,21 +32,13 @@ export function Chat({
   onToggleSidebar,
   isSidebarCollapsed,
 }: ChatProps) {
-  const [isDraggingOver, setIsDraggingOver] = useState(false);
-  const [shouldFocusInput, setShouldFocusInput] = useState(false);
+  const uiSnapshot = useSnapshot(uiStore);
   const dragCounter = useRef(0);
   const navigate = useNavigate();
-  const [previousId, setPreviousId] = useState("");
   const { viewportHeight } = useViewportHeight();
+  const previousConversationIdRef = useRef(propConversationId);
 
-  useEffect(() => {
-    // Reset when conversation changes
-    if (propConversationId !== previousConversationId.current) {
-      setPreviousId(propConversationId || "");
-    }
-  }, [propConversationId]);
-
-  // Use the new Valtio-based chat hook
+  // Use the new Valtio-based chat hook - must be called before any early returns
   const {
     messages,
     sendMessage,
@@ -67,12 +61,9 @@ export function Chat({
     cancelQueuedMessage,
     activeTools,
     contextUsage,
-  } = useValtioChat(projectId || "", propConversationId);
+  } = useValtioChat(projectId || "", propConversationId || "");
 
-  // Track current conversation ID similar to messages.tsx
-  const currentConversationId =
-    hookConversationId || propConversationId || "new";
-  const previousConversationId = useRef(currentConversationId);
+  // Current conversation ID from hook or props
 
   // Use the input state hook to persist input across conversation switches
   const {
@@ -80,33 +71,44 @@ export function Chat({
     setDraftMessage: setInput,
     attachments: pendingFiles,
     setAttachments: setPendingFiles,
-  } = useInputState(propConversationId || "new");
+  } = useInputState(propConversationId || "");
 
-  // Handle navigation when a new conversation is created
-  // Navigate when we receive a real conversation ID from the backend
+  // Get WebSocket subscription status
+  const wsService = WebSocketService.getInstance();
+
+  // Reset when conversation changes
   useEffect(() => {
-    if (
-      propConversationId === "new" &&
-      hookConversationId &&
-      hookConversationId !== "new"
-    ) {
-      logger.info(
-        "Chat: REDIRECTING to hookConversationId:",
-        hookConversationId
-      );
-      // Navigate to the real conversation URL
-      navigate(`/chat/${projectId}/${hookConversationId}`, { replace: true });
+    if (propConversationId !== previousConversationIdRef.current) {
+      previousConversationIdRef.current = propConversationId;
+      // Reset any chat-specific UI state
+      uiActions.setFocusInput(false);
+      uiActions.setDragging(false);
     }
-  }, [propConversationId, hookConversationId, projectId, navigate]);
+  }, [propConversationId]);
+
+  // Monitor WebSocket subscription status
+  useEffect(() => {
+    const checkSubscription = () => {
+      uiActions.setWsSubscribed(wsService.subscribed);
+    };
+
+    // Check every 500ms for subscription status changes
+    const interval = setInterval(checkSubscription, 500);
+    
+    // Also check immediately
+    checkSubscription();
+
+    return () => clearInterval(interval);
+  }, [projectId, propConversationId, wsService]);
 
   // Focus input when conversation changes (including navigating to /new)
   useEffect(() => {
     if (projectId && propConversationId) {
       // Small delay to ensure components are rendered
       const timer = setTimeout(() => {
-        setShouldFocusInput(true);
+        uiActions.setFocusInput(true);
         // Reset after focusing
-        setTimeout(() => setShouldFocusInput(false), 100);
+        setTimeout(() => uiActions.setFocusInput(false), 100);
       }, 100);
 
       return () => clearTimeout(timer);
@@ -115,6 +117,7 @@ export function Chat({
 
   const handleSubmit = async (e: React.FormEvent, files?: File[]) => {
     e.preventDefault();
+    console.log('handleSubmit called with projectId:', projectId);
     if (!input.trim() || !projectId) return;
 
     // If there are forgotten messages, restore them first before sending
@@ -221,7 +224,7 @@ export function Chat({
     e.stopPropagation();
     dragCounter.current++;
     if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
-      setIsDraggingOver(true);
+      uiActions.setDragging(true);
     }
   };
 
@@ -230,7 +233,7 @@ export function Chat({
     e.stopPropagation();
     dragCounter.current--;
     if (dragCounter.current === 0) {
-      setIsDraggingOver(false);
+      uiActions.setDragging(false);
     }
   };
 
@@ -242,7 +245,7 @@ export function Chat({
   const handleContainerDrop = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setIsDraggingOver(false);
+    uiActions.setDragging(false);
     dragCounter.current = 0;
 
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
@@ -252,6 +255,11 @@ export function Chat({
       e.dataTransfer.clearData();
     }
   };
+
+  // Early return if no conversation ID - must be after all hooks and handlers
+  if (!propConversationId) {
+    return null;
+  }
 
   return (
     <>
@@ -295,7 +303,7 @@ export function Chat({
           </div>
         )}
         {/* Full-screen drop zone overlay */}
-        {isDraggingOver && (
+        {uiSnapshot.isDraggingOver && (
           <div className="fixed inset-0 z-40 bg-primary/10 backdrop-blur-sm flex items-center justify-center pointer-events-none">
             <div className="bg-white rounded-lg shadow-xl p-8 text-center animate-in fade-in zoom-in duration-200">
               <FileText className="h-16 w-16 mx-auto mb-4 text-primary animate-bounce" />
@@ -326,11 +334,11 @@ export function Chat({
                     projectId && (
                       <button
                         onClick={() => {
-                          navigate(`/chat/${projectId}/new`, { replace: true });
+                          navigate("/projects", { replace: true });
                         }}
                         className="text-sm px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
                       >
-                        Start New Chat
+                        Go to Projects
                       </button>
                     )}
                 </div>
@@ -348,8 +356,12 @@ export function Chat({
                   with Claude.
                 </p>
               </div>
-            ) : isLoadingMessages ? (
+            ) : isLoadingMessages && messages.length === 0 && !isStreaming ? (
+              // Only show skeleton when initially loading a conversation with no messages yet
+              // Don't show if we're streaming (e.g., after a redirect)
               <ChatSkeleton />
+            ) : messages.length === 0 ? (
+              <WelcomeScreen />
             ) : (
               <Messages
                 messages={messages.map((msg) => ({
@@ -394,7 +406,7 @@ export function Chat({
         >
           <div className="mx-auto max-w-2xl sm:px-4">
             {/* Context usage indicator */}
-            {contextUsage && propConversationId !== "new" && (
+            {contextUsage && (
               <div className="flex justify-end mb-2 px-2">
                 <ContextIndicator contextUsage={contextUsage} />
               </div>
@@ -409,13 +421,9 @@ export function Chat({
               uploadedFiles={uploadedFiles ? [...uploadedFiles] : []}
               externalFiles={pendingFiles ? [...pendingFiles] : []}
               onExternalFilesChange={setPendingFiles}
-              shouldFocus={shouldFocusInput}
-              className={cn(
-                previousId === "new" && propConversationId !== "new"
-                  ? "opacity-0"
-                  : "",
-                "lg:ml-[-10px] lg:mr-[40px]"
-              )}
+              shouldFocus={uiSnapshot.shouldFocusInput}
+              isSubscribed={uiSnapshot.isWsSubscribed}
+              className="lg:ml-[-10px] lg:mr-[40px]"
             />
           </div>
         </div>

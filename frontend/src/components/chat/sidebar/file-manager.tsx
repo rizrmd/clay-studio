@@ -9,7 +9,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { api } from '@/lib/api';
+import { api } from '@/lib/utils/api';
 
 interface FileUpload {
   id: string;

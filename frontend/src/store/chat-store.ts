@@ -1,5 +1,5 @@
 import { proxy, subscribe } from "valtio";
-import { logger } from "@/lib/logger";
+import { logger } from "@/lib/utils/logger";
 import {
   Message,
   ConversationContext,
@@ -34,19 +34,7 @@ export interface ConversationState {
   conversationIdForResume?: string;
 }
 
-export interface InputState {
-  draftMessage: string;
-  attachments: File[];
-  isTyping: boolean;
-}
 
-export interface UIState {
-  sidebarOpen: boolean;
-  fileSidebarOpen: boolean;
-  activeTab: string;
-  viewportHeight: number;
-  keyboardHeight: number;
-}
 
 export interface GlobalState {
   // Project and auth state
@@ -56,14 +44,8 @@ export interface GlobalState {
   // Chat state keyed by conversation ID
   conversations: Record<string, ConversationState>;
 
-  // Input state keyed by conversation ID
-  inputs: Record<string, InputState>;
-
   // Project context cache
   projectContexts: Record<string, ProjectContextResponse>;
-
-  // UI state
-  ui: UIState;
 }
 
 // Helper function to deep clone objects to avoid readonly issues
@@ -86,15 +68,7 @@ const initialState: GlobalState = {
   currentProjectId: null,
   activeConversationId: null,
   conversations: {},
-  inputs: {},
   projectContexts: {},
-  ui: {
-    sidebarOpen: true,
-    fileSidebarOpen: false,
-    activeTab: "chat",
-    viewportHeight: typeof window !== "undefined" ? window.innerHeight : 0,
-    keyboardHeight: 0,
-  },
 };
 
 // Create the proxy state
@@ -140,16 +114,6 @@ export const getConversationState = (
   return store.conversations[conversationId];
 };
 
-export const getInputState = (conversationId: string): InputState => {
-  if (!store.inputs[conversationId]) {
-    store.inputs[conversationId] = {
-      draftMessage: "",
-      attachments: [],
-      isTyping: false,
-    };
-  }
-  return store.inputs[conversationId];
-};
 
 // Actions
 export const setCurrentProject = (projectId: string | null) => {
@@ -267,39 +231,6 @@ export const setConversationContext = (
   state.conversationContext = context;
 };
 
-export const updateInputDraft = (conversationId: string, draft: string) => {
-  const state = getInputState(conversationId);
-  state.draftMessage = draft;
-};
-
-export const setInputAttachments = (
-  conversationId: string,
-  attachments: File[]
-) => {
-  const state = getInputState(conversationId);
-  state.attachments = [...attachments];
-};
-
-export const addInputAttachment = (
-  conversationId: string,
-  attachment: File
-) => {
-  const state = getInputState(conversationId);
-  state.attachments = [...state.attachments, attachment];
-};
-
-export const removeInputAttachment = (
-  conversationId: string,
-  index: number
-) => {
-  const state = getInputState(conversationId);
-  state.attachments = state.attachments.filter((_, i) => i !== index);
-};
-
-export const setInputTyping = (conversationId: string, isTyping: boolean) => {
-  const state = getInputState(conversationId);
-  state.isTyping = isTyping;
-};
 
 export const cacheProjectContext = (
   projectId: string,
@@ -308,25 +239,6 @@ export const cacheProjectContext = (
   store.projectContexts[projectId] = context;
 };
 
-export const setSidebarOpen = (open: boolean) => {
-  store.ui.sidebarOpen = open;
-};
-
-export const setFileSidebarOpen = (open: boolean) => {
-  store.ui.fileSidebarOpen = open;
-};
-
-export const setActiveTab = (tab: string) => {
-  store.ui.activeTab = tab;
-};
-
-export const setViewportHeight = (height: number) => {
-  store.ui.viewportHeight = height;
-};
-
-export const setKeyboardHeight = (height: number) => {
-  store.ui.keyboardHeight = height;
-};
 
 // Message queue management functions
 export const addToMessageQueue = (
@@ -425,7 +337,6 @@ export const cleanupOldConversations = (activeConversationIds: string[]) => {
 
   toRemove.forEach((id) => {
     delete store.conversations[id];
-    delete store.inputs[id];
   });
 };
 
@@ -433,7 +344,6 @@ export const cleanupOldConversations = (activeConversationIds: string[]) => {
 export const cleanupDeletedConversation = (conversationId: string) => {
   // Remove conversation state
   delete store.conversations[conversationId];
-  delete store.inputs[conversationId];
 
   // Clear active conversation if it matches
   if (store.activeConversationId === conversationId) {
@@ -451,6 +361,5 @@ export const cleanupDeletedConversation = (conversationId: string) => {
 if (process.env.NODE_ENV === "development") {
   subscribe(store, () => {
     // You can add debugging here if needed
-    // console.log('Store updated:', store)
   });
 }

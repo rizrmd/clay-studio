@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
-import { logger } from "@/lib/logger";
-import { api } from "@/lib/api";
+import { logger } from "@/lib/utils/logger";
+import { api } from "@/lib/utils/api";
 import { ToolUsage } from "@/types/chat";
 
 interface UseToolUsageReturn {

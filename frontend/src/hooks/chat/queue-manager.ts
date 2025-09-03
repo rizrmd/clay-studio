@@ -5,7 +5,7 @@ import {
   removeFromMessageQueue,
   updateMessageInQueue,
   QueuedMessage,
-} from "../../store/chat-store";
+} from "@/store/chat-store";
 
 interface QueueManagerProps {
   currentConversationId: string;

@@ -1,20 +1,21 @@
 import { useEffect, useRef } from 'react';
 import { useSnapshot } from 'valtio';
-import { store, setViewportHeight, setKeyboardHeight } from '@/store/chat-store';
+import { uiStore, uiActions } from '@/store/ui-store';
 
 /**
  * Hook to monitor viewport height changes and detect virtual keyboard
  * Uses ResizeObserver and visualViewport API to detect keyboard on mobile
  */
 export function useViewportHeight() {
-  const snapshot = useSnapshot(store);
-  const initialHeight = useRef<number>(0);
+  const snapshot = useSnapshot(uiStore);
+  const maxHeight = useRef<number>(0);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
 
   useEffect(() => {
-    // Store initial viewport height
-    initialHeight.current = window.innerHeight;
-    setViewportHeight(window.innerHeight);
+    // Store initial viewport height and track maximum
+    const currentHeight = window.innerHeight;
+    maxHeight.current = currentHeight;
+    uiActions.setViewportHeight(currentHeight);
 
     // Function to calculate keyboard height
     const updateKeyboardHeight = () => {
@@ -25,16 +26,23 @@ export function useViewportHeight() {
         currentHeight = window.visualViewport.height;
       }
 
-      const keyboardHeight = Math.max(0, initialHeight.current - currentHeight);
+      // Update max height if current is larger (viewport expanded)
+      if (currentHeight > maxHeight.current) {
+        maxHeight.current = currentHeight;
+      }
+
+      // Calculate keyboard height based on max observed height
+      const keyboardHeight = Math.max(0, maxHeight.current - currentHeight);
       
-      // Only update if there's a significant change (>50px) to avoid false positives
-      if (Math.abs(store.ui.keyboardHeight - keyboardHeight) > 50) {
-        setKeyboardHeight(keyboardHeight);
-        setViewportHeight(currentHeight);
-      } else if (keyboardHeight < 50 && store.ui.keyboardHeight > 0) {
+      // Always update viewport height to current value
+      uiActions.setViewportHeight(currentHeight);
+      
+      // Only update keyboard height if there's a significant change (>50px)
+      if (Math.abs(snapshot.keyboardHeight - keyboardHeight) > 50) {
+        uiActions.setKeyboardHeight(keyboardHeight);
+      } else if (keyboardHeight < 50 && snapshot.keyboardHeight > 0) {
         // Keyboard was closed
-        setKeyboardHeight(0);
-        setViewportHeight(initialHeight.current);
+        uiActions.setKeyboardHeight(0);
       }
     };
 
@@ -63,11 +71,12 @@ export function useViewportHeight() {
 
     // Handle orientation changes
     const handleOrientationChange = () => {
-      // Reset initial height on orientation change
+      // Update max height on orientation change
       setTimeout(() => {
-        initialHeight.current = window.innerHeight;
-        setViewportHeight(window.innerHeight);
-        setKeyboardHeight(0);
+        const newHeight = window.innerHeight;
+        maxHeight.current = newHeight;
+        uiActions.setViewportHeight(newHeight);
+        uiActions.setKeyboardHeight(0);
       }, 100);
     };
 
@@ -88,8 +97,8 @@ export function useViewportHeight() {
   }, []);
 
   return {
-    viewportHeight: snapshot.ui.viewportHeight,
-    keyboardHeight: snapshot.ui.keyboardHeight,
-    isKeyboardOpen: snapshot.ui.keyboardHeight > 0,
+    viewportHeight: snapshot.viewportHeight,
+    keyboardHeight: snapshot.keyboardHeight,
+    isKeyboardOpen: snapshot.keyboardHeight > 0,
   };
 }

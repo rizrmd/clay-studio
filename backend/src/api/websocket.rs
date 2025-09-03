@@ -192,15 +192,53 @@ pub async fn handle_websocket(
                 }
             }
         } else {
-            // Check if there's a cookie at all
+            // Fallback: Try to manually load session from cookie if depot.session() fails
+            // This can happen during WebSocket upgrades where session middleware might not work properly
             if let Some(cookie) = req.cookie("clay_session") {
-                tracing::warn!("WebSocket: Cookie exists but depot.session() returned None");
-                tracing::debug!("WebSocket: Cookie value (first 50 chars): {}", 
-                               &cookie.value().chars().take(50).collect::<String>());
+                tracing::warn!("WebSocket: Cookie exists but depot.session() returned None, attempting manual load");
+                let cookie_value = cookie.value().to_string();
+                tracing::info!("WebSocket: Full cookie value: {}", cookie_value);
+                tracing::debug!("WebSocket: Cookie value length: {}", cookie_value.len());
+                
+                // Try to extract session ID from cookie for debugging
+                if let Ok(session_id) = async_session::Session::id_from_cookie_value(&cookie_value) {
+                    tracing::info!("WebSocket: Extracted session ID: {}", session_id);
+                } else {
+                    tracing::error!("WebSocket: Failed to extract session ID from cookie value");
+                }
+                
+                // Try to load the session directly from the store
+                // The cookie value needs to be passed as-is to load_session, which will extract the session ID
+                match state.session_store.load_session(cookie_value.clone()).await {
+                    Ok(Some(session)) => {
+                        let user_id: Option<String> = session.get("user_id");
+                        let client_id: Option<String> = session.get("client_id");
+                        let role: Option<String> = session.get("role");
+                        
+                        tracing::info!("WebSocket: Manually loaded session from cookie: user_id={:?}, client_id={:?}, role={:?}", 
+                                       user_id, client_id, role);
+                        
+                        match user_id {
+                            Some(uid) => (uid, client_id, role, true),
+                            None => {
+                                tracing::warn!("WebSocket: Manually loaded session but no user_id");
+                                ("anonymous".to_string(), None, None, false)
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        tracing::warn!("WebSocket: Manual session load returned None (cookie might be expired)");
+                        ("anonymous".to_string(), None, None, false)
+                    }
+                    Err(e) => {
+                        tracing::error!("WebSocket: Failed to manually load session from cookie: {}", e);
+                        ("anonymous".to_string(), None, None, false)
+                    }
+                }
             } else {
                 tracing::warn!("WebSocket: No session cookie found at all");
+                ("anonymous".to_string(), None, None, false)
             }
-            ("anonymous".to_string(), None, None, false)
         }
     };
     
@@ -336,16 +374,34 @@ async fn handle_client_message(
 ) {
     match msg {
         ClientMessage::Subscribe { project_id, conversation_id } => {
-            // Check if connection is authenticated before allowing subscription
-            let is_authenticated = {
+            // Check if connection is authenticated and if already subscribed
+            let (is_authenticated, already_subscribed) = {
                 let connections = WS_CONNECTIONS.read().await;
-                connections.get(connection_id).is_some()
+                if let Some(conn) = connections.get(connection_id) {
+                    let already_sub = conn.project_id.as_ref() == Some(&project_id) && 
+                                     conn.conversation_id == conversation_id;
+                    (true, already_sub)
+                } else {
+                    (false, false)
+                }
             };
             
             if !is_authenticated {
                 let _ = sender.send(ServerMessage::AuthenticationRequired);
                 tracing::warn!("Unauthenticated user {} tried to subscribe to project {}", 
                               user_id, project_id);
+                return;
+            }
+            
+            // Skip if already subscribed to the same project and conversation
+            if already_subscribed {
+                tracing::debug!("User {} already subscribed to project={}, conversation={:?}, skipping", 
+                    user_id, project_id, conversation_id);
+                // Still send subscribed confirmation for client's state tracking
+                let _ = sender.send(ServerMessage::Subscribed { 
+                    project_id,
+                    conversation_id,
+                });
                 return;
             }
             
@@ -602,38 +658,34 @@ lazy_static::lazy_static! {
 }
 
 
-// Helper to broadcast to subscribed users
 pub async fn broadcast_to_subscribers(
     project_id: &str,
     conversation_id: &str,
     message: ServerMessage,
 ) {
     let connections = WS_CONNECTIONS.read().await;
-    let mut _sent_count = 0;
-    
-    tracing::info!("Broadcasting to subscribers: project={}, conversation={}, total_connections={}", 
-                   project_id, conversation_id, connections.len());
+    tracing::info!("Broadcasting message to {} connections. project_id: {}, conversation_id: {}", connections.len(), project_id, conversation_id);
     
     for (connection_id, conn) in connections.iter() {
-        tracing::info!("Checking connection {}: project={:?}, conversation={:?}", 
-                       connection_id, conn.project_id, conn.conversation_id);
+        tracing::info!("Checking connection {}: user_id: {}, project_id: {:?}, conversation_id: {:?}", connection_id, conn.user_id, conn.project_id, conn.conversation_id);
         
         // Check if connection is subscribed to this project/conversation
         if let (Some(user_project), Some(user_conversation)) = (&conn.project_id, &conn.conversation_id) {
             if user_project == project_id && user_conversation == conversation_id {
-                tracing::info!("Sending to exact match: {}", connection_id);
+                tracing::info!("Sending message to connection {}", connection_id);
                 if conn.sender.send(message.clone()).is_ok() {
-                    _sent_count += 1;
+                    // sent
                 } else {
                     tracing::warn!("Failed to send message to connection {} (user {})", connection_id, conn.user_id);
                 }
             }
         } else if let Some(user_project) = &conn.project_id {
-            // Connection is subscribed to project but not specific conversation - still send
-            if user_project == project_id {
-                tracing::info!("Sending to project match: {}", connection_id);
+            // Connection is subscribed to project but not specific conversation
+            // Send if the message is for "new" conversation or no specific conversation
+            if user_project == project_id && (conversation_id == "new" || conversation_id.is_empty()) {
+                tracing::info!("Sending to project match for new/empty conversation: {}", connection_id);
                 if conn.sender.send(message.clone()).is_ok() {
-                    _sent_count += 1;
+                    // sent
                 }
             }
         }

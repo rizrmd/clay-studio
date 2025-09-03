@@ -50,7 +50,7 @@ import {
   Settings,
   RefreshCw
 } from "lucide-react";
-import api from "@/lib/api";
+import api from "@/lib/utils/api";
 import { format } from "date-fns";
 import { useValtioAuth } from "@/hooks/use-valtio-auth";
 

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useSnapshot } from "valtio";
 import { authStore } from "@/store/auth-store";
-import { rootService, ClientRootResponse } from "@/services/root-service";
+import { rootService, ClientRootResponse } from "@/lib/services/root-service";
 import { ClientManagement } from "@/components/root/client-management";
 import { AddClientDialog } from "@/components/root/add-client-dialog";
 import {
@@ -57,10 +57,10 @@ export function RootDashboard() {
       setClients(data);
 
       // Calculate stats
-      const activeClients = data.filter((c) => c.status === "active").length;
-      const totalUsers = data.reduce((sum, c) => sum + c.userCount, 0);
+      const activeClients = data.filter((c: any) => c.status === "active").length;
+      const totalUsers = data.reduce((sum: any, c: any) => sum + c.userCount, 0);
       const totalConversations = data.reduce(
-        (sum, c) => sum + c.conversationCount,
+        (sum: any, c: any) => sum + c.conversationCount,
         0
       );
 

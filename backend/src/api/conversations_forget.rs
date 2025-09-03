@@ -54,6 +54,11 @@ pub async fn forget_messages_after(
     
     let forgotten_count = update_result.rows_affected() as i64;
     
+    // Invalidate conversation cache to reflect forgotten messages
+    if forgotten_count > 0 {
+        let _ = state.invalidate_conversation_cache(&conversation_id).await;
+    }
+    
     res.render(Json(ForgetStatusResponse {
         has_forgotten: forgotten_count > 0,
         forgotten_count,
@@ -84,6 +89,11 @@ pub async fn restore_forgotten_messages(
     .map_err(|e| AppError::InternalServerError(format!("Failed to restore messages: {}", e)))?;
     
     let restored_count = update_result.rows_affected() as i64;
+    
+    // Invalidate conversation cache to reflect restored messages
+    if restored_count > 0 {
+        let _ = state.invalidate_conversation_cache(&conversation_id).await;
+    }
     
     res.render(Json(ForgetStatusResponse {
         has_forgotten: false,

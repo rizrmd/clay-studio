@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./app";
 import "./styles/globals.css";
 import "./styles/markdown.css";
-import "./lib/axios"; // Configure axios
+import "./lib/utils/axios"; // Configure axios
 
 const queryClient = new QueryClient({
   defaultOptions: {

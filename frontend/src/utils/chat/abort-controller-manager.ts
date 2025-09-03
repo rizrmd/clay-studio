@@ -1,49 +1,17 @@
-class AbortControllerManager {
-  private controllers: Map<string, AbortController> = new Map();
+// Re-export abort controller functionality from chat store for backward compatibility
+import { getConversationAbortController, setConversationAbortController } from "@/store/chat-store";
 
-  create(key: string): AbortController {
-    // Abort existing controller if any
-    this.abort(key);
-    
-    const controller = new AbortController();
-    this.controllers.set(key, controller);
-    return controller;
+export const abortControllerManager = {
+  has: (conversationId: string): boolean => {
+    return getConversationAbortController(conversationId) !== null;
+  },
+  get: (conversationId: string): AbortController | null => {
+    return getConversationAbortController(conversationId);
+  },
+  set: (conversationId: string, controller: AbortController | null): void => {
+    setConversationAbortController(conversationId, controller);
+  },
+  delete: (conversationId: string): void => {
+    setConversationAbortController(conversationId, null);
   }
-
-  get(key: string): AbortController | null {
-    return this.controllers.get(key) || null;
-  }
-
-  abort(key: string): void {
-    const controller = this.controllers.get(key);
-    if (controller) {
-      controller.abort();
-      this.controllers.delete(key);
-    }
-  }
-
-  abortAll(): void {
-    for (const [, controller] of this.controllers) {
-      controller.abort();
-    }
-    this.controllers.clear();
-  }
-
-  has(key: string): boolean {
-    return this.controllers.has(key);
-  }
-
-  clear(): void {
-    this.controllers.clear();
-  }
-
-  transfer(fromKey: string, toKey: string): void {
-    const controller = this.controllers.get(fromKey);
-    if (controller) {
-      this.controllers.delete(fromKey);
-      this.controllers.set(toKey, controller);
-    }
-  }
-}
-
-export const abortControllerManager = new AbortControllerManager();
+};

@@ -230,6 +230,7 @@ pub async fn login(req: &mut Request, depot: &mut Depot, res: &mut Response) -> 
 
     // Find user first to check if they are root before validating domain
     // First try to find user with the provided client_id
+    tracing::debug!("Looking for user: client_id={}, username={}", client_id, login_req.username);
     let mut row = sqlx::query(
         r#"
         SELECT id, client_id, username, password, role 

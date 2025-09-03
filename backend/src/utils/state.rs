@@ -397,4 +397,19 @@ impl AppState {
             cached.last_accessed = Utc::now();
         }
     }
+    
+    /// Invalidate and reload conversation cache (used when forget/restore operations change message visibility)
+    pub async fn invalidate_conversation_cache(
+        &self,
+        conversation_id: &str,
+    ) -> Result<Vec<Message>, Box<dyn std::error::Error + Send + Sync>> {
+        // Remove from cache first
+        {
+            let mut cache = self.conversation_cache.write().await;
+            cache.remove(conversation_id);
+        }
+        
+        // Reload from database (this will create a fresh cache entry)
+        self.load_conversation_cache(conversation_id).await
+    }
 }

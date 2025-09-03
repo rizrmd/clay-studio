@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { logger } from "@/lib/logger";
+import { logger } from "@/lib/utils/logger";
 
 const internal = { init: false };
 

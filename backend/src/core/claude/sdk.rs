@@ -396,7 +396,6 @@ impl ClaudeSDK {
             }
             
             let stdout_handle = if let Some(stdout) = cmd.stdout.take() {
-                tracing::info!("Starting to read from Claude CLI stdout");
                 let tx_clone = tx.clone();
                 
                 // Create debug log file for this query

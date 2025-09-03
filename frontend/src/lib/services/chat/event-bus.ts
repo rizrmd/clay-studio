@@ -1,5 +1,5 @@
-import { logger } from '@/lib/logger';
-import type { ConversationEvent } from '../../store/chat/types';
+import { logger } from '@/lib/utils/logger';
+import type { ConversationEvent } from '@/store/chat/types';
 
 type EventHandler = (event: ConversationEvent) => void | Promise<void>;
 

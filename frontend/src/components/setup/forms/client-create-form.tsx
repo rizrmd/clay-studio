@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/form";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { CheckCircle2, Loader2 } from "lucide-react";
-import axios from "@/lib/axios";
+import axios from "@/lib/utils/axios";
 
 interface ClientCreateData {
   name: string;

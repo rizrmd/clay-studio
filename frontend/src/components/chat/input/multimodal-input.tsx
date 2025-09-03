@@ -1,4 +1,5 @@
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useCallback, useState } from "react";
+import { useSnapshot } from "valtio";
 import {
   Send,
   Paperclip,
@@ -17,19 +18,26 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
-import { API_BASE_URL } from "@/lib/url";
+import { API_BASE_URL } from "@/lib/utils/url";
 import { FileBrowser } from "./file-browser";
+import { inputStore, inputActions } from "@/store/input-store";
 
-interface FileWithDescription extends File {
+interface ComponentFileWithDescription extends File {
   description?: string;
   autoDescription?: string;
   preview?: string;
 }
 
+interface StoreFileWithDescription {
+  file: File;
+  description?: string;
+  id: string;
+}
+
 interface MultimodalInputProps {
   input: string;
   setInput: (input: string) => void;
-  handleSubmit: (e: React.FormEvent, files?: FileWithDescription[]) => void;
+  handleSubmit: (e: React.FormEvent, files?: ComponentFileWithDescription[]) => void;
   isLoading?: boolean;
   isStreaming?: boolean;
   projectId?: string;
@@ -43,6 +51,7 @@ interface MultimodalInputProps {
   onExternalFilesChange?: (files: File[]) => void;
   shouldFocus?: boolean;
   className?: string;
+  isSubscribed?: boolean;
 }
 
 export function MultimodalInput({
@@ -57,30 +66,23 @@ export function MultimodalInput({
   onExternalFilesChange,
   shouldFocus,
   className,
+  isSubscribed = true,
 }: MultimodalInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [selectedFiles, setSelectedFiles] = useState<FileWithDescription[]>([]);
-  const [isDragging, setIsDragging] = useState(false);
-  const [showFileBrowser, setShowFileBrowser] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState<{
-    [key: string]: number;
-  }>({});
-  const [uploadAbortController, setUploadAbortController] =
-    useState<AbortController | null>(null);
-  const [editingDescription, setEditingDescription] = useState<{
-    [key: string]: boolean;
-  }>({});
-  const [fileDescriptions, setFileDescriptions] = useState<{
-    [key: string]: string;
-  }>({});
-  const [filePreviews, setFilePreviews] = useState<{ [key: string]: string }>(
-    {}
-  );
-  const dragCounter = useRef(0);
+  const inputSnapshot = useSnapshot(inputStore);
   const [localInput, setLocalInput] = useState(input);
+  const [uploadAbortController, setUploadAbortController] = useState<AbortController | null>(null);
+  const [editingDescription, setEditingDescription] = useState<{ [key: string]: boolean }>({});
+  const [fileDescriptions, setFileDescriptions] = useState<{ [key: string]: string }>({});
+  const [filePreviews, setFilePreviews] = useState<{ [key: string]: string }>({});
+  const dragCounter = useRef(0);
   const updateTimeout = useRef<NodeJS.Timeout>();
+  
+  // Sync local input with prop input when it changes externally
+  useEffect(() => {
+    setLocalInput(input);
+  }, [input]);
 
   // Sync local input with prop input when it changes externally
   useEffect(() => {
@@ -124,7 +126,7 @@ export function MultimodalInput({
           if (e.target?.result) {
             setFilePreviews((prev) => ({
               ...prev,
-              [file.name]: e.target!.result as string,
+              [file?.name]: e.target!.result as string,
             }));
           }
         };
@@ -147,16 +149,16 @@ export function MultimodalInput({
       return;
     }
 
-    setIsUploading(true);
+    inputActions.setUploading(true);
     const abortController = new AbortController();
     setUploadAbortController(abortController);
 
-    const uploadedFilesList: FileWithDescription[] = [];
+    const uploadedFilesList: ComponentFileWithDescription[] = [];
 
     try {
       for (const file of files) {
         // Track upload progress for this file
-        setUploadProgress((prev) => ({ ...prev, [file.name]: 0 }));
+        inputActions.updateUploadProgress(file?.name, 0);
 
         const formData = new FormData();
         formData.append("file", file);
@@ -167,10 +169,7 @@ export function MultimodalInput({
         xhr.upload.onprogress = (event) => {
           if (event.lengthComputable) {
             const percentComplete = (event.loaded / event.total) * 100;
-            setUploadProgress((prev) => ({
-              ...prev,
-              [file.name]: percentComplete,
-            }));
+            inputActions.updateUploadProgress(file?.name, Math.round(percentComplete));
           }
         };
 
@@ -179,32 +178,33 @@ export function MultimodalInput({
           xhr.onload = () => {
             if (xhr.status === 200) {
               const result = JSON.parse(xhr.responseText);
-              const uploadedFile = file as FileWithDescription;
-              uploadedFile.description =
-                result.description || fileDescriptions[file.name];
-              uploadedFile.autoDescription = result.auto_description;
-              uploadedFile.preview = filePreviews[file.name];
+              const uploadedFile: ComponentFileWithDescription = {
+                ...file,
+                description: result.description || fileDescriptions[file?.name],
+                autoDescription: result.auto_description,
+                preview: filePreviews[file?.name]
+              };
               uploadedFilesList.push(uploadedFile);
 
               // Store the description
-              if (result.description || fileDescriptions[file.name]) {
+              if (result.description || fileDescriptions[file?.name]) {
                 setFileDescriptions((prev) => ({
                   ...prev,
-                  [file.name]:
-                    result.description || fileDescriptions[file.name] || "",
+                  [file?.name]:
+                    result.description || fileDescriptions[file?.name] || "",
                 }));
               }
 
               resolve(result);
             } else {
-              reject(new Error(`Failed to upload ${file.name}`));
+              reject(new Error(`Failed to upload ${file?.name}`));
             }
           };
 
           xhr.onerror = () =>
-            reject(new Error(`Failed to upload ${file.name}`));
+            reject(new Error(`Failed to upload ${file?.name}`));
           xhr.onabort = () =>
-            reject(new Error(`Upload cancelled for ${file.name}`));
+            reject(new Error(`Upload cancelled for ${file?.name}`));
 
           xhr.open(
             "POST",
@@ -219,22 +219,24 @@ export function MultimodalInput({
           });
         });
 
-        // Remove progress tracking for completed file
-        setUploadProgress((prev) => {
-          const newProgress = { ...prev };
-          delete newProgress[file.name];
-          return newProgress;
-        });
+        // Progress is automatically updated via updateUploadProgress
       }
 
       // Add uploaded files to selected files
-      setSelectedFiles((prev) => [...prev, ...uploadedFilesList]);
+      uploadedFilesList.forEach(file => {
+        const fileWithDesc: StoreFileWithDescription = {
+          file,
+          description: file.description || '',
+          id: Date.now().toString() + Math.random().toString(36).substr(2, 9)
+        };
+        inputActions.addSelectedFile(fileWithDesc);
+      });
     } catch (error) {
       // Upload error
       // Clear all progress on error
-      setUploadProgress({});
+      inputActions.clearUploadProgress();
     } finally {
-      setIsUploading(false);
+      inputActions.setUploading(false);
       setUploadAbortController(null);
     }
   };
@@ -243,32 +245,32 @@ export function MultimodalInput({
     if (uploadAbortController) {
       uploadAbortController.abort();
       setUploadAbortController(null);
-      setIsUploading(false);
-      setUploadProgress({});
+      inputActions.setUploading(false);
+      inputActions.clearUploadProgress();
     }
   };
 
   const removeFile = (index: number) => {
-    const file = selectedFiles[index];
+    const file = inputSnapshot.selectedFiles[index];
     if (file) {
       // Clean up preview and description
       setFilePreviews((prev) => {
         const newPreviews = { ...prev };
-        delete newPreviews[file.name];
+        delete newPreviews[file.file.name];
         return newPreviews;
       });
       setFileDescriptions((prev) => {
         const newDescriptions = { ...prev };
-        delete newDescriptions[file.name];
+        delete newDescriptions[file.file.name];
         return newDescriptions;
       });
       setEditingDescription((prev) => {
         const newEditing = { ...prev };
-        delete newEditing[file.name];
+        delete newEditing[file.file.name];
         return newEditing;
       });
     }
-    setSelectedFiles((prev) => prev.filter((_, i) => i !== index));
+    inputActions.removeSelectedFile(file?.id || index.toString());
   };
 
   const toggleEditDescription = (fileName: string) => {
@@ -277,24 +279,23 @@ export function MultimodalInput({
 
   const updateFileDescription = (fileName: string, description: string) => {
     setFileDescriptions((prev) => ({ ...prev, [fileName]: description }));
-    // Update the file object if it exists
-    setSelectedFiles((prev) =>
-      prev.map((file) => {
-        if (file.name === fileName) {
-          const updatedFile = file as FileWithDescription;
-          updatedFile.description = description;
-          return updatedFile;
-        }
-        return file;
-      })
-    );
+    // Update the file object if it exists - need to create new object due to valtio proxy
+    const fileIndex = inputSnapshot.selectedFiles.findIndex(f => f.file?.name === fileName);
+    if (fileIndex !== -1) {
+      const updatedFiles = [...inputSnapshot.selectedFiles];
+      updatedFiles[fileIndex] = {
+        ...updatedFiles[fileIndex],
+        description
+      };
+      inputActions.setSelectedFiles(updatedFiles);
+    }
   };
 
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
     // Don't submit if files are uploading or no input
-    if (isUploading || !localInput.trim()) {
+    if (inputSnapshot.isUploading || !localInput.trim()) {
       return;
     }
 
@@ -305,13 +306,13 @@ export function MultimodalInput({
 
     // Ensure parent has the latest input value
     setInput(localInput);
-
-    const allFiles = [...selectedFiles, ...externalFiles];
+    
+    const allFiles = [...inputSnapshot.selectedFiles.map(f => f.file), ...externalFiles];
     handleSubmit(e, allFiles);
     
-    // Clear local input immediately
+    // Clear local input and files
     setLocalInput("");
-    setSelectedFiles([]);
+    inputActions.clearSelectedFiles();
     onExternalFilesChange?.([]);
   };
 
@@ -321,7 +322,7 @@ export function MultimodalInput({
     e.stopPropagation();
     dragCounter.current++;
     if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
-      setIsDragging(true);
+      inputActions.setDragging(true);
     }
   };
 
@@ -330,7 +331,7 @@ export function MultimodalInput({
     e.stopPropagation();
     dragCounter.current--;
     if (dragCounter.current === 0) {
-      setIsDragging(false);
+      inputActions.setDragging(false);
     }
   };
 
@@ -342,7 +343,7 @@ export function MultimodalInput({
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setIsDragging(false);
+    inputActions.setDragging(false);
     dragCounter.current = 0;
 
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
@@ -356,7 +357,7 @@ export function MultimodalInput({
             if (e.target?.result) {
               setFilePreviews((prev) => ({
                 ...prev,
-                [file.name]: e.target!.result as string,
+                [file?.name]: e.target!.result as string,
               }));
             }
           };
@@ -370,12 +371,28 @@ export function MultimodalInput({
     }
   };
 
+  // If not subscribed to WebSocket, show connecting message
+  if (!isSubscribed) {
+    return (
+      <div className={cn("relative m-3", className)}>
+        <div className="bg-muted/50 rounded-lg p-4 border border-border min-h-[60px] flex items-center justify-center">
+          <div className="flex items-center gap-2">
+            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary"></div>
+            <div className="text-sm text-muted-foreground">
+              Connecting to conversation...
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <form
       onSubmit={handleFormSubmit}
       className={cn(
         "relative m-3 transition-all",
-        isDragging &&
+        inputSnapshot.isDragging &&
           "ring-2 ring-primary ring-offset-2 bg-primary/5 rounded-lg",
         className
       )}
@@ -385,7 +402,7 @@ export function MultimodalInput({
       onDrop={handleDrop}
     >
       {/* Drop zone overlay */}
-      {isDragging && (
+      {inputSnapshot.isDragging && (
         <div className="absolute inset-0 z-50 flex items-center justify-center pointer-events-none">
           <div className="text-center">
             <FileText className="h-12 w-12 mx-auto mb-2 text-primary animate-pulse" />
@@ -399,7 +416,7 @@ export function MultimodalInput({
         </div>
       )}
       {/* Upload progress indicators */}
-      {isUploading && Object.keys(uploadProgress).length > 0 && (
+      {inputSnapshot.isUploading && Object.keys(inputSnapshot.uploadProgress).length > 0 && (
         <div className="mb-2 space-y-2">
           <div className="flex items-center justify-between">
             <div className="text-xs text-muted-foreground">
@@ -415,7 +432,7 @@ export function MultimodalInput({
               Cancel
             </Button>
           </div>
-          {Object.entries(uploadProgress).map(([fileName, progress]) => (
+          {Object.entries(inputSnapshot.uploadProgress).map(([fileName, progress]) => (
             <div key={fileName} className="space-y-1">
               <div className="flex items-center gap-2">
                 <FileText className="h-3 w-3" />
@@ -435,25 +452,23 @@ export function MultimodalInput({
         </div>
       )}
 
-      {(selectedFiles.length > 0 ||
+      {(inputSnapshot.selectedFiles.length > 0 ||
         externalFiles.length > 0 ||
         uploadedFiles.length > 0) && (
         <div className="mb-2 space-y-2">
           {/* Show newly selected files */}
-          {(selectedFiles.length > 0 || externalFiles.length > 0) && (
+          {(inputSnapshot.selectedFiles.length > 0 || externalFiles.length > 0) && (
             <>
               <div className="text-xs text-muted-foreground">
                 Attached files:
               </div>
               <div className="space-y-2">
-                {selectedFiles.map((file, index) => {
+                {inputSnapshot.selectedFiles.map((fileData, index) => {
+                  const file = fileData.file;
                   const isImage = file.type.startsWith("image/");
-                  const preview = filePreviews[file.name];
-                  const isEditingDesc = editingDescription[file.name];
-                  const description =
-                    fileDescriptions[file.name] ||
-                    (file as FileWithDescription).description ||
-                    "";
+                  const preview = filePreviews[file?.name];
+                  const isEditingDesc = editingDescription[file?.name];
+                  const description = fileDescriptions[file?.name] || fileData.description || "";
 
                   return (
                     <div
@@ -465,7 +480,7 @@ export function MultimodalInput({
                         {isImage && preview ? (
                           <img
                             src={preview}
-                            alt={file.name}
+                            alt={file?.name}
                             className="w-16 h-16 object-cover rounded border"
                           />
                         ) : (
@@ -478,13 +493,13 @@ export function MultimodalInput({
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center justify-between">
                             <span className="text-sm font-medium truncate">
-                              {file.name}
+                              {file?.name}
                             </span>
                             <button
                               type="button"
                               onClick={() => removeFile(index)}
                               className="ml-2 p-1 hover:text-destructive"
-                              disabled={isUploading}
+                              disabled={inputSnapshot.isUploading}
                             >
                               <X className="h-4 w-4" />
                             </button>
@@ -500,7 +515,7 @@ export function MultimodalInput({
                                   value={description}
                                   onChange={(e) =>
                                     updateFileDescription(
-                                      file.name,
+                                      file?.name,
                                       e.target.value
                                     )
                                   }
@@ -509,7 +524,7 @@ export function MultimodalInput({
                                   onKeyDown={(e) => {
                                     if (e.key === "Enter") {
                                       e.preventDefault();
-                                      toggleEditDescription(file.name);
+                                      toggleEditDescription(file?.name);
                                     }
                                   }}
                                 />
@@ -519,7 +534,7 @@ export function MultimodalInput({
                                   variant="ghost"
                                   className="h-7 w-7"
                                   onClick={() =>
-                                    toggleEditDescription(file.name)
+                                    toggleEditDescription(file?.name)
                                   }
                                 >
                                   <Check className="h-3 w-3" />
@@ -540,7 +555,7 @@ export function MultimodalInput({
                                   variant="ghost"
                                   className="h-5 w-5 opacity-0 group-hover:opacity-100 transition-opacity"
                                   onClick={() =>
-                                    toggleEditDescription(file.name)
+                                    toggleEditDescription(file?.name)
                                   }
                                 >
                                   <Edit2 className="h-3 w-3" />
@@ -555,12 +570,12 @@ export function MultimodalInput({
                 })}
                 {externalFiles.map((file, index) => {
                   const isImage = file.type.startsWith("image/");
-                  const preview = filePreviews[file.name];
+                  const preview = filePreviews[file?.name];
                   const isEditingDesc =
-                    editingDescription[`external-${file.name}`];
+                    editingDescription[`external-${file?.name}`];
                   const description =
-                    fileDescriptions[`external-${file.name}`] ||
-                    (file as FileWithDescription).description ||
+                    fileDescriptions[`external-${file?.name}`] ||
+                    (file as ComponentFileWithDescription).description ||
                     "";
 
                   return (
@@ -573,7 +588,7 @@ export function MultimodalInput({
                         {isImage && preview ? (
                           <img
                             src={preview}
-                            alt={file.name}
+                            alt={file?.name}
                             className="w-16 h-16 object-cover rounded border"
                           />
                         ) : (
@@ -586,7 +601,7 @@ export function MultimodalInput({
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center justify-between">
                             <span className="text-sm font-medium truncate">
-                              {file.name}
+                              {file?.name}
                             </span>
                             <button
                               type="button"
@@ -625,7 +640,7 @@ export function MultimodalInput({
                                   onChange={(e) =>
                                     setFileDescriptions((prev) => ({
                                       ...prev,
-                                      [`external-${file.name}`]: e.target.value,
+                                      [`external-${file?.name}`]: e.target.value,
                                     }))
                                   }
                                   className="h-7 text-xs"
@@ -635,7 +650,7 @@ export function MultimodalInput({
                                       e.preventDefault();
                                       setEditingDescription((prev) => ({
                                         ...prev,
-                                        [`external-${file.name}`]: false,
+                                        [`external-${file?.name}`]: false,
                                       }));
                                     }
                                   }}
@@ -648,7 +663,7 @@ export function MultimodalInput({
                                   onClick={() =>
                                     setEditingDescription((prev) => ({
                                       ...prev,
-                                      [`external-${file.name}`]: false,
+                                      [`external-${file?.name}`]: false,
                                     }))
                                   }
                                 >
@@ -672,7 +687,7 @@ export function MultimodalInput({
                                   onClick={() =>
                                     setEditingDescription((prev) => ({
                                       ...prev,
-                                      [`external-${file.name}`]: true,
+                                      [`external-${file?.name}`]: true,
                                     }))
                                   }
                                 >
@@ -703,23 +718,23 @@ export function MultimodalInput({
         placeholder={
           isLoading
             ? "Continue typing"
-            : isDragging
+            : inputSnapshot.isDragging
             ? "Drop files here..."
-            : isUploading
+            : inputSnapshot.isUploading
             ? "Uploading files..."
             : "Type to chat..."
         }
         placeholderSecondary={
           isLoading
             ? "while the ai is thinking..."
-            : isDragging || isUploading
+            : inputSnapshot.isDragging || inputSnapshot.isUploading
             ? undefined
             : "Enter to send, Shift+Enter for new line"
         }
         className={cn(
           "min-h-[60px] max-h-[200px] resize-none pr-12 bg-background"
         )}
-        disabled={isDragging || isUploading}
+        disabled={inputSnapshot.isDragging || inputSnapshot.isUploading}
         rows={1}
       />
       <input
@@ -740,9 +755,9 @@ export function MultimodalInput({
                 variant="ghost"
                 className={cn(
                   "h-8 w-8",
-                  (isLoading || isStreaming || !projectId) && "hidden"
+                  (isLoading || isStreaming || !projectId) && "invisible"
                 )}
-                onClick={() => setShowFileBrowser(true)}
+                onClick={() => inputActions.setShowFileBrowser(true)}
                 disabled={isLoading || isStreaming || !projectId}
               >
                 <Paperclip className="h-4 w-4" />
@@ -756,8 +771,9 @@ export function MultimodalInput({
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
+                  size="icon"
                   variant={
-                    !localInput.trim() || isUploading
+                    !localInput.trim() || inputSnapshot.isUploading
                       ? "outline"
                       : isLoading || isStreaming
                       ? "secondary"
@@ -765,14 +781,15 @@ export function MultimodalInput({
                   }
                   type="submit"
                   disabled={
-                    !localInput.trim() || isUploading
+                    !localInput.trim() || inputSnapshot.isUploading
                   }
+                  className="h-8 w-8"
                 >
                   <Send className="h-4 w-4" />
                   <span className="sr-only">Send message</span>
                 </Button>
               </TooltipTrigger>
-              {isUploading && (
+              {inputSnapshot.isUploading && (
                 <TooltipContent>Wait for files to upload</TooltipContent>
               )}
             </Tooltip>
@@ -781,8 +798,8 @@ export function MultimodalInput({
 
       {projectId && (
         <FileBrowser
-          open={showFileBrowser}
-          onOpenChange={setShowFileBrowser}
+          open={inputSnapshot.showFileBrowser}
+          onOpenChange={inputActions.setShowFileBrowser}
           projectId={projectId}
           onFilesSelected={(files) => {
             // Convert the selected existing files to File-like objects for consistency
@@ -800,14 +817,21 @@ export function MultimodalInput({
                 filePath: { value: f.file_path, writable: false },
                 preview: { value: null, writable: true },
               });
-              return file as FileWithDescription & {
+              return file as ComponentFileWithDescription & {
                 isExisting: boolean;
                 fileId: string;
                 filePath: string;
               };
             });
 
-            setSelectedFiles((prev) => [...prev, ...convertedFiles]);
+            convertedFiles.forEach(file => {
+              const storeFile: StoreFileWithDescription = {
+                file,
+                description: (file as any).description || '',
+                id: (file as any).fileId || Date.now().toString() + Math.random().toString(36).substr(2, 9)
+              };
+              inputActions.addSelectedFile(storeFile);
+            });
 
             // Store descriptions and generate previews for selected files
             convertedFiles.forEach((file) => {
@@ -819,7 +843,7 @@ export function MultimodalInput({
               if (description) {
                 setFileDescriptions((prev) => ({
                   ...prev,
-                  [file.name]: description,
+                  [file?.name]: description,
                 }));
               }
 
@@ -831,7 +855,7 @@ export function MultimodalInput({
                   const previewUrl = `${API_BASE_URL}/uploads/${clientId}/${projectId}/${fileName}`;
                   setFilePreviews((prev) => ({
                     ...prev,
-                    [file.name]: previewUrl,
+                    [file?.name]: previewUrl,
                   }));
                 }
               }

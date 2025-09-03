@@ -1,11 +1,11 @@
 import { useEffect } from "react";
-import { logger } from "@/lib/logger";
+import { logger } from "@/lib/utils/logger";
 import {
   getConversationState,
   setConversationLoading,
   setConversationStreaming,
   setConversationError,
-} from "../../store/chat-store";
+} from "@/store/chat-store";
 
 interface StreamResumeOptions {
   projectId: string;
@@ -31,7 +31,6 @@ export function useStreamResume({
     const checkTimer = setTimeout(() => {
       const state = getConversationState(currentConversationId);
       if (state.needsStreamResume && state.pendingResumeContent) {
-        logger.info("StreamResume: Resuming stream for conversation:", currentConversationId);
         
         setConversationLoading(currentConversationId, true);
         setConversationStreaming(currentConversationId, true);

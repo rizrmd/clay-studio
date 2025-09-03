@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { User, Lock, Loader2 } from 'lucide-react'
-import axios from '@/lib/axios'
+import axios from '@/lib/utils/axios'
 import { useValtioAuth } from '@/hooks/use-valtio-auth'
 
 interface CreateFirstUserStepProps {

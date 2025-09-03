@@ -1,22 +1,24 @@
 import { useEffect, useCallback, useMemo, useRef } from "react";
 import { useSnapshot } from "valtio";
 import { useNavigate } from "react-router-dom";
+import { logger } from "../lib/utils/logger";
 import {
   conversationStore,
   getOrCreateConversationState,
 } from "../store/chat/conversation-store";
 import { ConversationManager } from "../store/chat/conversation-manager";
-import { MessageService } from "../services/chat/message-service";
-import { chatEventBus } from "../services/chat/event-bus";
+import { MessageService } from "../lib/services/chat/message-service";
+import { MessageCacheService } from "../lib/services/chat/message-cache";
+import { chatEventBus } from "../lib/services/chat/event-bus";
 import { abortControllerManager } from "../utils/chat/abort-controller-manager";
-import { WebSocketService } from "../services/chat/websocket-service";
+import { WebSocketService } from "../lib/services/chat/websocket-service";
 import { useConversationContext, useProjectContext } from "./chat/use-context";
 import type { Message } from "../types/chat";
 
 /**
  * Simplified chat hook using the new ConversationManager architecture
  */
-export function useChat(projectId: string, conversationId?: string) {
+export function useChat(projectId: string, conversationId: string) {
   const navigate = useNavigate();
   const snapshot = useSnapshot(conversationStore);
 
@@ -26,9 +28,10 @@ export function useChat(projectId: string, conversationId?: string) {
     []
   );
   const messageService = useMemo(() => MessageService.getInstance(), []);
+  const messageCache = useMemo(() => MessageCacheService.getInstance(), []);
 
-  // Current conversation ID (default to 'new' if not provided)
-  const currentConversationId = conversationId || "new";
+  // Current conversation ID (required)
+  const currentConversationId = conversationId;
   const previousConversationId = useRef<string | null>(null);
 
   // Ensure conversation state exists
@@ -39,43 +42,21 @@ export function useChat(projectId: string, conversationId?: string) {
   }, [currentConversationId]);
 
   // Get conversation state from snapshot
-  const conversationState = snapshot.conversations[currentConversationId] || {
-    id: currentConversationId,
-    status: "idle" as const,
-    messages: [],
-    error: null,
-    uploadedFiles: [],
-    forgottenAfterMessageId: null,
-    forgottenCount: 0,
-    messageQueue: [],
-    activeTools: [],
-    lastUpdated: Date.now(),
-    version: 0,
-  };
+  const conversationState = snapshot.conversations[currentConversationId];
 
   // Load context
-  const { context: conversationContext } = useConversationContext(
-    conversationId && conversationId !== "new" ? conversationId : null
-  );
+  const { context: conversationContext } = useConversationContext(conversationId);
   const { projectContext } = useProjectContext(projectId);
 
-  // Set project ID and subscribe to WebSocket
+  // Set project ID
   useEffect(() => {
     conversationStore.currentProjectId = projectId;
+  }, [projectId]);
 
-    // Subscribe to WebSocket for this project and conversation
-    const wsService = WebSocketService.getInstance();
-    wsService.subscribe(projectId, currentConversationId);
-
-    return () => {
-      // Note: Don't unsubscribe on cleanup as other components might still need it
-      // The WebSocket will handle reconnection and resubscription automatically
-    };
-  }, [projectId, currentConversationId]);
-
-  // Handle conversation switching
+  // Handle conversation switching and WebSocket subscription
   useEffect(() => {
     if (previousConversationId.current !== currentConversationId) {
+      
       // First, ensure the active conversation is properly set
       // This is critical for preventing message bleeding
       conversationStore.activeConversationId = currentConversationId;
@@ -83,20 +64,47 @@ export function useChat(projectId: string, conversationId?: string) {
       // Update WebSocket service's current conversation
       const wsService = WebSocketService.getInstance();
       wsService.setCurrentConversation(currentConversationId);
+      
+      // Subscribe to WebSocket for this project and conversation
+      // This handles both initial subscription and conversation switches
+      wsService.subscribe(projectId, currentConversationId);
 
       // Switch conversation atomically
       conversationManager.switchConversation(currentConversationId);
 
-      // For existing conversations, messages will be loaded via WebSocket
-      // For new conversations, ensure we start with a clean state
-      if (currentConversationId === "new") {
-        conversationManager.clearConversation(currentConversationId);
+      // Check for cached messages first for instant loading
+      const cachedMessages = messageCache.getCachedMessages(currentConversationId);
+      
+      if (cachedMessages && cachedMessages.length > 0) {
+        // Load cached messages immediately for instant experience
+        conversationManager.setMessages(currentConversationId, cachedMessages);
+        conversationManager.updateStatus(currentConversationId, 'idle');
+        
+        logger.debug(`Loaded ${cachedMessages.length} cached messages for conversation ${currentConversationId}`);
       } else {
-        // Set loading state while waiting for WebSocket to send messages
-        conversationManager.updateStatus(currentConversationId, 'loading');
+        // No cache available - check existing state
+        const existingState = conversationStore.conversations[currentConversationId];
+        const hasMessages = existingState && existingState.messages && existingState.messages.length > 0;
+        const isStreaming = existingState && existingState.status === 'streaming';
+        
+        // Only show loading if truly necessary (no cache, no messages, not streaming)
+        if (!hasMessages && !isStreaming && currentConversationId !== 'new') {
+          conversationManager.updateStatus(currentConversationId, 'loading');
+          
+          // Much shorter timeout since cache miss is rare
+          const timeoutId = setTimeout(() => {
+            const currentState = conversationStore.conversations[currentConversationId];
+            if (currentState && currentState.status === 'loading') {
+              logger.warn('WebSocket response timeout for conversation:', currentConversationId);
+              conversationManager.updateStatus(currentConversationId, 'idle');
+            }
+          }, 2000); // Reduced to 2 seconds
+          
+          return () => clearTimeout(timeoutId);
+        }
       }
-      // Note: Messages for existing conversations will be sent via WebSocket
-      // when we subscribe to the conversation
+      
+      // WebSocket will still send fresh data and update the cache
 
       previousConversationId.current = currentConversationId;
     }
@@ -107,74 +115,24 @@ export function useChat(projectId: string, conversationId?: string) {
     navigate,
   ]);
 
-  // Handle navigation when new conversation gets real ID during streaming
-  useEffect(() => {
-    // Only redirect if:
-    // 1. We're currently on '/new'
-    // 2. There's an active conversation that's not 'new'
-    // 3. We're currently streaming (indicating this is a transition, not just leftover state)
-    const activeState = snapshot.activeConversationId
-      ? snapshot.conversations[snapshot.activeConversationId]
-      : null;
 
-    if (
-      conversationId === "new" &&
-      snapshot.activeConversationId &&
-      snapshot.activeConversationId !== "new" &&
-      activeState &&
-      (activeState.status === "streaming" || activeState.status === "loading")
-    ) {
-      // Navigate to the real conversation
-      navigate(`/chat/${projectId}/${snapshot.activeConversationId}`, {
-        replace: true,
-      });
-    }
-  }, [
-    conversationId,
-    snapshot.activeConversationId,
-    projectId,
-    navigate,
-    snapshot.conversations,
-  ]);
-
-  // Subscribe to conversation creation events
-  useEffect(() => {
-    const unsubscribe = chatEventBus.subscribe(
-      "CONVERSATION_CREATED",
-      async (event) => {
-        if (
-          event.type === "CONVERSATION_CREATED" &&
-          event.projectId === projectId
-        ) {
-          // Refresh sidebar or do other UI updates
-          window.dispatchEvent(
-            new CustomEvent("conversation-created", {
-              detail: { conversationId: event.conversationId, projectId },
-            })
-          );
-        }
-      }
-    );
-
-    return unsubscribe;
-  }, [projectId]);
-
-  // Subscribe to conversation redirect events
+  // Handle conversation redirect
   useEffect(() => {
     const unsubscribe = chatEventBus.subscribe(
       "CONVERSATION_REDIRECT",
-      async (event) => {
-        if (event.type === "CONVERSATION_REDIRECT") {
-          // Navigate to the new conversation ID
-          navigate(`/chat/${projectId}/${event.newConversationId}`, {
-            replace: true,
-          });
+      async (event: any) => {
+        if (
+          event.type === "CONVERSATION_REDIRECT" &&
+          (event.oldConversationId === conversationId || event.oldConversationId === 'new')
+        ) {
+          navigate(`/project/${projectId}/chat/${event.newConversationId}`, { replace: true });
         }
       }
     );
 
     return unsubscribe;
-  }, [projectId, navigate]);
+  }, [conversationId, projectId, navigate]);
+
 
   // Cleanup on unmount
   useEffect(() => {
@@ -183,24 +141,30 @@ export function useChat(projectId: string, conversationId?: string) {
     };
   }, []);
 
+  const effectiveConversationId = currentConversationId;
+
   // Send message
   const sendMessage = useCallback(
     async (content: string, files?: File[]) => {
+      // Use the effective conversation ID for sending messages
+      // This ensures we always send to the correct conversation
+      const targetConversationId = effectiveConversationId || currentConversationId;
+      
       await messageService.sendMessage(
         projectId,
-        currentConversationId,
+        targetConversationId,
         content,
         files
       );
     },
-    [messageService, projectId, currentConversationId]
+    [messageService, projectId, currentConversationId, conversationId, effectiveConversationId]
   );
 
   // Trigger response without adding user message (for resend scenarios)
   const triggerResponse = useCallback(
     async (content: string) => {
       // Remove last assistant message if exists
-      const messages = conversationState.messages;
+      const messages = conversationState?.messages || [];
       if (
         messages.length > 0 &&
         messages[messages.length - 1].role === "assistant"
@@ -226,7 +190,7 @@ export function useChat(projectId: string, conversationId?: string) {
       messageService,
       projectId,
       currentConversationId,
-      conversationState.messages,
+      conversationState?.messages,
     ]
   );
 
@@ -265,7 +229,7 @@ export function useChat(projectId: string, conversationId?: string) {
   // Edit queued message
   const editQueuedMessage = useCallback(
     async (messageId: string, newContent: string) => {
-      const queue = conversationState.messageQueue;
+      const queue = conversationState?.messageQueue || [];
       const message = queue.find((m) => m.id === messageId);
       if (message) {
         // Remove old message and add updated one
@@ -276,11 +240,11 @@ export function useChat(projectId: string, conversationId?: string) {
         await conversationManager.addToQueue(currentConversationId, {
           ...message,
           content: newContent,
-          files: [...message.files],
+          files: [...(message.files || [])] as File[]
         });
       }
     },
-    [conversationManager, currentConversationId, conversationState.messageQueue]
+    [conversationManager, currentConversationId, conversationState?.messageQueue]
   );
 
   // Cancel queued message
@@ -294,24 +258,6 @@ export function useChat(projectId: string, conversationId?: string) {
     [conversationManager, currentConversationId]
   );
 
-  // Determine effective conversation ID for display
-  // When user is explicitly on /new, stay on new unless we're actively streaming a transition
-  const isActivelyStreaming =
-    snapshot.activeConversationId &&
-    snapshot.conversations[snapshot.activeConversationId] &&
-    (snapshot.conversations[snapshot.activeConversationId].status ===
-      "streaming" ||
-      snapshot.conversations[snapshot.activeConversationId].status ===
-        "loading");
-
-  const effectiveConversationId =
-    conversationId === "new" &&
-    snapshot.activeConversationId &&
-    snapshot.activeConversationId !== "new" &&
-    isActivelyStreaming
-      ? snapshot.activeConversationId
-      : currentConversationId;
-
   // Get effective state - ensure it exists in the store
   useEffect(() => {
     if (
@@ -322,8 +268,24 @@ export function useChat(projectId: string, conversationId?: string) {
     }
   }, [effectiveConversationId]);
 
-  const effectiveState =
-    snapshot.conversations[effectiveConversationId] || conversationState;
+  const effectiveState = conversationState || {
+    id: currentConversationId || '',
+    status: "idle" as const,
+    messages: [],
+    error: null,
+    uploadedFiles: [],
+    forgottenAfterMessageId: null,
+    forgottenCount: 0,
+    messageQueue: [],
+    activeTools: [],
+    lastUpdated: Date.now(),
+    version: 0,
+  };
+
+  // Debug logging for message state
+  useEffect(() => {
+    // Message state tracking
+  }, [conversationId, currentConversationId, effectiveConversationId, effectiveState.messages?.length, effectiveState.status]);
 
   return {
     // Messages and state

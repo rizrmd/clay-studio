@@ -44,12 +44,6 @@ export function AskUser({
 
   // Determine the selected option from the response
   const [selectedOption, setSelectedOption] = useState<string | null>(() => {
-    console.log("AskUser init:", {
-      hasResponse,
-      selectedResponse,
-      promptType,
-      options,
-    });
     if (
       hasResponse &&
       typeof selectedResponse === "string" &&
@@ -60,10 +54,6 @@ export function AskUser({
         (opt) =>
           opt.label === selectedResponse || opt.value === selectedResponse
       );
-      console.log("AskUser matching option:", {
-        selectedResponse,
-        matchingOption,
-      });
       return matchingOption ? matchingOption.value : null;
     }
     return null;

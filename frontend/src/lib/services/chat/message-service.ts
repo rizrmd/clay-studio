@@ -1,12 +1,11 @@
-import { api } from '@/lib/api';
-import { logger } from '@/lib/logger';
-import { ConversationManager } from '../../store/chat/conversation-manager';
-import { conversationStore } from '../../store/chat/conversation-store';
-import { chatEventBus } from './event-bus';
-import { abortControllerManager } from '../../utils/chat/abort-controller-manager';
-import { WebSocketService } from './websocket-service';
-import type { Message } from '../../types/chat';
-import type { QueuedMessage } from '../../store/chat/types';
+import { api } from "@/lib/utils/api";
+import { logger } from "@/lib/utils/logger";
+import { ConversationManager } from "@/store/chat/conversation-manager";
+import { conversationStore } from "@/store/chat/conversation-store";
+import { chatEventBus } from "./event-bus";
+import { WebSocketService } from "./websocket-service";
+import type { Message } from "@/types/chat";
+import type { QueuedMessage } from "@/store/chat/types";
 
 export class MessageService {
   private static instance: MessageService;
@@ -33,57 +32,73 @@ export class MessageService {
     isFromQueue: boolean = false
   ): Promise<void> {
     // Create unique key for deduplication
-    const messageKey = `${conversationId}-${content.substring(0, 50)}-${Date.now()}`;
-    
+    const messageKey = `${conversationId}-${content.substring(
+      0,
+      50
+    )}-${Date.now()}`;
+
     // Check if already sending this message
     if (this.sendingMessages.has(messageKey)) {
-      logger.warn('MessageService: Duplicate send attempt blocked:', messageKey);
+      logger.warn(
+        "MessageService: Duplicate send attempt blocked:",
+        messageKey
+      );
       return;
     }
 
     try {
       this.sendingMessages.add(messageKey);
-      
+
       const state = conversationStore.conversations[conversationId];
-      
+
       // Queue message if busy (unless it's from queue to prevent infinite loop)
-      if (!isFromQueue && state && (state.status === 'streaming' || state.status === 'processing_queue')) {
+      if (
+        !isFromQueue &&
+        state &&
+        (state.status === "streaming" || state.status === "processing_queue")
+      ) {
         const queuedMessage: QueuedMessage = {
           id: `queue-${Date.now()}`,
           content,
           files: files || [],
           timestamp: new Date(),
         };
-        
-        await this.conversationManager.addToQueue(conversationId, queuedMessage);
+
+        await this.conversationManager.addToQueue(
+          conversationId,
+          queuedMessage
+        );
         return;
       }
 
       // Note: WebSocket doesn't need abort controllers like SSE did
 
       // Update status
-      logger.debug('MessageService: About to set status to streaming for:', conversationId);
-      await this.conversationManager.updateStatus(conversationId, 'streaming');
-      logger.debug('MessageService: Status set to streaming, clearing error for:', conversationId);
+      await this.conversationManager.updateStatus(conversationId, "streaming");
       await this.conversationManager.setError(conversationId, null);
-      logger.debug('MessageService: Error cleared for:', conversationId);
 
       // Upload files if any
       let uploadedFilePaths: string[] = [];
       if (files && files.length > 0) {
-        uploadedFilePaths = await this.uploadFiles(files, projectId, conversationId);
+        uploadedFilePaths = await this.uploadFiles(
+          files,
+          projectId,
+          conversationId
+        );
       }
 
       // Prepare message content
       let messageContent = content;
       if (uploadedFilePaths.length > 0) {
-        messageContent += `\n\nAttached files:\n${uploadedFilePaths.map(f => `- ${f}`).join('\n')}`;
+        messageContent += `\n\nAttached files:\n${uploadedFilePaths
+          .map((f) => `- ${f}`)
+          .join("\n")}`;
       }
 
       // Add user message to state
       const userMessage: Message = {
         id: `temp-${Date.now()}`,
-        role: 'user',
+        role: "user",
         content: messageContent,
         createdAt: new Date().toISOString(),
       };
@@ -91,31 +106,34 @@ export class MessageService {
 
       // Start streaming
       await chatEventBus.emit({
-        type: 'STREAMING_STARTED',
+        type: "STREAMING_STARTED",
         conversationId,
       });
 
-      logger.debug('MessageService: Sending message via WebSocket for:', conversationId);
-      
       // Use WebSocket to send message instead of SSE
       const wsService = WebSocketService.getInstance();
       await wsService.connect();
+
+      // Only subscribe if not already subscribed to this conversation
+      // The useChat hook should have already established the subscription
       wsService.subscribe(projectId, conversationId);
       wsService.setCurrentConversation(conversationId);
-      
-      // Send the message via WebSocket
-      wsService.sendChatMessage(projectId, conversationId, content, uploadedFilePaths);
-      
-      logger.debug('MessageService: Message sent via WebSocket for:', conversationId);
 
+      // Send the message via WebSocket
+      wsService.sendChatMessage(
+        projectId,
+        conversationId,
+        content,
+        uploadedFilePaths
+      );
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to send message';
+      const errorMessage =
+        error instanceof Error ? error.message : "Failed to send message";
       await this.conversationManager.setError(conversationId, errorMessage);
       // Only set to idle if there was an error
-      await this.conversationManager.updateStatus(conversationId, 'idle');
+      await this.conversationManager.updateStatus(conversationId, "idle");
       throw error;
     } finally {
-      logger.debug('MessageService: Finally block reached for:', conversationId);
       this.sendingMessages.delete(messageKey);
       // Don't set status to idle here - let streaming service handle it
       // The streaming has already been handled, so we can process queue
@@ -124,16 +142,24 @@ export class MessageService {
   }
 
   // Process message queue
-  private async processQueue(projectId: string, conversationId: string): Promise<void> {
-    const nextMessage = await this.conversationManager.getNextQueuedMessage(conversationId);
-    
+  private async processQueue(
+    projectId: string,
+    conversationId: string
+  ): Promise<void> {
+    const nextMessage = await this.conversationManager.getNextQueuedMessage(
+      conversationId
+    );
+
     if (!nextMessage) {
       return;
     }
 
     // Update status to show queue processing
-    await this.conversationManager.updateStatus(conversationId, 'processing_queue');
-    
+    await this.conversationManager.updateStatus(
+      conversationId,
+      "processing_queue"
+    );
+
     // Send the queued message
     await this.sendMessage(
       projectId,
@@ -152,22 +178,22 @@ export class MessageService {
     // IMPORTANT: Verify we're loading messages for the right conversation
     // This prevents message bleeding when multiple conversations are being loaded
     const activeConversationId = conversationStore.activeConversationId;
-    
+
     // Only proceed if this is the active conversation or if there's no active conversation
     if (activeConversationId && activeConversationId !== conversationId) {
-      logger.warn(`MessageService: Skipping loadMessages for inactive conversation ${conversationId}, active is ${activeConversationId}`);
+      logger.warn(
+        `MessageService: Skipping loadMessages for inactive conversation ${conversationId}, active is ${activeConversationId}`
+      );
       return [];
     }
-    
+
     // Messages should already be loaded via WebSocket ConversationHistory message
     const existingState = conversationStore.conversations[conversationId];
     if (existingState && existingState.messages) {
-      logger.info(`MessageService: Using messages from WebSocket for conversation ${conversationId}`);
       return existingState.messages;
     }
-    
+
     // If no messages, return empty array (WebSocket will send them when ready)
-    logger.info(`MessageService: No messages yet for conversation ${conversationId}, waiting for WebSocket`);
     return [];
   }
 
@@ -177,18 +203,22 @@ export class MessageService {
     messageId: string
   ): Promise<void> {
     // Stop any ongoing streaming
-    abortControllerManager.abort(conversationId);
-    
+
     try {
       // Get current messages for optimistic update
       const state = conversationStore.conversations[conversationId];
       if (state && state.messages) {
-        const messageIndex = state.messages.findIndex((m) => m.id === messageId);
+        const messageIndex = state.messages.findIndex(
+          (m) => m.id === messageId
+        );
         if (messageIndex !== -1) {
           // Optimistically update UI to prevent flickering
           const filteredMessages = state.messages.slice(0, messageIndex + 1);
-          await this.conversationManager.setMessages(conversationId, filteredMessages);
-          
+          await this.conversationManager.setMessages(
+            conversationId,
+            filteredMessages
+          );
+
           // Set forgotten state optimistically
           const forgottenCount = state.messages.length - messageIndex - 1;
           await this.conversationManager.setForgottenState(
@@ -198,25 +228,28 @@ export class MessageService {
           );
         }
       }
-      
+
       // Make the API call
       const response = await api.fetchStream(
         `/conversations/${conversationId}/forget-after`,
         {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ message_id: messageId }),
         }
       );
 
       if (!response.ok) {
         // On error, reload to restore correct state
-        await this.loadMessages(conversationId, conversationStore.currentProjectId || '');
+        await this.loadMessages(
+          conversationId,
+          conversationStore.currentProjectId || ""
+        );
         throw new Error(`Failed to forget messages: ${response.status}`);
       }
 
       const data = await response.json();
-      
+
       // Update with actual count from server if different
       if (data.forgotten_count !== undefined) {
         await this.conversationManager.setForgottenState(
@@ -225,11 +258,11 @@ export class MessageService {
           data.forgotten_count
         );
       }
-      
+
       // Don't reload messages - we already updated optimistically
-      
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to forget messages';
+      const errorMessage =
+        error instanceof Error ? error.message : "Failed to forget messages";
       await this.conversationManager.setError(conversationId, errorMessage);
       throw error;
     }
@@ -241,7 +274,7 @@ export class MessageService {
       const response = await api.fetchStream(
         `/conversations/${conversationId}/forget-after`,
         {
-          method: 'DELETE',
+          method: "DELETE",
         }
       );
 
@@ -251,12 +284,15 @@ export class MessageService {
 
       // Clear forgotten state
       await this.conversationManager.setForgottenState(conversationId, null, 0);
-      
+
       // Reload messages
-      await this.loadMessages(conversationId, conversationStore.currentProjectId || '');
-      
+      await this.loadMessages(
+        conversationId,
+        conversationStore.currentProjectId || ""
+      );
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to restore messages';
+      const errorMessage =
+        error instanceof Error ? error.message : "Failed to restore messages";
       await this.conversationManager.setError(conversationId, errorMessage);
       throw error;
     }
@@ -269,17 +305,17 @@ export class MessageService {
     conversationId: string
   ): Promise<string[]> {
     const formData = new FormData();
-    files.forEach(file => formData.append('files', file));
-    
-    const clientId = localStorage.getItem('activeClientId');
-    if (clientId) {
-      formData.append('client_id', clientId);
-    }
-    formData.append('project_id', projectId);
-    formData.append('conversation_id', conversationId);
+    files.forEach((file) => formData.append("files", file));
 
-    const response = await api.fetchStream('/upload', {
-      method: 'POST',
+    const clientId = localStorage.getItem("activeClientId");
+    if (clientId) {
+      formData.append("client_id", clientId);
+    }
+    formData.append("project_id", projectId);
+    formData.append("conversation_id", conversationId);
+
+    const response = await api.fetchStream("/upload", {
+      method: "POST",
       body: formData,
     });
 
@@ -293,22 +329,11 @@ export class MessageService {
 
   // Stop current message
   async stopMessage(conversationId: string): Promise<void> {
-    // Clear the abort controller from the store
-    const { getConversationAbortController, setConversationAbortController } = await import('../../store/chat-store');
-    const controller = getConversationAbortController(conversationId);
-    if (controller) {
-      controller.abort();
-      setConversationAbortController(conversationId, null);
-    }
-    
-    // Also try legacy abort controller manager for backwards compatibility
-    abortControllerManager.abort(conversationId);
-    
     // Send stop streaming message via WebSocket
     const wsService = WebSocketService.getInstance();
     wsService.stopStreaming(conversationId);
-    
-    await this.conversationManager.updateStatus(conversationId, 'idle');
+
+    await this.conversationManager.updateStatus(conversationId, "idle");
     await this.conversationManager.clearQueue(conversationId);
   }
 }

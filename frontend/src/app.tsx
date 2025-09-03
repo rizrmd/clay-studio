@@ -8,7 +8,7 @@ import { ClientDetailPage } from "./pages/ClientDetail";
 import { ConfigPage } from "./pages/ConfigPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { WipTablePage } from "./pages/WipTable";
-import { ValtioProvider } from "./providers/ValtioProvider";
+import { ValtioProvider } from "./lib/valtio-provider";
 import { SetupRoute } from "./components/auth/setup-route";
 import { ProtectedRoute } from "./components/auth/protected-route";
 import { AdminRoute } from "./components/auth/admin-route";

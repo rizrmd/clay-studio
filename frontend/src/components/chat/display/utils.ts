@@ -1,4 +1,4 @@
-import { API_BASE_URL } from "@/lib/url";
+import { API_BASE_URL } from "@/lib/utils/url";
 import { FileAttachment } from "./types";
 
 export const formatFileSize = (bytes: number) => {

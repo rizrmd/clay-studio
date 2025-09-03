@@ -3,7 +3,7 @@
 import React, { useState } from "react"
 import { useForm } from "react-hook-form"
 import { Plus, Settings, Trash2, Edit, Loader2, Check } from "lucide-react"
-import axios from "@/lib/axios"
+import axios from "@/lib/utils/axios"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"

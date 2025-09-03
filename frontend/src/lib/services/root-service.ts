@@ -1,4 +1,4 @@
-import axios from '@/lib/axios'
+import axios from '@/lib/utils/axios'
 
 export interface ClientAdminResponse {
   id: string

@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
-import { api } from "@/lib/api";
-import { setConversationContext, cacheProjectContext } from "../../store/chat-store";
+import { api } from "@/lib/utils/api";
+import { setConversationContext, cacheProjectContext } from "@/store/chat-store";
 
 /**
  * Hook for managing conversation-specific context using Valtio

@@ -320,13 +320,11 @@ export function Messages({
   // Show Virtuoso when it's ready
   useEffect(() => {
     if (isVirtuosoReady && isInitialized && !showVirtuoso) {
-      // Virtuoso has signaled it's ready, now we can show it
+      // Show immediately for instant experience
+      setShowVirtuoso(true);
+      // Scroll after next frame
       requestAnimationFrame(() => {
-        // Scroll to bottom after opacity transition
-        setTimeout(() => {
-          scrollToBottom("auto");
-          setShowVirtuoso(true);
-        }, 250);
+        scrollToBottom("auto");
       });
     }
   }, [isVirtuosoReady, isInitialized, showVirtuoso]);
@@ -380,24 +378,23 @@ export function Messages({
 
       // Always scroll to bottom for user messages (when user sends a message)
       if (lastMessage.role === "user") {
-        // Add a small delay to ensure the message is rendered
-        setTimeout(() => {
+        // Scroll immediately for instant feedback
+        requestAnimationFrame(() => {
           scrollToBottom("smooth");
-        }, 100); // Reduced delay for better responsiveness
+        });
         setShowNewMessageAlert(false);
       }
       // For assistant messages
       else if (lastMessage.role === "assistant") {
-        // Always scroll for assistant messages, but with shorter delay for responsiveness
-        setTimeout(() => {
-          if (isAtBottom) {
-            // Auto-scroll if user is at bottom - use smooth for better UX
+        // Scroll immediately if at bottom
+        if (isAtBottom) {
+          requestAnimationFrame(() => {
             scrollToBottom("smooth");
-          } else {
-            // Show alert if user has scrolled up
-            setShowNewMessageAlert(true);
-          }
-        }, 50); // Small delay to ensure rendering
+          });
+        } else {
+          // Show alert if user has scrolled up
+          setShowNewMessageAlert(true);
+        }
       }
       previousMessageCount.current = messages.length;
     } else if (isAtBottom && messages.length > 0) {
@@ -412,10 +409,10 @@ export function Messages({
     if (_isStreaming && isAtBottom && messages.length > 0) {
       const lastMessage = messages[messages.length - 1];
       if (lastMessage.role === "assistant") {
-        // Use a very short delay for streaming content updates
-        setTimeout(() => {
+        // Immediate scroll for streaming
+        requestAnimationFrame(() => {
           scrollToBottom("auto");
-        }, 10);
+        });
       }
     }
   }, [messages.map((m) => m.content).join(""), _isStreaming, isAtBottom]);
@@ -423,9 +420,9 @@ export function Messages({
   // Handle loading state changes (when loading indicator appears/disappears)
   useEffect(() => {
     if (isLoading && isAtBottom) {
-      setTimeout(() => {
+      requestAnimationFrame(() => {
         scrollToBottom("auto");
-      }, 50);
+      });
     }
   }, [isLoading, isAtBottom]);
 
@@ -480,33 +477,22 @@ export function Messages({
                   clearTimeout(scrollStabilityCheckRef.current);
                 }
 
-                // Monitor scroll height for stability
+                // Simplified stability check - much faster
                 const checkScrollStability = () => {
                   let _ref = ref as HTMLElement;
                   if (!_ref) return;
 
                   const currentHeight = _ref.scrollHeight;
 
-                  // If height hasn't changed, we might be stable
-                  if (
-                    currentHeight === scrollHeightRef.current &&
-                    currentHeight > 0
-                  ) {
-                    // Wait longer if there's async content like charts
-                    const waitTime = hasAsyncContent ? 300 : 100;
+                  // If we have any height, we're ready
+                  if (currentHeight > 0) {
+                    // Quick check for async content
+                    const waitTime = hasAsyncContent ? 100 : 20;
                     scrollStabilityCheckRef.current = setTimeout(() => {
-                      // Double-check the height is still the same
-                      if (_ref.scrollHeight === currentHeight) {
-                        setIsVirtuosoReady(true);
-                      } else {
-                        // Height changed, keep monitoring
-                        scrollHeightRef.current = _ref.scrollHeight;
-                        requestAnimationFrame(checkScrollStability);
-                      }
+                      setIsVirtuosoReady(true);
                     }, waitTime);
                   } else {
-                    // Height changed or is still 0, keep checking
-                    scrollHeightRef.current = currentHeight;
+                    // No height yet, check again
                     requestAnimationFrame(checkScrollStability);
                   }
                 };
@@ -557,7 +543,7 @@ export function Messages({
               // Add bottom padding for last item
               const bottomPadding =
                 index === allItems.length - 1 ? (
-                  <div style={{ height: "200px", minHeight: "200px" }} />
+                  <div style={{ height: "100px", minHeight: "100px" }} />
                 ) : null;
 
               // Loading indicator
@@ -629,19 +615,7 @@ export function Messages({
               <WelcomeScreen />
             ) : (
               <>
-                {previousConversationId.current === "new" ? (
-                  <div className="flex absolute items-center justify-center inset-0 z-10">
-                    <Button
-                      size="sm"
-                      disabled
-                      className="rounded-full shadow-lg animate-in fade-in slide-in-from-bottom-2 duration-300"
-                    >
-                      Creating new chat...
-                    </Button>
-                  </div>
-                ) : (
-                  <ChatSkeleton />
-                )}
+                <ChatSkeleton />
               </>
             )}
           </div>

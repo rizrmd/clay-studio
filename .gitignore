@@ -35,3 +35,5 @@ Thumbs.db
 
 .playwright-mcp
 .clients
+.aider*
+.env

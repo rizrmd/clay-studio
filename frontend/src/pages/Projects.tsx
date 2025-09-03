@@ -10,7 +10,7 @@ import {
   Trash2,
   MoreVertical,
 } from "lucide-react";
-import { api } from "@/lib/api";
+import { api } from "@/lib/utils/api";
 import { useValtioAuth } from "@/hooks/use-valtio-auth";
 import { AppHeader } from "@/components/layout/app-header";
 import { ProjectsSkeleton } from "@/components/projects/projects-skeleton";

@@ -3,3 +3,5 @@
   - Set up: `export DATABASE_URL=postgres://user:pass@localhost:5432/clay_studio`  
   - Before committing backend changes: `npm run sqlx:prepare` to update query cache
   - Check compilation: `npm run check` (works without DATABASE_URL using existing cache)
+- using useState considered code smell, use valtio instead.
+- file that has more than 1000 lines is code smell.

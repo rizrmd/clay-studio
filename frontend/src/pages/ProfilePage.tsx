@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Shield, User, AlertCircle, CheckCircle } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
-import axios from '@/lib/axios'
+import axios from '@/lib/utils/axios'
 import { AppHeader } from '@/components/layout/app-header'
 
 export function ProfilePage() {

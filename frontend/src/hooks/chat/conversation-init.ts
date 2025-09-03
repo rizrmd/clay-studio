@@ -6,7 +6,7 @@ import {
   setActiveConversation,
   setConversationAbortController,
   getConversationAbortController,
-} from "../../store/chat-store";
+} from "@/store/chat-store";
 import {
   loadConversationMessages,
   loadUploadedFiles,

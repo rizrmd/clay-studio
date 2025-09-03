@@ -1,5 +1,6 @@
 import { useSnapshot } from "valtio";
-import { store, getConversationAbortController } from "../../store/chat-store";
+import { conversationStore } from "@/store/chat/conversation-store";
+import { abortControllerManager } from "../../utils/chat/abort-controller-manager";
 
 /**
  * Hook to select and compute derived state from the store
@@ -8,18 +9,18 @@ export function useConversationStateSelector(
   conversationId?: string,
   currentConversationId: string = "new"
 ) {
-  const snapshot = useSnapshot(store);
+  const snapshot = useSnapshot(conversationStore);
   
   // Get conversation state from store
   const conversationState = snapshot.conversations[currentConversationId];
   const messages = conversationState?.messages || [];
-  const isLoadingMessages = conversationState?.isLoadingMessages || false;
+  const isLoading = conversationState?.status === 'loading';
   const error = conversationState?.error || null;
   const uploadedFiles = conversationState?.uploadedFiles || [];
   const forgottenAfterMessageId = conversationState?.forgottenAfterMessageId || null;
   const forgottenCount = conversationState?.forgottenCount || 0;
   const messageQueue = conversationState?.messageQueue || [];
-  const isProcessingQueue = conversationState?.isProcessingQueue || false;
+  const isProcessingQueue = conversationState?.status === 'processing_queue';
 
   // Determine returned values
   const activeConversationId = snapshot.activeConversationId;
@@ -52,22 +53,20 @@ export function useConversationStateSelector(
       ? activeConversationId
       : currentConversationId;
 
-  const effectiveIsLoading =
-    snapshot.conversations[effectiveConversationId]?.isLoading || false;
-  const effectiveIsStreaming =
-    snapshot.conversations[effectiveConversationId]?.isStreaming || false;
-  const effectiveActiveTools =
-    snapshot.conversations[effectiveConversationId]?.activeTools || [];
+  const effectiveState = snapshot.conversations[effectiveConversationId];
+  const effectiveIsLoading = effectiveState?.status === 'loading' || false;
+  const effectiveIsStreaming = effectiveState?.status === 'streaming' || false;
+  const effectiveActiveTools = effectiveState?.activeTools || [];
 
   const canStop = currentConversationId
-    ? getConversationAbortController(currentConversationId) !== null
+    ? abortControllerManager.has(currentConversationId)
     : false;
 
   return {
     // Basic state
     messages: returnedMessages,
     isLoading: effectiveIsLoading,
-    isLoadingMessages,
+    isLoadingMessages: isLoading,
     isStreaming: effectiveIsStreaming,
     error,
     uploadedFiles,

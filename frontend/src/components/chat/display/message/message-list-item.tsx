@@ -1,4 +1,3 @@
-import { Badge } from "@/components/ui/badge";
 import { FileAttachments } from "./file-attachments";
 import { getToolNamesFromMessage } from "@/types/chat";
 import { Button } from "@/components/ui/button";
@@ -19,7 +18,6 @@ import { cn } from "@/lib/utils";
 import { css } from "goober";
 import "github-markdown-css/github-markdown-light.css";
 import {
-  Clock,
   Copy,
   MoreVertical,
   Send,
@@ -83,7 +81,8 @@ export const MessageListItem = memo(
       if (message.role === "user") return false; // User messages always stay at 70%
 
       // Ensure content is always a string
-      const content = typeof message.content === 'string' ? message.content : '';
+      const content =
+        typeof message.content === "string" ? message.content : "";
       const contentLength = content.length;
 
       // Check for indicators of large/complex content
@@ -121,7 +120,6 @@ export const MessageListItem = memo(
 
     // Find if there's a response to this interaction anywhere in the subsequent messages
     const findInteractionResponse = () => {
-
       if (
         !message.tool_usages?.some(
           (u) => u.tool_name === "mcp__interaction__ask_user"
@@ -151,30 +149,17 @@ export const MessageListItem = memo(
           typeof output === "object" && output.text ? output.text : output;
         const match = text.match(/"interaction_id":\s*"([^"]+)"/);
         interactionId = match?.[1];
-        console.log("Extracted interaction ID:", interactionId);
       } catch (e) {
-        console.log("Error extracting interaction ID:", e);
         return { hasResponse: false, response: undefined };
       }
 
       if (!interactionId) {
-        console.log("No interaction ID found");
         return { hasResponse: false, response: undefined };
       }
-
-      console.log(
-        "Looking for responses in",
-        allMessages.length - messageIndex - 1,
-        "subsequent messages"
-      );
 
       // Look for a subsequent assistant message containing response to this interaction
       for (let i = messageIndex + 1; i < allMessages.length; i++) {
         const futureMessage = allMessages[i];
-        console.log(`Checking message ${i}:`, {
-          role: futureMessage.role,
-          content: futureMessage.content?.substring(0, 100),
-        });
 
         if (
           futureMessage.role === "system" &&
@@ -185,12 +170,10 @@ export const MessageListItem = memo(
           const responseMatch = futureMessage.content.match(
             /User response to interaction [^:]+:\s*\n?"([^"]+)"/
           );
-          console.log("Found response:", responseMatch?.[1]);
           return { hasResponse: true, response: responseMatch?.[1] };
         }
       }
 
-      console.log("No response found for interaction", interactionId);
       return { hasResponse: false, response: undefined };
     };
 
@@ -229,7 +212,7 @@ export const MessageListItem = memo(
               className={cn(
                 "flex flex-col gap-1 min-w-0",
                 message.role === "user"
-                  ? "max-w-[70%]"
+                  ? cn("max-w-[70%]")
                   : shouldUseFullWidth
                   ? css`
                       width: calc(100% - 30px) !important;
@@ -238,20 +221,11 @@ export const MessageListItem = memo(
                   : "max-w-[70%]"
               )}
             >
-              {/* Queue indicator badge */}
-              {isQueued && (
-                <div className="flex items-center gap-2 mb-1">
-                  <Badge variant="outline" className="text-xs">
-                    <Clock className="h-3 w-3 mr-1" />
-                    Queued #{message.queuePosition}
-                  </Badge>
-                </div>
-              )}
               {/* Only show message box if there's actual content or it's a user message */}
               {(message.content?.trim() || message.role === "user") && (
                 <div
                   className={cn(
-                    "rounded-lg px-0 py-3 text-sm overflow-hidden",
+                    "max-w-[350px] lg:max-w-[450px] rounded-lg px-0 py-3 text-sm overflow-hidden",
                     message.role === "user" && !isQueued
                       ? "bg-primary text-background"
                       : message.role === "user" && isQueued
@@ -429,7 +403,7 @@ export const MessageListItem = memo(
                 <div
                   className={cn(
                     (message.content?.trim() || message.role === "user") &&
-                      "mt-2 ",
+                      "mt-2",
                     "space-y-2"
                   )}
                 >

@@ -102,8 +102,25 @@ pub async fn handle_prompt_stream(
         // Prepare query options
         let options = QueryOptions {
             max_turns: prompt_request.max_turns,
-            allowed_tools: None,
-            permission_mode: None,
+            allowed_tools: Some(vec![
+                // Data Analysis Tools
+                "mcp__data-analysis__datasource_list".to_string(),
+                "mcp__data-analysis__datasource_detail".to_string(),
+                "mcp__data-analysis__datasource_add".to_string(),
+                "mcp__data-analysis__datasource_remove".to_string(),
+                "mcp__data-analysis__datasource_update".to_string(),
+                "mcp__data-analysis__datasource_test".to_string(),
+                "mcp__data-analysis__datasource_inspect".to_string(),
+                "mcp__data-analysis__data_query".to_string(),
+                "mcp__data-analysis__schema_stats".to_string(),
+                "mcp__data-analysis__schema_search".to_string(),
+                "mcp__data-analysis__schema_get".to_string(),
+                // Interaction Tools
+                "mcp__interaction__ask_user".to_string(),
+                "mcp__interaction__show_table".to_string(),
+                "mcp__interaction__show_chart".to_string(),
+            ]),
+            permission_mode: Some("relaxed".to_string()),
             resume_session_id: None,
             output_format: Some("stream-json".to_string()),
         };

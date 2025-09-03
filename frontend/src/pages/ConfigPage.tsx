@@ -1,7 +1,7 @@
 import { useValtioAuth } from "@/hooks/use-valtio-auth";
 import { Navigate } from "react-router-dom";
 import { useState, useEffect } from "react";
-import api from "@/lib/api";
+import api from "@/lib/utils/api";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AppHeader } from "@/components/layout/app-header";
 import { DomainManagement } from "@/components/root/domain-management";
@@ -37,7 +37,6 @@ export function ConfigPage() {
   const fetchConfig = async () => {
     try {
       const response = await api.get("/admin/config");
-      console.log(response);
       
       setConfig({
         ...response,

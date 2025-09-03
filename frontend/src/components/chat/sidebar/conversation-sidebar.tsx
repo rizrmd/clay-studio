@@ -1,9 +1,8 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useSnapshot } from "valtio";
 import {
   ChevronDown,
-  Plus,
   PanelLeftClose,
   PanelLeftOpen,
   MessageSquare,
@@ -29,23 +28,24 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { api } from "@/lib/api";
+import { api } from "@/lib/utils/api";
 import { cn } from "@/lib/utils";
-import { logger } from "@/lib/logger";
+import { logger } from "@/lib/utils/logger";
 import { useValtioAuth } from "@/hooks/use-valtio-auth";
-import { ClaudeMdModal } from "./claude-md-modal";
-import { store, cleanupDeletedConversation } from "@/store/chat-store";
 import { ConversationManager } from "@/store/chat/conversation-manager";
 import { conversationStore } from "@/store/chat/conversation-store";
-import { chatEventBus } from "@/services/chat/event-bus";
+import { sidebarStore, sidebarActions } from "@/store/sidebar-store";
+import { chatEventBus } from "@/lib/services/chat/event-bus";
+import { MessageCacheService } from "@/lib/services/chat/message-cache";
 
 interface Conversation {
   id: string;
   project_id: string;
-  title: string | null;
+  title: string;
   message_count: number;
   created_at: string;
   updated_at: string;
+  is_title_manually_set?: boolean;
 }
 
 interface ConversationSidebarProps {
@@ -63,33 +63,18 @@ export function ConversationSidebar({
   currentConversationId,
   onConversationSelect: _onConversationSelect,
 }: ConversationSidebarProps) {
-  // Get the active conversation ID from store to handle /new -> real ID transition
-  const actualConversationId =
-    currentConversationId === "new" && store.activeConversationId
-      ? store.activeConversationId
-      : currentConversationId;
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [renameDialogOpen, setRenameDialogOpen] = useState(false);
-  const [renamingConversation, setRenamingConversation] =
-    useState<Conversation | null>(null);
-  const [newTitle, setNewTitle] = useState("");
-  const [claudeMdModalOpen, setClaudeMdModalOpen] = useState(false);
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [recentlyUpdatedConversations, setRecentlyUpdatedConversations] =
-    useState<Set<string>>(new Set());
+  const sidebarSnapshot = useSnapshot(sidebarStore);
+  const conversationStoreSnapshot = useSnapshot(conversationStore);
+  
+  const actualConversationId = currentConversationId;
   const { isAuthenticated, isSetupComplete, user, logout } = useValtioAuth();
   const navigate = useNavigate();
   const fetchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastFetchTimeRef = useRef<number>(0);
   const lastMessageCountRef = useRef<Record<string, number>>({});
+  const messageCache = MessageCacheService.getInstance();
+  const prefetchedConversations = useRef<Set<string>>(new Set());
 
-  // Track loading state for conversations
-  const snapshot = useSnapshot(store.conversations);
-  
-  // Track loading state from conversationStore for proper streaming detection
-  const conversationStoreSnapshot = useSnapshot(conversationStore.conversations);
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -103,25 +88,33 @@ export function ConversationSidebar({
   // Track new messages in non-active conversations
   useEffect(() => {
     // Check all conversations for new messages
-    Object.keys(conversationStoreSnapshot).forEach(conversationId => {
-      const state = conversationStoreSnapshot[conversationId];
+    Object.keys(conversationStoreSnapshot.conversations).forEach(conversationId => {
+      const state = conversationStoreSnapshot.conversations[conversationId];
       if (!state) return;
       
       // Count messages in this conversation
       const currentMessageCount = state.messages?.length || 0;
       const previousMessageCount = lastMessageCountRef.current[conversationId];
       
-      // Only mark as updated if we've seen this conversation before (not undefined)
-      // and it has new messages
+      // Only mark as updated if:
+      // 1. We've seen this conversation before (not undefined)
+      // 2. It's not the active conversation
+      // 3. It has new messages
+      // 4. The conversation is currently streaming (real-time update) or
+      //    the last message is recent (within last 10 seconds)
       if (previousMessageCount !== undefined && 
           conversationId !== actualConversationId && 
           currentMessageCount > previousMessageCount) {
-        logger.info('New message detected in conversation', conversationId);
-        setRecentlyUpdatedConversations(prev => {
-          const newSet = new Set(prev);
-          newSet.add(conversationId);
-          return newSet;
-        });
+        
+        // Check if this is a real-time update or just loading old messages
+        const lastMessage = state.messages[state.messages.length - 1];
+        const isRealTimeUpdate = state.status === 'streaming' || 
+          (lastMessage && lastMessage.createdAt &&
+           new Date().getTime() - new Date(lastMessage.createdAt).getTime() < 10000);
+        
+        if (isRealTimeUpdate) {
+          sidebarActions.addRecentlyUpdated(conversationId);
+        }
       }
       
       // Update the count
@@ -133,7 +126,7 @@ export function ConversationSidebar({
   useEffect(() => {
     const handleResize = () => {
       if (window.innerWidth >= 768) {
-        setIsMobileMenuOpen(false);
+        sidebarActions.setMobileMenuOpen(false);
       }
     };
     window.addEventListener("resize", handleResize);
@@ -168,11 +161,11 @@ export function ConversationSidebar({
     // Record the fetch time
     lastFetchTimeRef.current = Date.now();
 
-    // Only show loading state if requested and we don't have conversations yet
-    if (showLoadingState && conversations.length === 0) {
-      setLoading(true);
+    // Only show sidebarSnapshot.loading state if requested and we don't have conversations yet
+    if (showLoadingState && sidebarSnapshot.conversations.length === 0) {
+      sidebarActions.setLoading(true);
     }
-    setError(null);
+    sidebarActions.setError(null);
     try {
       const url = `/conversations?project_id=${encodeURIComponent(
         projectId
@@ -187,22 +180,21 @@ export function ConversationSidebar({
       }
 
       const data = await response.json();
-      setConversations(data);
+      sidebarActions.setConversations(data);
 
       // Validate current conversation ID against fetched conversations
       // Only redirect if we have an invalid conversation ID and there are existing conversations
       // OR if there are no conversations at all (empty state should go to /new)
       if (
         currentConversationId &&
-        currentConversationId !== "new" &&
         !data.find((conv: Conversation) => conv.id === currentConversationId)
       ) {
         // Current conversation ID doesn't exist in the list, redirect to new
-        navigate(`/chat/${projectId}/new`, { replace: true });
+        navigate("/projects", { replace: true });
       }
     } catch (err) {
       if (showLoadingState) {
-        setError(
+        sidebarActions.setError(
           err instanceof Error ? err.message : "Failed to load conversations"
         );
       } else {
@@ -213,15 +205,15 @@ export function ConversationSidebar({
       }
     } finally {
       if (showLoadingState) {
-        setLoading(false);
+        sidebarActions.setLoading(false);
       }
     }
-  }, [projectId, isAuthenticated, isSetupComplete, currentConversationId, navigate, conversations.length]);
+  }, [projectId, isAuthenticated, isSetupComplete, currentConversationId, navigate, sidebarSnapshot.conversations.length]);
 
   // Initial fetch when component mounts or auth changes
   useEffect(() => {
     if (!projectId || !isAuthenticated || !isSetupComplete) return;
-    fetchConversations(true, true); // true = show loading, true = force immediate
+    fetchConversations(true, true); // true = show sidebarSnapshot.loading, true = force immediate
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, isAuthenticated, isSetupComplete]); // Removed currentConversationId from deps to prevent refetch on navigation
 
@@ -232,14 +224,9 @@ export function ConversationSidebar({
     // Listen for conversation creation events to refresh the list
     const handleConversationCreated = (event: CustomEvent) => {
       if (event.detail?.projectId === projectId) {
-        logger.info(
-          "ConversationSidebar: New conversation created, refreshing list",
-          event.detail
-        );
-
         // Just fetch the real data from server - don't add placeholder
         // This ensures we get the correct count and avoid race conditions
-        fetchConversations(false); // false = no loading state for background refresh
+        fetchConversations(false); // false = no sidebarSnapshot.loading state for background refresh
       }
     };
 
@@ -249,24 +236,16 @@ export function ConversationSidebar({
         event.detail?.projectId === projectId &&
         event.detail?.conversationId
       ) {
-        logger.info(
-          "ConversationSidebar: Message sent, updating conversation list"
-        );
-
-        // Add to recently updated set (no auto-removal, will be removed on click)
-        setRecentlyUpdatedConversations(
-          (prev) => new Set([...prev, event.detail.conversationId])
-        );
+        // Add to recently updated set
+        sidebarActions.addRecentlyUpdated(event.detail.conversationId);
 
         // Update the message count for the specific conversation
-        setConversations((prevConversations) =>
-          prevConversations
-            .map((conv) => {
-              if (conv.id === event.detail.conversationId) {
-                return {
-                  ...conv,
-                  message_count: conv.message_count + 2, // +1 for user message, +1 for assistant response
-                  updated_at: new Date().toISOString(),
+        const conversations = sidebarSnapshot.conversations.map((conv) => {
+          if (conv.id === event.detail.conversationId) {
+            return {
+              ...conv,
+              message_count: conv.message_count + 2, // +1 for user message, +1 for assistant response
+              updated_at: new Date().toISOString(),
                 };
               }
               return conv;
@@ -275,27 +254,21 @@ export function ConversationSidebar({
               (a, b) =>
                 new Date(b.created_at).getTime() -
                 new Date(a.created_at).getTime()
-            )
-        );
+            );
+        sidebarActions.setConversations(conversations);
       }
     };
 
     // Listen for streaming events (no need to update state, valtio handles it)
     const handleStreamingStarted = (event: CustomEvent) => {
       if (event.detail?.projectId === projectId) {
-        logger.debug(
-          "ConversationSidebar: Streaming started for",
-          event.detail.conversationId
-        );
+        // Streaming started
       }
     };
 
     const handleStreamingStopped = (event: CustomEvent) => {
       if (event.detail?.projectId === projectId) {
-        logger.debug(
-          "ConversationSidebar: Streaming stopped for",
-          event.detail.conversationId
-        );
+        // Streaming stopped
       }
     };
 
@@ -338,34 +311,14 @@ export function ConversationSidebar({
   useEffect(() => {
     const unsubscribe = chatEventBus.subscribe(
       'CONVERSATION_TITLE_UPDATED',
-      async (event) => {
+      async (event: any) => {
         if (event.type === 'CONVERSATION_TITLE_UPDATED') {
-          logger.info('ConversationSidebar: Title updated for conversation', event.conversationId, 'to', event.title);
           
           // Update the conversation in the local state
-          setConversations((prev) => 
-            prev.map((conv) => 
-              conv.id === event.conversationId 
-                ? { ...conv, title: event.title }
-                : conv
-            )
-          );
+          sidebarActions.updateConversation(event.conversationId, { title: event.title });
           
           // Add to recently updated set for visual feedback
-          setRecentlyUpdatedConversations((prev) => {
-            const newSet = new Set(prev);
-            newSet.add(event.conversationId);
-            return newSet;
-          });
-          
-          // Remove from recently updated after a delay
-          setTimeout(() => {
-            setRecentlyUpdatedConversations((prev) => {
-              const newSet = new Set(prev);
-              newSet.delete(event.conversationId);
-              return newSet;
-            });
-          }, 2000);
+          sidebarActions.addRecentlyUpdated(event.conversationId);
         }
       }
     );
@@ -383,16 +336,12 @@ export function ConversationSidebar({
     e.preventDefault();
 
     // Remove from recently updated set when clicked
-    setRecentlyUpdatedConversations((prev) => {
-      const newSet = new Set(prev);
-      newSet.delete(conversationId);
-      return newSet;
-    });
+    sidebarStore.recentlyUpdatedConversations.delete(conversationId);
 
     // Don't navigate if already on this conversation
     if (actualConversationId === conversationId) {
       // Close mobile menu if open
-      setIsMobileMenuOpen(false);
+      sidebarActions.setMobileMenuOpen(false);
       return;
     }
 
@@ -400,8 +349,30 @@ export function ConversationSidebar({
     navigate(`/chat/${projectId}/${conversationId}`);
 
     // Close mobile menu after navigation
-    setIsMobileMenuOpen(false);
+    sidebarActions.setMobileMenuOpen(false);
   };
+
+  // Prefetch conversation on hover for instant switching
+  const handleConversationHover = useCallback((conversationId: string) => {
+    // Skip if already prefetched or if it's the current conversation
+    if (prefetchedConversations.current.has(conversationId) || 
+        conversationId === actualConversationId) {
+      return;
+    }
+
+    // Check if already cached
+    const cached = messageCache.getCachedMessages(conversationId);
+    if (cached && cached.length > 0) {
+      // Already cached, just mark as prefetched
+      prefetchedConversations.current.add(conversationId);
+      return;
+    }
+
+    // Mark as prefetched to avoid duplicate requests
+    prefetchedConversations.current.add(conversationId);
+    logger.debug(`Prefetch hover for conversation ${conversationId}`);
+    // Actual prefetching will be triggered by WebSocket subscription when clicked
+  }, [actualConversationId, messageCache]);
 
   // Handle logout
   const handleLogout = async () => {
@@ -422,18 +393,18 @@ export function ConversationSidebar({
 
   // Handle conversation rename
   const handleRenameConversation = async () => {
-    if (!renamingConversation || !newTitle.trim()) return;
+    if (!sidebarSnapshot.renamingConversation || !sidebarSnapshot.newTitle.trim()) return;
 
     try {
       const response = await api.fetchStream(
-        `/conversations/${renamingConversation.id}`,
+        `/conversations/${sidebarSnapshot.renamingConversation.id}`,
         {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            title: newTitle.trim(),
+            title: sidebarSnapshot.newTitle.trim(),
           }),
         }
       );
@@ -445,18 +416,15 @@ export function ConversationSidebar({
       const updatedConversation = await response.json();
 
       // Update local state
-      setConversations((convs) =>
-        convs.map((c) =>
-          c.id === renamingConversation.id ? updatedConversation : c
-        )
+      const updatedConversations = sidebarSnapshot.conversations.map((c) =>
+        c.id === sidebarSnapshot.renamingConversation!.id ? updatedConversation : c
       );
+      sidebarActions.setConversations(updatedConversations);
 
       // Close dialog and reset state
-      setRenameDialogOpen(false);
-      setRenamingConversation(null);
-      setNewTitle("");
+      sidebarActions.closeRenameDialog();
     } catch (err) {
-      setError("Failed to rename conversation");
+      sidebarActions.setError("Failed to rename conversation");
     }
   };
 
@@ -485,12 +453,12 @@ export function ConversationSidebar({
       }
 
       // Update local state
-      setConversations((convs) =>
-        convs.filter((c) => c.id !== conversation.id)
-      );
+      sidebarActions.removeConversation(conversation.id);
 
       // Clean up the deleted conversation from store
-      cleanupDeletedConversation(conversation.id);
+      if (conversationStoreSnapshot.conversations[conversation.id]) {
+        ConversationManager.getInstance().clearConversation(conversation.id);
+      }
 
       // Clear from localStorage if this was the last viewed conversation
       const lastConversationKey = `last_conversation_${projectId}`;
@@ -502,27 +470,25 @@ export function ConversationSidebar({
       // If we're currently viewing this conversation, navigate away
       if (actualConversationId === conversation.id) {
         // Navigate to new conversation
-        navigate(`/chat/${projectId}/new`);
+        navigate("/projects");
       }
     } catch (err) {
-      setError("Failed to delete conversation");
+      sidebarActions.setError("Failed to delete conversation");
     }
   };
 
   // Open rename dialog
   const openRenameDialog = (conversation: Conversation) => {
-    setRenamingConversation(conversation);
-    setNewTitle(conversation.title || "");
-    setRenameDialogOpen(true);
+    sidebarActions.openRenameDialog(conversation);
   };
 
   return (
     <>
       {/* Mobile overlay */}
-      {isMobileMenuOpen && (
+      {sidebarSnapshot.isMobileMenuOpen && (
         <div
           className="fixed inset-0 bg-black/50 z-40 md:hidden"
-          onClick={() => setIsMobileMenuOpen(false)}
+          onClick={() => sidebarActions.setMobileMenuOpen(false)}
         />
       )}
 
@@ -534,8 +500,8 @@ export function ConversationSidebar({
           isCollapsed ? "md:w-12" : "md:max-w-64 md:min-w-64",
           // Mobile: full height overlay or hidden
           "fixed md:relative inset-y-0 left-0 z-50",
-          isMobileMenuOpen ? "w-64" : "w-0 md:w-auto",
-          !isMobileMenuOpen && "overflow-hidden md:overflow-visible"
+          sidebarSnapshot.isMobileMenuOpen ? "w-64" : "w-0 md:w-auto",
+          !sidebarSnapshot.isMobileMenuOpen && "overflow-hidden md:overflow-visible"
         )}
       >
         {/* Header with back to projects and new chat */}
@@ -548,7 +514,7 @@ export function ConversationSidebar({
                 // Always navigate back to projects
                 navigate("/projects");
                 // Also close mobile menu if open
-                setIsMobileMenuOpen(false);
+                sidebarActions.setMobileMenuOpen(false);
               }}
               className="pl-1 gap-1 h-[25px] border border-transparent hover:border-gray-200"
             >
@@ -556,65 +522,13 @@ export function ConversationSidebar({
               <span className="text-xs">Projects</span>
             </Button>
 
-            {(!isCollapsed || isMobileMenuOpen) && projectId && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="pl-1 gap-1 h-[25px] border border-transparent hover:border-gray-200"
-                onClick={async () => {
-                  const conversationManager = ConversationManager.getInstance();
-                  
-                  // Get the current active conversation ID from both stores
-                  const previousActiveId = store.activeConversationId || conversationStore.activeConversationId;
-                  
-                  // Clear active conversation IDs in both stores
-                  store.activeConversationId = null;
-                  conversationStore.activeConversationId = null;
-
-                  // Clear any existing 'new' conversation state in both stores
-                  if (store.conversations.new) {
-                    delete store.conversations.new;
-                    delete store.inputs.new;
-                  }
-                  if (conversationStore.conversations.new) {
-                    await conversationManager.clearConversation('new');
-                  }
-
-                  // If we were on a newly created conversation (that now has a real ID), 
-                  // clear its state too to prevent message bleeding
-                  if (previousActiveId && previousActiveId !== 'new') {
-                    // Clear the conversation state in old store
-                    if (store.conversations[previousActiveId]) {
-                      store.conversations[previousActiveId].messages = [];
-                      store.conversations[previousActiveId].isStreaming = false;
-                      store.conversations[previousActiveId].isLoading = false;
-                      store.conversations[previousActiveId].error = null;
-                    }
-                    
-                    // Clear the conversation state in new store
-                    if (conversationStore.conversations[previousActiveId]) {
-                      await conversationManager.clearConversation(previousActiveId);
-                    }
-                  }
-
-                  // Navigate to new chat
-                  navigate(`/chat/${projectId}/new`);
-                  // Close mobile menu after navigation
-                  setIsMobileMenuOpen(false);
-                }}
-                type="button"
-              >
-                <Plus className="h-4 w-4" />
-                New Chat
-              </Button>
-            )}
           </div>
         </div>
 
         {/* Conversations area */}
-        {(!isCollapsed || isMobileMenuOpen) && (
+        {(!isCollapsed || sidebarSnapshot.isMobileMenuOpen) && (
           <div className="flex-1 overflow-y-auto relative">
-            {loading ? (
+            {sidebarSnapshot.loading ? (
               <div className="p-4">
                 <div className="animate-pulse">
                   <div className="h-4 bg-gray-200 rounded mb-2"></div>
@@ -622,18 +536,18 @@ export function ConversationSidebar({
                   <div className="h-4 bg-gray-200 rounded"></div>
                 </div>
               </div>
-            ) : error ? (
+            ) : sidebarSnapshot.error ? (
               <div className="p-4">
-                <p className="text-sm text-red-500">{error}</p>
+                <p className="text-sm text-red-500">{sidebarSnapshot.error}</p>
               </div>
-            ) : conversations.length === 0 ? (
+            ) : sidebarSnapshot.conversations.length === 0 ? (
               <div className="p-4">
                 <p className="text-xs text-muted-foreground">Ummm... </p>
                 <p className="text-xs text-muted-foreground">Let's talk ? </p>
               </div>
             ) : (
               <div className="p-2 min-w-[130px] absolute inset-0 ">
-                {conversations.map((conversation) => (
+                {sidebarSnapshot.conversations.map((conversation) => (
                   <div
                     key={conversation.id}
                     className={cn(
@@ -642,6 +556,7 @@ export function ConversationSidebar({
                         "bg-muted border-blue-700/30"
                     )}
                     onClick={(e) => handleConversationClick(conversation.id, e)}
+                    onMouseEnter={() => handleConversationHover(conversation.id)}
                   >
                     <div
                       className={cn(
@@ -650,16 +565,15 @@ export function ConversationSidebar({
                     >
                       <div className="relative flex flex-col items-center pt-1">
                         {/* Check streaming state from conversationStore */}
-                        {conversationStoreSnapshot[conversation.id]?.status === 'streaming' ? (
+                        {conversationStoreSnapshot.conversations[conversation.id]?.status === 'streaming' ? (
                           <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />
-                        ) : snapshot[conversation.id]?.isLoading ||
-                        snapshot[conversation.id]?.isStreaming ? (
+                        ) : conversationStoreSnapshot.conversations[conversation.id]?.status === 'loading' ? (
                           <Loader2 className="h-4 w-4 text-muted-foreground animate-spin" />
                         ) : (
                           <MessageSquare
                             className={cn(
                               "h-4 w-4",
-                              recentlyUpdatedConversations.has(conversation.id) && 
+                              sidebarSnapshot.recentlyUpdatedConversations.has(conversation.id) && 
                               actualConversationId !== conversation.id
                                 ? "text-green-500"
                                 : "text-muted-foreground"
@@ -667,7 +581,7 @@ export function ConversationSidebar({
                           />
                         )}
                         {/* Green notification dot for new messages in non-active conversations */}
-                        {recentlyUpdatedConversations.has(conversation.id) && 
+                        {sidebarSnapshot.recentlyUpdatedConversations.has(conversation.id) && 
                          actualConversationId !== conversation.id && (
                           <div className="h-[6px] w-[6px] rounded-full bg-green-500 mt-1 animate-pulse" />
                         )}
@@ -676,7 +590,7 @@ export function ConversationSidebar({
                         <p
                           className={cn(
                             "text-sm font-medium truncate",
-                            recentlyUpdatedConversations.has(conversation.id) &&
+                            sidebarSnapshot.recentlyUpdatedConversations.has(conversation.id) &&
                             actualConversationId !== conversation.id &&
                               "text-green-500 font-semibold"
                           )}
@@ -745,9 +659,9 @@ export function ConversationSidebar({
         )}
 
         {/* Bottom user section - visible on desktop and when mobile menu is open */}
-        {(!isCollapsed || isMobileMenuOpen) && (
+        {(!isCollapsed || sidebarSnapshot.isMobileMenuOpen) && (
           <div className="border-t p-3 relative z-10">
-            {isCollapsed && !isMobileMenuOpen ? (
+            {isCollapsed && !sidebarSnapshot.isMobileMenuOpen ? (
             <button
               className="h-8 w-8 p-0 cursor-pointer hover:bg-accent rounded-md flex items-center justify-center pointer-events-auto"
               onClick={handleLogout}
@@ -792,17 +706,9 @@ export function ConversationSidebar({
           </div>
         )}
 
-        {/* CLAUDE.md Modal */}
-        {projectId && (
-          <ClaudeMdModal
-            projectId={projectId}
-            isOpen={claudeMdModalOpen}
-            onOpenChange={setClaudeMdModalOpen}
-          />
-        )}
 
         {/* Rename Dialog */}
-        <Dialog open={renameDialogOpen} onOpenChange={setRenameDialogOpen}>
+        <Dialog open={sidebarSnapshot.renameDialogOpen} onOpenChange={(open) => !open && sidebarActions.closeRenameDialog()}>
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Rename Conversation</DialogTitle>
@@ -814,8 +720,8 @@ export function ConversationSidebar({
                 </Label>
                 <Input
                   id="title"
-                  value={newTitle}
-                  onChange={(e) => setNewTitle(e.target.value)}
+                  value={sidebarSnapshot.newTitle}
+                  onChange={(e) => sidebarActions.setNewTitle(e.target.value)}
                   className="col-span-3"
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
@@ -831,14 +737,14 @@ export function ConversationSidebar({
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setRenameDialogOpen(false)}
+                onClick={() => sidebarActions.closeRenameDialog()}
               >
                 Cancel
               </Button>
               <Button
                 type="button"
                 onClick={handleRenameConversation}
-                disabled={!newTitle.trim()}
+                disabled={!sidebarSnapshot.newTitle.trim()}
               >
                 Save
               </Button>
@@ -851,10 +757,10 @@ export function ConversationSidebar({
       <Button
         variant="ghost"
         size="sm"
-        onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+        onClick={() => sidebarActions.toggleMobileMenu()}
         className="fixed top-4 left-4 z-40 h-10 w-10 p-0 md:hidden rounded-full shadow-lg bg-background border"
       >
-        {isMobileMenuOpen ? (
+        {sidebarSnapshot.isMobileMenuOpen ? (
           <PanelLeftClose className="h-5 w-5" />
         ) : (
           <PanelLeftOpen className="h-5 w-5" />

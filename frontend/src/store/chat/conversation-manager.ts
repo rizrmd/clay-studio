@@ -1,11 +1,16 @@
-import { snapshot } from 'valtio';
-import { logger } from '@/lib/logger';
-import { conversationStore, getOrCreateConversationState } from './conversation-store';
-import { chatEventBus } from '../../services/chat/event-bus';
-import { abortControllerManager } from '../../utils/chat/abort-controller-manager';
-import type { ConversationState, QueuedMessage, ConversationStatus } from './types';
-import type { Message } from '../../types/chat';
-import { CONVERSATION_CACHE_SIZE } from './constants';
+import { snapshot } from "valtio";
+import { logger } from "@/lib/utils/logger";
+import {
+  conversationStore,
+  getOrCreateConversationState,
+} from "./conversation-store";
+import { chatEventBus } from "@/lib/services/chat/event-bus";
+import type {
+  ConversationState,
+  QueuedMessage,
+  ConversationStatus,
+} from "./types";
+import type { Message } from "../../types/chat";
 
 export class ConversationManager {
   private static instance: ConversationManager;
@@ -35,7 +40,9 @@ export class ConversationManager {
 
     // Create new operation promise
     let resolve: () => void;
-    const opPromise = new Promise<void>((res) => { resolve = res; });
+    const opPromise = new Promise<void>((res) => {
+      resolve = res;
+    });
     this.operationLocks.set(conversationId, opPromise);
 
     try {
@@ -51,7 +58,7 @@ export class ConversationManager {
   async switchConversation(newConversationId: string): Promise<void> {
     return this.atomicOperation(newConversationId, async () => {
       const previousId = conversationStore.activeConversationId;
-      
+
       // Don't switch if already active
       if (previousId === newConversationId) {
         return;
@@ -64,43 +71,53 @@ export class ConversationManager {
 
       // Set new active conversation
       conversationStore.activeConversationId = newConversationId;
-      
-      // Initialize new conversation state if needed, but ensure it starts fresh
+
+      // Initialize new conversation state if needed
       const state = getOrCreateConversationState(newConversationId);
-      
+
       // IMPORTANT: Clear any stale messages if this is a new conversation
       // This prevents message bleeding from other conversations
-      if (newConversationId === 'new' && state.messages.length > 0) {
-        logger.warn('ConversationManager: Clearing stale messages from "new" conversation');
+      if (newConversationId === "new" && state.messages.length > 0) {
+        logger.warn(
+          'ConversationManager: Clearing stale messages from "new" conversation'
+        );
         state.messages = [];
-        state.status = 'idle';
+        state.status = "idle";
         state.error = null;
+      } else if (newConversationId !== "new") {
+        // For existing conversations, try to load from cache immediately
+        const { MessageCacheService } = await import('@/lib/services/chat/message-cache');
+        const messageCache = MessageCacheService.getInstance();
+        const cachedMessages = messageCache.getCachedMessages(newConversationId);
+        
+        if (cachedMessages && cachedMessages.length > 0 && state.messages.length === 0) {
+          // Load cached messages for instant display
+          state.messages = cachedMessages;
+          state.status = "idle";
+          logger.debug(`ConversationManager: Loaded ${cachedMessages.length} cached messages for ${newConversationId}`);
+        }
       }
 
       // Emit event
       await chatEventBus.emit({
-        type: 'CONVERSATION_SWITCHED',
+        type: "CONVERSATION_SWITCHED",
         from: previousId,
         to: newConversationId,
       });
-
-      // Clean up old conversations if cache is full
-      this.pruneConversationCache();
     });
   }
 
   // Clean up conversation resources
   private async cleanupConversation(conversationId: string): Promise<void> {
     // Abort any ongoing requests
-    abortControllerManager.abort(conversationId);
 
     const state = conversationStore.conversations[conversationId];
     if (!state) return;
 
     // Clear active tools and pending operations
     state.activeTools = [];
-    state.status = 'idle';
-    
+    state.status = "idle";
+
     // Don't clear messages or queue - keep them for when user returns
   }
 
@@ -110,12 +127,9 @@ export class ConversationManager {
       const state = conversationStore.conversations[conversationId];
       if (!state) return;
 
-      // Abort any ongoing requests
-      abortControllerManager.abort(conversationId);
-
       // Clear all state
       state.messages = [];
-      state.status = 'idle';
+      state.status = "idle";
       state.error = null;
       state.uploadedFiles = [];
       state.forgottenAfterMessageId = null;
@@ -128,7 +142,10 @@ export class ConversationManager {
   }
 
   // Update conversation status atomically
-  async updateStatus(conversationId: string, status: ConversationStatus): Promise<void> {
+  async updateStatus(
+    conversationId: string,
+    status: ConversationStatus
+  ): Promise<void> {
     return this.atomicOperation(conversationId, () => {
       const state = getOrCreateConversationState(conversationId);
       state.status = status;
@@ -141,9 +158,9 @@ export class ConversationManager {
   async addMessage(conversationId: string, message: Message): Promise<void> {
     return this.atomicOperation(conversationId, () => {
       const state = getOrCreateConversationState(conversationId);
-      
+
       // Check for duplicates
-      const exists = state.messages.some(m => m.id === message.id);
+      const exists = state.messages.some((m) => m.id === message.id);
       if (!exists) {
         state.messages.push(message);
         state.lastUpdated = Date.now();
@@ -153,18 +170,26 @@ export class ConversationManager {
   }
 
   // Helper function to update last assistant message (without atomic wrapper)
-  private updateLastAssistantMessageInternal(state: any, updates: Partial<Message>, conversationId: string): void {
+  private updateLastAssistantMessageInternal(
+    state: any,
+    updates: Partial<Message>,
+    conversationId: string
+  ): void {
     if (state.messages.length > 0) {
       // Find the last ASSISTANT message, not just the last message
       // This prevents accidentally overwriting user messages
       for (let i = state.messages.length - 1; i >= 0; i--) {
-        if (state.messages[i].role === 'assistant') {
+        if (state.messages[i].role === "assistant") {
           // CRITICAL SAFETY CHECK: Never update role field to prevent corruption
-          if (updates.role && updates.role !== 'assistant') {
-            logger.error('ConversationManager: Attempted to change assistant message role to', updates.role, '- blocking update');
+          if (updates.role && updates.role !== "assistant") {
+            logger.error(
+              "ConversationManager: Attempted to change assistant message role to",
+              updates.role,
+              "- blocking update"
+            );
             return;
           }
-          
+
           // Apply updates safely
           Object.assign(state.messages[i], updates);
           state.lastUpdated = Date.now();
@@ -172,39 +197,65 @@ export class ConversationManager {
           return;
         }
       }
-      
+
       // If no assistant message found, log a warning with message details for debugging
-      logger.warn('ConversationManager: No assistant message found to update in conversation', conversationId, 
-        'Messages:', state.messages.map((m: Message) => `${m.role}:${m.id.substring(0,8)}`).join(', '));
+      logger.warn(
+        "ConversationManager: No assistant message found to update in conversation",
+        conversationId,
+        "Messages:",
+        state.messages
+          .map((m: Message) => `${m.role}:${m.id.substring(0, 8)}`)
+          .join(", ")
+      );
     }
   }
 
   // Update message by ID atomically - ONLY updates ASSISTANT messages
-  async updateMessageById(conversationId: string, messageId: string, updates: Partial<Message>): Promise<void> {
+  async updateMessageById(
+    conversationId: string,
+    messageId: string,
+    updates: Partial<Message>
+  ): Promise<void> {
     return this.atomicOperation(conversationId, () => {
       const state = getOrCreateConversationState(conversationId);
-      
+
       // Find message by ID
-      const messageIndex = state.messages.findIndex(m => m.id === messageId);
+      const messageIndex = state.messages.findIndex((m) => m.id === messageId);
       if (messageIndex >= 0) {
         const message = state.messages[messageIndex];
-        
+
         // CRITICAL SAFETY CHECK: Only allow updating assistant messages
-        if (message.role !== 'assistant') {
-          logger.error('ConversationManager: Attempted to update non-assistant message', messageId, 'with role', message.role, '- blocking update');
+        if (message.role !== "assistant") {
+          logger.error(
+            "ConversationManager: Attempted to update non-assistant message",
+            messageId,
+            "with role",
+            message.role,
+            "- blocking update"
+          );
           return;
         }
-        
+
         // CRITICAL SAFETY CHECK: Never update role field to prevent corruption
-        if (updates.role && updates.role !== 'assistant') {
-          logger.error('ConversationManager: Attempted to change assistant message role to', updates.role, '- blocking update');
+        if (updates.role && updates.role !== "assistant") {
+          logger.error(
+            "ConversationManager: Attempted to change assistant message role to",
+            updates.role,
+            "- blocking update"
+          );
           return;
         }
         Object.assign(state.messages[messageIndex], updates);
         state.lastUpdated = Date.now();
         state.version++;
       } else {
-        logger.warn('ConversationManager: Message not found by ID', messageId, 'in conversation', conversationId, '- falling back to update last assistant message');
+        logger.warn(
+          "ConversationManager: Message not found by ID",
+          messageId,
+          "in conversation",
+          conversationId,
+          "- falling back to update last assistant message"
+        );
         // Fallback: Update the last assistant message instead
         // This handles the case where the target message was filtered out but we still want to apply the completion data
         this.updateLastAssistantMessageInternal(state, updates, conversationId);
@@ -213,7 +264,10 @@ export class ConversationManager {
   }
 
   // Update last message atomically - ONLY updates the last ASSISTANT message
-  async updateLastMessage(conversationId: string, updates: Partial<Message>): Promise<void> {
+  async updateLastMessage(
+    conversationId: string,
+    updates: Partial<Message>
+  ): Promise<void> {
     return this.atomicOperation(conversationId, () => {
       const state = getOrCreateConversationState(conversationId);
       this.updateLastAssistantMessageInternal(state, updates, conversationId);
@@ -221,11 +275,13 @@ export class ConversationManager {
   }
 
   // Replace all messages (for loading from API)
-  async setMessages(conversationId: string, messages: Message[]): Promise<void> {
+  async setMessages(
+    conversationId: string,
+    messages: Message[]
+  ): Promise<void> {
     return this.atomicOperation(conversationId, () => {
       const state = getOrCreateConversationState(conversationId);
-      
-      
+
       state.messages = [...messages];
       state.lastUpdated = Date.now();
       state.version++;
@@ -233,16 +289,20 @@ export class ConversationManager {
   }
 
   // Queue management with deduplication
-  async addToQueue(conversationId: string, message: QueuedMessage): Promise<void> {
+  async addToQueue(
+    conversationId: string,
+    message: QueuedMessage
+  ): Promise<void> {
     return this.atomicOperation(conversationId, () => {
       const state = getOrCreateConversationState(conversationId);
-      
+
       // Check for duplicate content in queue
       const isDuplicate = state.messageQueue.some(
-        m => m.content === message.content && 
-        Math.abs(m.timestamp.getTime() - message.timestamp.getTime()) < 1000
+        (m) =>
+          m.content === message.content &&
+          Math.abs(m.timestamp.getTime() - message.timestamp.getTime()) < 1000
       );
-      
+
       if (!isDuplicate) {
         state.messageQueue.push(message);
         state.lastUpdated = Date.now();
@@ -252,32 +312,37 @@ export class ConversationManager {
   }
 
   // Remove from queue
-  async removeFromQueue(conversationId: string, messageId: string): Promise<void> {
+  async removeFromQueue(
+    conversationId: string,
+    messageId: string
+  ): Promise<void> {
     return this.atomicOperation(conversationId, () => {
       const state = getOrCreateConversationState(conversationId);
-      state.messageQueue = state.messageQueue.filter(m => m.id !== messageId);
+      state.messageQueue = state.messageQueue.filter((m) => m.id !== messageId);
       state.lastUpdated = Date.now();
       state.version++;
     });
   }
 
   // Get next queued message
-  async getNextQueuedMessage(conversationId: string): Promise<QueuedMessage | null> {
+  async getNextQueuedMessage(
+    conversationId: string
+  ): Promise<QueuedMessage | null> {
     return this.atomicOperation(conversationId, () => {
       const state = getOrCreateConversationState(conversationId);
-      
+
       // Only process queue if not streaming and no errors
-      if (state.status !== 'idle' || state.messageQueue.length === 0) {
+      if (state.status !== "idle" || state.messageQueue.length === 0) {
         return null;
       }
-      
+
       // Get and remove first message
       const message = state.messageQueue.shift();
       if (message) {
         state.lastUpdated = Date.now();
         state.version++;
       }
-      
+
       return message || null;
     });
   }
@@ -299,14 +364,14 @@ export class ConversationManager {
       state.error = error;
       // Only change status if there's an error, not when clearing it
       if (error) {
-        state.status = 'error';
+        state.status = "error";
       }
       state.lastUpdated = Date.now();
       state.version++;
 
       if (error) {
         await chatEventBus.emit({
-          type: 'ERROR_OCCURRED',
+          type: "ERROR_OCCURRED",
           conversationId,
           error,
         });
@@ -315,17 +380,23 @@ export class ConversationManager {
   }
 
   // Handle active tools with detailed tracking
-  async addActiveTool(conversationId: string, toolName: string, toolUsageId?: string): Promise<void> {
+  async addActiveTool(
+    conversationId: string,
+    toolName: string,
+    toolUsageId?: string
+  ): Promise<void> {
     return this.atomicOperation(conversationId, () => {
       const state = getOrCreateConversationState(conversationId);
-      
+
       // Check if tool already exists
-      const exists = state.activeTools.some(t => t.tool_name === toolName && t.status === 'executing');
+      const exists = state.activeTools.some(
+        (t) => t.tool_name === toolName && t.status === "executing"
+      );
       if (!exists) {
         state.activeTools.push({
           tool_name: toolName,
           tool_usage_id: toolUsageId,
-          status: 'executing',
+          status: "executing",
           started_at: new Date().toISOString(),
         });
         state.lastUpdated = Date.now();
@@ -335,21 +406,21 @@ export class ConversationManager {
   }
 
   async updateToolCompleted(
-    conversationId: string, 
-    toolName: string, 
+    conversationId: string,
+    toolName: string,
     toolUsageId: string,
     executionTimeMs: number
   ): Promise<void> {
     return this.atomicOperation(conversationId, () => {
       const state = getOrCreateConversationState(conversationId);
-      
+
       // Find the tool and update it
-      const tool = state.activeTools.find(t => 
-        t.tool_name === toolName && t.status === 'executing'
+      const tool = state.activeTools.find(
+        (t) => t.tool_name === toolName && t.status === "executing"
       );
-      
+
       if (tool) {
-        tool.status = 'completed';
+        tool.status = "completed";
         tool.tool_usage_id = toolUsageId;
         tool.execution_time_ms = executionTimeMs;
         tool.completed_at = new Date().toISOString();
@@ -362,7 +433,7 @@ export class ConversationManager {
   async removeActiveTool(conversationId: string, tool: string): Promise<void> {
     return this.atomicOperation(conversationId, () => {
       const state = getOrCreateConversationState(conversationId);
-      const index = state.activeTools.findIndex(t => t.tool_name === tool);
+      const index = state.activeTools.findIndex((t) => t.tool_name === tool);
       if (index > -1) {
         state.activeTools.splice(index, 1);
         state.lastUpdated = Date.now();
@@ -395,52 +466,30 @@ export class ConversationManager {
     });
   }
 
-  // Clean up old conversations to prevent memory leaks
-  private pruneConversationCache(): void {
-    const conversations = Object.entries(conversationStore.conversations);
-    
-    if (conversations.length <= CONVERSATION_CACHE_SIZE) {
-      return;
-    }
-
-    // Sort by last updated, keep most recent
-    conversations.sort((a, b) => b[1].lastUpdated - a[1].lastUpdated);
-    
-    const toRemove = conversations.slice(CONVERSATION_CACHE_SIZE);
-    for (const [id] of toRemove) {
-      // Don't remove active conversation
-      if (id !== conversationStore.activeConversationId) {
-        delete conversationStore.conversations[id];
-        abortControllerManager.abort(id);
-      }
-    }
-  }
-
   // Reset entire store (for logout, etc)
   async reset(): Promise<void> {
-    // Abort all operations
-    abortControllerManager.abortAll();
-    
     // Clear all conversations
     conversationStore.conversations = {};
     conversationStore.currentProjectId = null;
     conversationStore.activeConversationId = null;
     conversationStore.projectContexts = {};
     conversationStore.pendingOperations.clear();
-    
+
     // Clear operation locks
     this.operationLocks.clear();
-    
+
     // Clear event bus
     chatEventBus.clear();
   }
 
   // Update context usage information
-  async updateContextUsage(conversationId: string, usage: import('./types').ContextUsageInfo): Promise<void> {
+  async updateContextUsage(
+    conversationId: string,
+    usage: import("./types").ContextUsageInfo
+  ): Promise<void> {
     return this.atomicOperation(conversationId, () => {
       const state = getOrCreateConversationState(conversationId);
       state.contextUsage = usage;
-      logger.info('ConversationManager: Updated context usage', { conversationId, usage });
     });
   }
 
@@ -454,22 +503,21 @@ export class ConversationManager {
   async addToolUsage(conversationId: string, toolUsage: any): Promise<void> {
     return this.atomicOperation(conversationId, () => {
       const state = getOrCreateConversationState(conversationId);
-      
+
       // Find the last assistant message
       for (let i = state.messages.length - 1; i >= 0; i--) {
-        if (state.messages[i].role === 'assistant') {
+        if (state.messages[i].role === "assistant") {
           const message = state.messages[i];
           const currentToolUsages = message.tool_usages || [];
-          
+
           // Set the message_id on the tool usage
           toolUsage.message_id = message.id;
-          
+
           // Add the new tool usage
           message.tool_usages = [...currentToolUsages, toolUsage];
           state.lastUpdated = Date.now();
           state.version++;
-          
-          logger.debug('ConversationManager: Added tool usage', toolUsage.tool_name, 'Total:', message.tool_usages.length);
+
           break;
         }
       }

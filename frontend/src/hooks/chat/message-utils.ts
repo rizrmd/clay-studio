@@ -1,5 +1,4 @@
-import { api } from "@/lib/api";
-import { logger } from "@/lib/logger";
+import { api } from "@/lib/utils/api";
 import {
   getConversationState,
   updateConversationMessages,
@@ -7,7 +6,7 @@ import {
   setConversationForgotten,
   setConversationUploadedFiles,
   addConversationUploadedFile,
-} from "../../store/chat-store";
+} from "@/store/chat-store";
 import type { Message } from "../../types/chat";
 
 /**
@@ -92,13 +91,11 @@ function checkStreamResume(conversationId: string, messages: Message[], state: a
   
   if (messages.length > 0) {
     const lastMessage = messages[messages.length - 1];
-    logger.debug("MessageUtils: Last message in conversation:", lastMessage.role);
     
     if (lastMessage.role === 'user') {
       // The assistant hasn't responded yet - likely interrupted by refresh
       shouldResumeStreaming = true;
       lastUserMessage = lastMessage;
-      logger.info("MessageUtils: Detected incomplete conversation, will resume streaming");
     }
   }
   
@@ -110,7 +107,6 @@ function checkStreamResume(conversationId: string, messages: Message[], state: a
       content = content.substring(0, attachedFilesIndex);
     }
     
-    logger.debug("MessageUtils: Setting resume flags for conversation:", conversationId);
     state.needsStreamResume = true;
     state.pendingResumeContent = content.trim();
     state.resumeWithoutRemovingMessage = true;

@@ -1,7 +1,9 @@
 import { Chat, ConversationSidebar } from "@/components/chat";
-import { useState, useEffect, memo } from "react";
+import { useEffect, memo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { useSnapshot } from "valtio";
 import { useLoggerDebug } from "@/hooks/use-logger-debug";
+import { uiStore, uiActions } from "@/store/ui-store";
 
 // Memoize the Chat component to prevent unnecessary re-renders
 // But ensure it re-renders when conversationId or sidebar state changes
@@ -15,8 +17,7 @@ const MemoizedChat = memo(Chat, (prevProps, nextProps) => {
 });
 
 export function MainApp() {
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  const uiSnapshot = useSnapshot(uiStore);
   const { projectId, conversationId } = useParams<{
     projectId: string;
     conversationId?: string;
@@ -37,15 +38,15 @@ export function MainApp() {
         // Redirect to the last conversation
         navigate(`/chat/${projectId}/${lastConversationId}`, { replace: true });
       } else {
-        // No last conversation, redirect to new
-        navigate(`/chat/${projectId}/new`, { replace: true });
+        // No last conversation, redirect to projects
+        navigate("/projects", { replace: true });
       }
     }
   }, [projectId, conversationId, navigate]);
 
   // Save current conversation ID to localStorage when it changes
   useEffect(() => {
-    if (projectId && conversationId && conversationId !== "new") {
+    if (projectId && conversationId) {
       const lastConversationKey = `last_conversation_${projectId}`;
       localStorage.setItem(lastConversationKey, conversationId);
     }
@@ -55,20 +56,20 @@ export function MainApp() {
   useEffect(() => {
     const handleResize = () => {
       const mobile = window.innerWidth < 768;
-      setIsMobile(mobile);
+      uiActions.setMobile(mobile);
       // Auto-collapse sidebar on mobile
-      if (mobile && !isSidebarCollapsed) {
-        setIsSidebarCollapsed(true);
+      if (mobile && !uiSnapshot.isSidebarCollapsed) {
+        uiActions.setSidebarCollapsed(true);
       }
     };
 
     handleResize(); // Check initial size
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
-  }, [isSidebarCollapsed]);
+  }, [uiSnapshot.isSidebarCollapsed]);
 
   const toggleSidebar = () => {
-    setIsSidebarCollapsed(!isSidebarCollapsed);
+    uiActions.toggleSidebar();
   };
 
   const handleConversationSelect = (newConversationId: string) => {
@@ -77,10 +78,15 @@ export function MainApp() {
     }
   };
 
+  // Don't render until we have a projectId
+  if (!projectId) {
+    return null;
+  }
+
   return (
     <div className="flex-1 flex relative h-full w-full">
       <ConversationSidebar
-        isCollapsed={isMobile ? true : isSidebarCollapsed}
+        isCollapsed={uiSnapshot.isMobile ? true : uiSnapshot.isSidebarCollapsed}
         onToggle={toggleSidebar}
         projectId={projectId}
         currentConversationId={conversationId}
@@ -91,7 +97,7 @@ export function MainApp() {
           projectId={projectId} 
           conversationId={conversationId}
           onToggleSidebar={toggleSidebar}
-          isSidebarCollapsed={isMobile ? true : isSidebarCollapsed}
+          isSidebarCollapsed={uiSnapshot.isMobile ? true : uiSnapshot.isSidebarCollapsed}
         />
       </div>
     </div>

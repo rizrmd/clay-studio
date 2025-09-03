@@ -33,7 +33,12 @@ async fn save_message(
         MessageRole::Assistant => "assistant",
     })
     .bind(message.processing_time_ms)
-    .bind(message.created_at.as_ref().map(|dt| dt.parse::<chrono::DateTime<Utc>>().unwrap()).unwrap_or(Utc::now()))
+        .bind(
+        message.created_at.as_ref()
+            .and_then(|dt| chrono::DateTime::parse_from_rfc3339(dt).ok())
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(Utc::now)
+    )
     .execute(pool)
     .await
     .map_err(|e| AppError::InternalServerError(format!("Failed to save message: {}", e)))?;
@@ -57,7 +62,12 @@ async fn save_message(
             .bind(&tool_usage.parameters)
             .bind(&tool_usage.output)
             .bind(tool_usage.execution_time_ms)
-            .bind(tool_usage.created_at.as_ref().map(|dt| dt.parse::<chrono::DateTime<Utc>>().unwrap()).unwrap_or(Utc::now()))
+                        .bind(
+                tool_usage.created_at.as_ref()
+                    .and_then(|dt| chrono::DateTime::parse_from_rfc3339(dt).ok())
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .unwrap_or_else(Utc::now)
+            )
             .execute(pool)
             .await
             .map_err(|e| AppError::InternalServerError(format!("Failed to save tool usage: {}", e)))?;
@@ -140,12 +150,14 @@ pub async fn handle_chat_message_ws(
     
     // Update the conversation cache with the new user message
     state.update_conversation_cache(&actual_conversation_id, user_message.clone()).await;
+    tracing::info!("Conversation cache updated");
     
     // Get conversation history from cache (fast) or database (slow)
     tracing::info!("Getting conversation history for context");
     let cached_messages = state.get_conversation_messages(&actual_conversation_id)
         .await
         .map_err(|e| format!("Failed to get conversation history: {}", e))?;
+    tracing::info!("Got conversation history");
     
     // Build the full prompt with conversation history
     let mut full_prompt = String::new();
@@ -226,7 +238,8 @@ pub async fn handle_chat_message_ws(
         });
     }
     
-    // Send start event
+    // Send start event to the actual conversation ID
+    // Note: If this was a redirect from "new", the connection subscription has already been updated
     broadcast_to_subscribers(
         &project_id,
         &conversation_id_clone,
@@ -256,7 +269,7 @@ pub async fn handle_chat_message_ws(
             let mut assistant_content = String::new();
             
             while let Some(message) = receiver.recv().await {
-                tracing::info!("Received Claude message: {:?}", std::mem::discriminant(&message));
+                // tracing::info!("Received Claude message: {:?}", std::mem::discriminant(&message));
                 
                 match message {
                     ClaudeMessage::Progress { content } => {

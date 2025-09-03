@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { AskUser } from "./ask-user";
-import { WebSocketService } from "@/services/chat/websocket-service";
+import { WebSocketService } from "@/lib/services/chat/websocket-service";
 import { InteractiveTable } from "@/components/data-table/interactive-table";
 import { ChartDisplay } from "@/components/data-chart";
 
@@ -33,14 +33,12 @@ export function InteractionRenderer({
 }: InteractionRendererProps) {
   // Parse the interaction spec from the tool output
   const interactionSpec = useMemo(() => {
-    console.log("InteractionRenderer: parsing toolOutput", toolOutput);
     if (!toolOutput) return null;
     
     // Handle array outputs (take first element)
     let actualOutput = toolOutput;
     if (Array.isArray(toolOutput) && toolOutput.length > 0) {
       actualOutput = toolOutput[0];
-      console.log("InteractionRenderer: extracted from array", actualOutput);
     }
     
     try {
@@ -59,10 +57,8 @@ export function InteractionRenderer({
         // Look for JSON block in the output
         const jsonMatch = actualOutput.match(/```json\n([\s\S]*?)\n```/);
         if (jsonMatch) {
-          console.log("InteractionRenderer: found JSON block", jsonMatch[1]);
           const parsed = JSON.parse(jsonMatch[1]);
           if (parsed.interaction_type) {
-            console.log("InteractionRenderer: successfully parsed interaction spec", parsed);
             return parsed as InteractionSpec;
           }
         }
@@ -159,15 +155,12 @@ export function InteractionRenderer({
 // Helper function to check if a tool output contains an interaction
 export function hasInteraction(toolOutput: any): boolean {
   if (!toolOutput) {
-    console.log("hasInteraction: toolOutput is null/undefined");
     return false;
   }
   
-  console.log("hasInteraction: checking toolOutput", typeof toolOutput, toolOutput);
   
   // If it's an array, check the first element
   if (Array.isArray(toolOutput) && toolOutput.length > 0) {
-    console.log("hasInteraction: toolOutput is array, checking first element", toolOutput[0]);
     return hasInteraction(toolOutput[0]);
   }
   
@@ -184,7 +177,6 @@ export function hasInteraction(toolOutput: any): boolean {
     }
     
     if (typeof actualOutput === "object" && actualOutput.interaction_type) {
-      console.log("hasInteraction: found object with interaction_type");
       return true;
     }
     
@@ -192,7 +184,6 @@ export function hasInteraction(toolOutput: any): boolean {
       // Check for interaction JSON in the output
       const hasInteractionType = actualOutput.includes('"interaction_type"');
       const hasInteractionId = actualOutput.includes('"interaction_id"');
-      console.log("hasInteraction: string check", { hasInteractionType, hasInteractionId });
       return hasInteractionType && hasInteractionId;
     }
   } catch (error) {
@@ -200,6 +191,5 @@ export function hasInteraction(toolOutput: any): boolean {
     return false;
   }
   
-  console.log("hasInteraction: no interaction found");
   return false;
 }

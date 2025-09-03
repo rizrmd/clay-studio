@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ClientRootResponse, rootService } from '@/services/root-service'
+import { ClientRootResponse, rootService } from '@/lib/services/root-service'
 import {
   Dialog,
   DialogContent,

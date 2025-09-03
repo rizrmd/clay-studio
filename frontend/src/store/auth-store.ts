@@ -1,12 +1,13 @@
 import { proxy } from "valtio";
-import axios from "@/lib/axios";
-import { WebSocketService } from "@/services/chat/websocket-service";
+import axios from "@/lib/utils/axios";
+import { WebSocketService } from "@/lib/services/chat/websocket-service";
 
 export interface User {
   id: string;
   client_id: string;
   username: string;
   role: "user" | "admin" | "root";
+  isSubscribed?: boolean;
 }
 
 export interface Client {
@@ -45,8 +46,9 @@ const initialAuthState: AuthState = {
 // Create the auth store
 export const authStore = proxy(initialAuthState);
 
-// Computed property
+// Computed properties
 export const isAuthenticated = () => !!authStore.user;
+export const isSubscribed = () => authStore.user?.isSubscribed ?? false;
 
 // Auth actions
 export const setUser = (user: User | null) => {
@@ -99,27 +101,18 @@ export const detectAndSetClientByDomain = async () => {
   try {
     // Get the current domain (hostname with port)
     const currentDomain = window.location.host;
-    console.log(`[Domain Detection] Checking domain: ${currentDomain}`);
-    
-    // Check if we already have a client selected
-    const existingClientId = localStorage.getItem("activeClientId");
-    console.log(`[Domain Detection] Existing client ID: ${existingClientId}`);
     
     // Try to detect client by domain
     const url = `/auth/clients/detect-by-domain?domain=${encodeURIComponent(currentDomain)}`;
-    console.log(`[Domain Detection] Calling API: ${url}`);
     
     const response = await axios.get(url);
-    console.log(`[Domain Detection] API response:`, response.data);
     
     if (response.data.found && response.data.client) {
       const detectedClientId = response.data.client.id;
-      console.log(`[Domain Detection] Found client: ${response.data.client.name} (${detectedClientId})`);
       
       // Always set the detected client to ensure UI consistency
       localStorage.setItem("activeClientId", detectedClientId);
       localStorage.setItem("activeProjectId", detectedClientId);
-      console.log(`[Domain Detection] Set client "${response.data.client.name}" for domain ${currentDomain}`);
       
       // Set as first client with the proper Client interface structure
       const clientData: Client = {
@@ -131,7 +124,6 @@ export const detectAndSetClientByDomain = async () => {
       
       return clientData;
     } else {
-      console.log(`[Domain Detection] No client found for domain: ${currentDomain}`);
     }
     return null;
   } catch (error) {
@@ -195,7 +187,6 @@ export const checkRegistrationStatus = async () => {
 
 export const initializeApp = async () => {
   try {
-    console.log("[InitApp] Starting app initialization...");
     
     // First, try to detect client by domain
     const detectedClient = await detectAndSetClientByDomain();
@@ -203,28 +194,22 @@ export const initializeApp = async () => {
     // If we detected a client by domain, use it; otherwise fetch the first client
     let clientData = detectedClient;
     if (!clientData) {
-      console.log("[InitApp] No domain-based client found, fetching first client...");
       clientData = await fetchFirstClient();
     } else {
-      console.log("[InitApp] Using domain-detected client:", clientData.name);
     }
     
     // Only check auth status once after client is determined
-    console.log("[InitApp] Checking auth status...");
     const userData = await checkAuthStatus();
 
     // Check registration status after getting the client
     if (clientData) {
-      console.log("[InitApp] Checking registration status...");
       await checkRegistrationStatus();
     }
 
     if (!userData && clientData?.status === "active" && clientData?.id) {
-      console.log("[InitApp] Checking if users exist...");
       await checkUsersExist(clientData.id);
     }
     
-    console.log("[InitApp] App initialization complete.");
   } catch (error) {
     console.error("[InitApp] Error during initialization:", error);
   } finally {
