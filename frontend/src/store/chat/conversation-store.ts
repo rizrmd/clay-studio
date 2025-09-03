@@ -33,16 +33,11 @@ export const inputStore = proxy<Record<string, InputState>>({});
 export const getOrCreateConversationState = (conversationId: string): ConversationState => {
   if (!conversationStore.conversations[conversationId]) {
     conversationStore.conversations[conversationId] = createInitialConversationState(conversationId);
-  } else {
-    // If this is the 'new' conversation and it has messages from a previous session,
-    // clear them to prevent message bleeding
-    const state = conversationStore.conversations[conversationId];
-    if (conversationId === 'new' && state.messages.length > 0) {
-      console.warn('Clearing stale messages from "new" conversation state');
-      state.messages = [];
-      state.error = null;
-      state.status = 'idle';
-    }
+  } else if (conversationId === 'new') {
+    // Always reset 'new' conversation state to prevent stale data
+    const freshState = createInitialConversationState(conversationId);
+    conversationStore.conversations[conversationId] = freshState;
+    console.debug('Reset "new" conversation state to prevent message bleeding');
   }
   return conversationStore.conversations[conversationId];
 };

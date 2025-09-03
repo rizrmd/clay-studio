@@ -12,9 +12,8 @@ import {
   MoreVertical,
 } from "lucide-react";
 import { api } from "@/lib/utils/api";
-import { useValtioAuth } from "@/hooks/use-valtio-auth";
+import { useAuth } from "@/hooks/use-auth";
 import { projectsStore, projectsActions } from "@/store/projects-store";
-import { AppHeader } from "@/components/layout/app-header";
 import { ProjectsSkeleton } from "@/components/projects/projects-skeleton";
 import {
   DropdownMenu,
@@ -45,7 +44,7 @@ interface Project {
 export function ProjectsPage() {
   const projectsSnapshot = useSnapshot(projectsStore);
   const navigate = useNavigate();
-  const {} = useValtioAuth();
+  const {} = useAuth();
 
   useEffect(() => {
     fetchProjects();
@@ -78,7 +77,7 @@ export function ProjectsPage() {
       projectsActions.clearNewProjectForm();
 
       // Navigate to chat with the new project
-      navigate(`/chat/${newProject.id}`);
+      navigate(`/p/${newProject.id}/new`);
     } catch (err) {
       projectsActions.setError(err instanceof Error ? err.message : "Failed to create project");
     } finally {
@@ -121,7 +120,6 @@ export function ProjectsPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      <AppHeader />
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
@@ -156,7 +154,7 @@ export function ProjectsPage() {
                     className="relative bg-white dark:bg-gray-800 rounded-lg shadow-sm hover:shadow-md transition-shadow border border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-600 group"
                   >
                     <Link
-                      to={`/chat/${project.id}`}
+                      to={`/p/${project.id}`}
                       className="block p-6"
                     >
                       <div className="flex items-start justify-between mb-4">

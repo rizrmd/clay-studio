@@ -1,25 +1,25 @@
-import { useEffect } from 'react'
-import { useSnapshot } from 'valtio'
+import { useEffect } from "react";
+import { useSnapshot } from "valtio";
 import {
   authStore,
   isAuthenticated,
   login as loginAction,
   register as registerAction,
   logout as logoutAction,
-  checkRegistrationStatus
-} from '../store/auth-store'
+  checkRegistrationStatus,
+} from "../store/auth-store";
 
-export function useValtioAuth() {
-  const snapshot = useSnapshot(authStore)
+export function useAuth() {
+  const snapshot = useSnapshot(authStore);
 
   // No need to initialize here since ValtioProvider already does it
 
   // Update registration status when firstClient changes
   useEffect(() => {
     if (snapshot.firstClient) {
-      checkRegistrationStatus()
+      checkRegistrationStatus();
     }
-  }, [snapshot.firstClient])
+  }, [snapshot.firstClient]);
 
   return {
     user: snapshot.user,
@@ -35,5 +35,5 @@ export function useValtioAuth() {
     register: registerAction,
     logout: logoutAction,
     checkRegistrationStatus,
-  }
+  };
 }

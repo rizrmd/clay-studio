@@ -1,1 +1,1 @@
-export { MultimodalInput } from './multimodal-input'
+export { ChatInput as MultimodalInput } from './chat-input'

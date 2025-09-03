@@ -52,7 +52,7 @@ import {
 } from "lucide-react";
 import api from "@/lib/utils/api";
 import { format } from "date-fns";
-import { useValtioAuth } from "@/hooks/use-valtio-auth";
+import { useAuth } from "@/hooks/use-auth";
 
 interface User {
   id: string;
@@ -77,7 +77,7 @@ export function UserManagement({
   clientId,
   onUpdate,
 }: UserManagementProps) {
-  const { user } = useValtioAuth();
+  const { user } = useAuth();
   const isRoot = user?.role === "root";
   
   const [registrationEnabled, setRegistrationEnabled] = useState(initialRegistrationEnabled);

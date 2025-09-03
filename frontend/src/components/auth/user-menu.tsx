@@ -1,4 +1,4 @@
-import { useValtioAuth } from '@/hooks/use-valtio-auth'
+import { useAuth } from '@/hooks/use-auth'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import {
@@ -14,7 +14,7 @@ import { Badge } from '@/components/ui/badge'
 import { LogOut, Settings, User, Shield } from 'lucide-react'
 
 export function UserMenu() {
-  const { user, logout, firstClient } = useValtioAuth()
+  const { user, logout, firstClient } = useAuth()
   const navigate = useNavigate()
 
   if (!user) {

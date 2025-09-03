@@ -1,4 +1,4 @@
-import { useValtioAuth } from '@/hooks/use-valtio-auth'
+import { useAuth } from '@/hooks/use-auth'
 import { Navigate } from 'react-router-dom'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -8,7 +8,7 @@ interface RootRouteProps {
 }
 
 export function RootRoute({ children }: RootRouteProps) {
-  const { user, isAuthenticated, loading } = useValtioAuth()
+  const { user, isAuthenticated, loading } = useAuth()
 
   if (loading) {
     return <LoadingFallback />

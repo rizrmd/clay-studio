@@ -46,38 +46,15 @@ export class MessageService {
       return;
     }
 
-    // Handle 'new' conversation - create it first
-    let effectiveConversationId = conversationId;
+    // All conversations should be real now - no 'new' pseudo-conversations
+    const effectiveConversationId = conversationId;
 
     try {
       this.sendingMessages.add(messageKey);
+      
+      // If somehow we still get a 'new' conversation, this is an error
       if (conversationId === 'new') {
-        try {
-          const response = await api.fetchStream("/conversations", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              project_id: projectId,
-            }),
-          });
-
-          if (!response.ok) {
-            throw new Error("Failed to create new conversation");
-          }
-
-          const newConversation = await response.json();
-          effectiveConversationId = newConversation.id;
-
-          // Update the conversation store to use the new ID
-          conversationStore.activeConversationId = effectiveConversationId;
-
-          logger.debug(`Created new conversation ${effectiveConversationId} for project ${projectId}`);
-        } catch (error) {
-          logger.error("Failed to create conversation:", error);
-          throw new Error("Failed to create new conversation");
-        }
+        throw new Error("'new' conversations should be created before sending messages. This is a bug.");
       }
 
       const state = conversationStore.conversations[effectiveConversationId];
@@ -141,12 +118,9 @@ export class MessageService {
         conversationId: effectiveConversationId,
       });
 
-      // Use WebSocket to send message instead of SSE
+      // Ensure WebSocket is connected and subscribed
       const wsService = WebSocketService.getInstance();
       await wsService.connect();
-
-      // Only subscribe if not already subscribed to this conversation
-      // The useChat hook should have already established the subscription
       wsService.subscribe(projectId, effectiveConversationId);
       wsService.setCurrentConversation(effectiveConversationId);
 
@@ -157,15 +131,6 @@ export class MessageService {
         content,
         uploadedFilePaths
       );
-
-      // If this was a 'new' conversation, emit a redirect event to update the URL
-      if (conversationId === 'new') {
-        await chatEventBus.emit({
-          type: 'CONVERSATION_REDIRECT',
-          oldConversationId: 'new',
-          newConversationId: effectiveConversationId,
-        });
-      }
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Failed to send message";

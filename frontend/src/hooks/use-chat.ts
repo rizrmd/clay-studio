@@ -1,6 +1,6 @@
 import { useEffect, useCallback, useMemo, useRef } from "react";
 import { useSnapshot } from "valtio";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { logger } from "../lib/utils/logger";
 import {
   conversationStore,
@@ -20,6 +20,7 @@ import type { Message } from "../types/chat";
  */
 export function useChat(projectId: string, conversationId: string) {
   const navigate = useNavigate();
+  const location = useLocation();
   const snapshot = useSnapshot(conversationStore, { sync: true });
 
   // Service instances
@@ -56,86 +57,82 @@ export function useChat(projectId: string, conversationId: string) {
   // Handle conversation switching and WebSocket subscription
   useEffect(() => {
     if (previousConversationId.current !== currentConversationId) {
-
-      // Skip WebSocket subscription and message loading for 'new' conversations
+      // Set active conversation first to prevent message bleeding
+      conversationStore.activeConversationId = currentConversationId;
+      
+      // Handle 'new' conversations differently - don't set up WebSocket or load messages
       if (currentConversationId === 'new') {
-        // Just set up a minimal state for the new conversation
-        conversationStore.activeConversationId = currentConversationId;
         conversationManager.switchConversation(currentConversationId);
         conversationManager.updateStatus(currentConversationId, 'idle');
         previousConversationId.current = currentConversationId;
         return;
       }
 
-      // First, ensure the active conversation is properly set
-      // This is critical for preventing message bleeding
-      conversationStore.activeConversationId = currentConversationId;
-
-      // Update WebSocket service's current conversation
+      // For real conversations, set up WebSocket and load messages
       const wsService = WebSocketService.getInstance();
       wsService.setCurrentConversation(currentConversationId);
-
-      // Subscribe to WebSocket for this project and conversation
-      // This handles both initial subscription and conversation switches
       wsService.subscribe(projectId, currentConversationId);
-
-      // Switch conversation atomically
       conversationManager.switchConversation(currentConversationId);
+
+      // Check for transition from new chat first
+      const state = location.state as {
+        fromNewChat?: boolean;
+        existingMessages?: Message[];
+      } | null;
+      
+      if (state?.fromNewChat && state.existingMessages) {
+        // Set existing messages immediately to prevent loading state
+        conversationManager.setMessages(currentConversationId, state.existingMessages);
+        conversationManager.updateStatus(currentConversationId, 'idle');
+        logger.debug(`Loaded ${state.existingMessages.length} messages from new chat transition`);
+        previousConversationId.current = currentConversationId;
+        return;
+      }
 
       // Check for cached messages first for instant loading
       const cachedMessages = messageCache.getCachedMessages(currentConversationId);
 
       if (cachedMessages && cachedMessages.length > 0) {
-        // Load cached messages immediately for instant experience
         conversationManager.setMessages(currentConversationId, cachedMessages);
         conversationManager.updateStatus(currentConversationId, 'idle');
-
         logger.debug(`Loaded ${cachedMessages.length} cached messages for conversation ${currentConversationId}`);
       } else {
         // No cache available - check existing state
         const existingState = conversationStore.conversations[currentConversationId];
-        const hasMessages = existingState && existingState.messages && existingState.messages.length > 0;
-        const isStreaming = existingState && existingState.status === 'streaming';
+        const hasMessages = existingState?.messages?.length > 0;
+        const isStreaming = existingState?.status === 'streaming';
 
-        // Only show loading if truly necessary (no cache, no messages, not streaming)
+        // Only show loading if truly necessary
         if (!hasMessages && !isStreaming) {
           conversationManager.updateStatus(currentConversationId, 'loading');
 
-          // Much shorter timeout since cache miss is rare
           const timeoutId = setTimeout(() => {
             const currentState = conversationStore.conversations[currentConversationId];
-            if (currentState && currentState.status === 'loading') {
+            if (currentState?.status === 'loading') {
               logger.warn('WebSocket response timeout for conversation:', currentConversationId);
               conversationManager.updateStatus(currentConversationId, 'idle');
             }
-          }, 2000); // Reduced to 2 seconds
+          }, 2000);
 
           return () => clearTimeout(timeoutId);
         }
       }
 
-      // WebSocket will still send fresh data and update the cache
-
       previousConversationId.current = currentConversationId;
     }
-  }, [
-    currentConversationId,
-    projectId,
-    conversationManager,
-    navigate,
-  ]);
+  }, [currentConversationId, projectId, conversationManager, location.state]);
 
 
-  // Handle conversation redirect
+  // Handle conversation redirect (should be rare now that we pre-create conversations)
   useEffect(() => {
     const unsubscribe = chatEventBus.subscribe(
       "CONVERSATION_REDIRECT",
       async (event: any) => {
         if (
           event.type === "CONVERSATION_REDIRECT" &&
-          (event.oldConversationId === conversationId || event.oldConversationId === 'new')
+          event.oldConversationId === conversationId
         ) {
-          navigate(`/chat/${projectId}/${event.newConversationId}`, { replace: true });
+          navigate(`/p/${projectId}/c/${event.newConversationId}`, { replace: true });
         }
       }
     );

@@ -1,11 +1,11 @@
 import { useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { useSnapshot } from "valtio";
 import { logger } from "@/lib/utils/logger";
 import { Messages, ChatSkeleton, WelcomeScreen } from "../display";
-import { MultimodalInput } from "../input/multimodal-input";
+import type { Message } from "../display/types";
+import { MultimodalInput } from "../input";
 import { ContextIndicator } from "../display";
-import { useValtioChat } from "@/hooks/use-valtio-chat";
 import { useInputState } from "@/hooks/use-input-state";
 import { useViewportHeight } from "@/hooks/use-viewport-height";
 import { api } from "@/lib/utils/api";
@@ -19,25 +19,19 @@ import {
 import { Button } from "@/components/ui/button";
 import { WebSocketService } from "@/lib/services/chat/websocket-service";
 import { uiStore, uiActions } from "@/store/ui-store";
+import { useChat } from "@/hooks/use-chat";
 
-interface ChatProps {
-  projectId?: string;
-  conversationId?: string;
-  onToggleSidebar?: () => void;
-  isSidebarCollapsed?: boolean;
-}
-
-export function Chat({
-  projectId,
-  conversationId: propConversationId,
-  onToggleSidebar,
-  isSidebarCollapsed,
-}: ChatProps) {
+export function Chat() {
   const uiSnapshot = useSnapshot(uiStore, { sync: true });
   const dragCounter = useRef(0);
   const navigate = useNavigate();
+  const location = useLocation();
   const { viewportHeight } = useViewportHeight();
-  const previousConversationIdRef = useRef(propConversationId);
+
+  // Get routing data from valtio store
+  const projectId = uiSnapshot.currentProjectId;
+  const conversationId = uiSnapshot.currentConversationId;
+  const previousConversationIdRef = useRef(conversationId);
 
   // Use the new Valtio-based chat hook - must be called before any early returns
   const {
@@ -62,7 +56,7 @@ export function Chat({
     cancelQueuedMessage,
     activeTools,
     contextUsage,
-  } = useValtioChat(projectId || "", propConversationId || "");
+  } = useChat(projectId || "", conversationId || "");
 
   // Current conversation ID from hook or props
 
@@ -72,48 +66,69 @@ export function Chat({
     setDraftMessage: setInput,
     attachments: pendingFiles,
     setAttachments: setPendingFiles,
-  } = useInputState(propConversationId || "");
+  } = useInputState(conversationId || "");
 
   // Get WebSocket subscription status
   const wsService = WebSocketService.getInstance();
 
   // Reset when conversation changes
   useEffect(() => {
-    if (propConversationId !== previousConversationIdRef.current) {
-      previousConversationIdRef.current = propConversationId;
+    if (conversationId !== previousConversationIdRef.current) {
+      previousConversationIdRef.current = conversationId;
       // Reset any chat-specific UI state
       uiActions.setFocusInput(false);
       uiActions.setDragging(false);
     }
-  }, [propConversationId]);
+  }, [conversationId]);
 
-  // Monitor WebSocket subscription status
+  // Monitor WebSocket subscription status (but only for real conversations)
   useEffect(() => {
     const checkSubscription = () => {
       const isSubscribed = wsService.subscribed;
       uiActions.setWsSubscribed(isSubscribed);
-      
-      // If not subscribed, try to reconnect (but not for 'new' conversations)
-      if (!isSubscribed && projectId && propConversationId && propConversationId !== 'new') {
-        console.log('WebSocket not subscribed, attempting to reconnect...');
-        wsService.connect().catch(error => {
-          console.error('Failed to reconnect WebSocket:', error);
+
+      // Try to reconnect if not subscribed
+      if (!isSubscribed && projectId && conversationId) {
+        console.log("WebSocket not subscribed, attempting to reconnect...");
+        wsService.connect().catch((error) => {
+          console.error("Failed to reconnect WebSocket:", error);
         });
       }
     };
 
-    // Check every 500ms for subscription status changes
-    const interval = setInterval(checkSubscription, 500);
-    
-    // Also check immediately
+    // Check every 2 seconds (reduced frequency)
+    const interval = setInterval(checkSubscription, 2000);
     checkSubscription();
 
     return () => clearInterval(interval);
-  }, [projectId, propConversationId, wsService]);
+  }, [projectId, conversationId, wsService]);
+
+  // Handle initial message from navigation state
+  useEffect(() => {
+    const state = location.state as {
+      initialMessage?: string;
+      initialFiles?: File[];
+      fromNewChat?: boolean;
+      existingMessages?: Message[];
+    } | null;
+
+    if (state?.initialMessage && projectId && conversationId) {
+      // If transitioning from new chat, use existing messages to prevent loading skeleton
+      if (state.fromNewChat && state.existingMessages) {
+        // Set existing messages immediately to prevent loading state
+        // This will be handled in useChat hook
+      }
+
+      // Send the initial message
+      sendMessage(state.initialMessage, state.initialFiles);
+      // Clear the navigation state
+      window.history.replaceState(null, "", location.pathname);
+    }
+  }, [projectId, conversationId, location.state, sendMessage]);
 
   // Focus input when conversation changes (including navigating to /new)
   useEffect(() => {
-    if (projectId && propConversationId) {
+    if (projectId && conversationId) {
       // Small delay to ensure components are rendered
       const timer = setTimeout(() => {
         uiActions.setFocusInput(true);
@@ -123,15 +138,24 @@ export function Chat({
 
       return () => clearTimeout(timer);
     }
-  }, [projectId, propConversationId]);
+  }, [projectId, conversationId]);
 
-  const handleSubmit = async (e: React.FormEvent, message: string, files?: File[]) => {
+  const handleSubmit = async (
+    e: React.FormEvent,
+    message: string,
+    files?: File[]
+  ) => {
     e.preventDefault();
-    console.log('handleSubmit called with projectId:', projectId, 'conversationId:', propConversationId);
-    console.log('WebSocket subscribed:', wsService.subscribed);
-    console.log('Message:', message);
-    console.log('sendMessage function:', typeof sendMessage);
-    console.log('WebSocket service methods:', Object.keys(wsService));
+    console.log(
+      "handleSubmit called with projectId:",
+      projectId,
+      "conversationId:",
+      conversationId
+    );
+    console.log("WebSocket subscribed:", wsService.subscribed);
+    console.log("Message:", message);
+    console.log("sendMessage function:", typeof sendMessage);
+    console.log("WebSocket service methods:", Object.keys(wsService));
     if (!message.trim() || !projectId) return;
 
     // If there are forgotten messages, restore them first before sending
@@ -144,31 +168,31 @@ export function Chat({
     // Include any pending files from drag-drop along with form files
     const allFiles = [...(files || []), ...pendingFiles];
     setPendingFiles([]);
-    
+
     try {
-      // Ensure WebSocket is connected before sending
+      // For 'new' conversations, no need to check WebSocket - it will be handled in sendMessage
       if (!wsService.subscribed) {
-        console.log('WebSocket not connected, attempting to connect...');
+        console.log("WebSocket not connected, attempting to connect...");
         await wsService.connect();
       }
-      
-      console.log('Calling sendMessage with:', { message, fileCount: allFiles.length });
-      
-      // Check if sendMessage is a function
-      if (typeof sendMessage === 'function') {
-        const result = await sendMessage(
-          message,
-          allFiles.length > 0 ? allFiles : undefined
-        );
-        console.log('sendMessage completed:', result);
-      } else {
-        console.error('sendMessage is not a function');
-        // Fallback failed - sendMessage should always be a function from useValtioChat
-      }
+
+      console.log("Calling sendMessage with:", {
+        message,
+        fileCount: allFiles.length,
+      });
+
+      const result = await sendMessage(
+        message,
+        allFiles.length > 0 ? allFiles : undefined
+      );
+      console.log("sendMessage completed:", result);
     } catch (error) {
-      console.error('Failed to send message:', error);
+      console.error("Failed to send message:", error);
       // Set error state to show to user
-      setConversationError(propConversationId || '', 'Failed to send message. Please try again.');
+      setConversationError(
+        conversationId || "",
+        "Failed to send message. Please try again."
+      );
     }
   };
 
@@ -214,7 +238,7 @@ export function Chat({
           },
           body: JSON.stringify({
             project_id: projectId,
-            source_conversation_id: hookConversationId || propConversationId,
+            source_conversation_id: hookConversationId || conversationId,
             message_id: messageId,
             messages: messagesToClone,
           }),
@@ -229,7 +253,7 @@ export function Chat({
 
       // Navigate to the new conversation
       if (data.conversation_id) {
-        navigate(`/chat/${projectId}/${data.conversation_id}`);
+        navigate(`/p/${projectId}/c/${data.conversation_id}`);
       }
     } catch (error) {
       logger.error("Chat: Failed to create new chat from message:", error);
@@ -293,7 +317,7 @@ export function Chat({
   };
 
   // Early return if no conversation ID - must be after all hooks and handlers
-  if (!propConversationId) {
+  if (!conversationId) {
     return null;
   }
 
@@ -308,20 +332,20 @@ export function Chat({
         onDrop={handleContainerDrop}
       >
         {/* Floating sidebar toggle button - hidden on mobile since mobile has its own toggle */}
-        {onToggleSidebar && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onToggleSidebar}
-            className="fixed top-4 left-4 z-30 h-10 w-10 p-0 rounded-full shadow-lg bg-background border hidden md:flex"
-          >
-            {isSidebarCollapsed ? (
-              <PanelLeftOpen className="h-5 w-5" />
-            ) : (
-              <PanelLeftClose className="h-5 w-5" />
-            )}
-          </Button>
-        )}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => uiActions.toggleSidebar()}
+          className="fixed top-4 left-4 z-30 h-10 w-10 p-0 rounded-full shadow-lg bg-background border hidden md:flex"
+        >
+          {uiSnapshot.isMobile ? (
+            true
+          ) : uiSnapshot.isSidebarCollapsed ? (
+            <PanelLeftOpen className="h-5 w-5" />
+          ) : (
+            <PanelLeftClose className="h-5 w-5" />
+          )}
+        </Button>
         {hasForgottenMessages && (
           <div className="absolute left-0 right-0 bg-white pt-5 top-0 w-full z-10 px-4">
             <div className="flex max-w-[44rem] mx-auto mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 items-center justify-between">
@@ -392,9 +416,12 @@ export function Chat({
                   with Claude.
                 </p>
               </div>
-            ) : isLoadingMessages && messages.length === 0 && !isStreaming ? (
+            ) : isLoadingMessages &&
+              messages.length === 0 &&
+              !isStreaming &&
+              !uiSnapshot.isTransitioningFromNew ? (
               // Only show skeleton when initially loading a conversation with no messages yet
-              // Don't show if we're streaming (e.g., after a redirect)
+              // Don't show if we're streaming or transitioning from new chat
               <ChatSkeleton />
             ) : messages.length === 0 ? (
               <WelcomeScreen />
@@ -459,6 +486,7 @@ export function Chat({
               onExternalFilesChange={setPendingFiles}
               shouldFocus={uiSnapshot.shouldFocusInput}
               isSubscribed={uiSnapshot.isWsSubscribed}
+              conversationId={conversationId}
               className="lg:ml-[-10px] lg:mr-[40px]"
             />
           </div>

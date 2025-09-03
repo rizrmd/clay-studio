@@ -41,7 +41,7 @@ export async function loadConversationMessages(
           }
           // Navigate to new conversation when not found
           if (projectId) {
-            navigate(`/chat/${projectId}/new`);
+            navigate(`/p/${projectId}/new`);
           }
           break;
         case 403:

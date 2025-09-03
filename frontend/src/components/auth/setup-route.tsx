@@ -1,4 +1,4 @@
-import { useValtioAuth } from '@/hooks/use-valtio-auth'
+import { useAuth } from '@/hooks/use-auth'
 import { AuthPage } from '@/pages/AuthPage'
 import { SetupPage } from '@/pages/SetupPage'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -10,7 +10,7 @@ interface SetupRouteProps {
 }
 
 export function SetupRoute({ children, fallback }: SetupRouteProps) {
-  const { isAuthenticated, isSetupComplete, needsInitialSetup, needsFirstUser, loading, firstClient, user } = useValtioAuth()
+  const { isAuthenticated, isSetupComplete, needsInitialSetup, needsFirstUser, loading, firstClient, user } = useAuth()
   const location = useLocation()
 
   if (loading) {

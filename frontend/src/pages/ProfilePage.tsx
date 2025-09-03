@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useValtioAuth } from '@/hooks/use-valtio-auth'
+import { useAuth } from '@/hooks/use-auth'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -9,10 +9,9 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Shield, User, AlertCircle, CheckCircle } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import axios from '@/lib/utils/axios'
-import { AppHeader } from '@/components/layout/app-header'
 
 export function ProfilePage() {
-  const { user, firstClient } = useValtioAuth()
+  const { user, firstClient } = useAuth()
   const navigate = useNavigate()
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -63,7 +62,6 @@ export function ProfilePage() {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      <AppHeader />
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="grid gap-6 md:grid-cols-2">
           <Card>

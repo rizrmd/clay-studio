@@ -1,4 +1,3 @@
-export { ConversationSidebar } from './conversation-sidebar'
+export { ConversationSidebar } from './chat-sidebar'
 export { FileSidebar } from './file-sidebar'
 export { FileManager } from './file-manager'
-export { ClaudeMdEditor } from './claude-md-editor'

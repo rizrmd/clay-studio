@@ -40,7 +40,7 @@ export function useConversationContext(conversationId: string | null) {
       if (!response.ok) {
         // If conversation doesn't exist (404), redirect to /new
         if (response.status === 404 && projectId) {
-          navigate(`/chat/${projectId}/new`, { replace: true });
+          navigate(`/p/${projectId}/new`, { replace: true });
         }
         throw new Error(`Failed to fetch conversation context: ${response.status}`);
       }

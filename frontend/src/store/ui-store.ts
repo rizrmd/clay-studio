@@ -23,6 +23,11 @@ interface UIState {
   // Viewport management
   viewportHeight: number;
   keyboardHeight: number;
+
+  // Routing state
+  currentProjectId?: string;
+  currentConversationId?: string;
+  isTransitioningFromNew: boolean;
 }
 
 export const uiStore = proxy<UIState>({
@@ -48,6 +53,11 @@ export const uiStore = proxy<UIState>({
   // Viewport management
   viewportHeight: typeof window !== 'undefined' ? window.innerHeight : 0,
   keyboardHeight: 0,
+
+  // Routing state
+  currentProjectId: undefined,
+  currentConversationId: undefined,
+  isTransitioningFromNew: false,
 });
 
 // Actions
@@ -118,5 +128,18 @@ export const uiActions = {
   
   setKeyboardHeight: (height: number) => {
     uiStore.keyboardHeight = height;
+  },
+
+  // Routing actions
+  setCurrentProject: (projectId: string) => {
+    uiStore.currentProjectId = projectId;
+  },
+
+  setCurrentConversation: (conversationId: string) => {
+    uiStore.currentConversationId = conversationId;
+  },
+
+  setTransitioningFromNew: (isTransitioning: boolean) => {
+    uiStore.isTransitioningFromNew = isTransitioning;
   },
 };

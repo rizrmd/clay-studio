@@ -358,12 +358,10 @@ export class WebSocketService {
             this.authenticationResolver = null;
           }
           
-          // Auto-subscribe to current project and conversation if we have them and we're authenticated
-          // Only if we're not already subscribed (to prevent duplicates on reconnection)
-          // Don't subscribe if the current conversation is 'new' (which would be null)
-          if (this.isAuthenticated && this.currentProjectId && !this.isSubscribed && this.currentConversationId !== null) {
-            const convId = this.currentConversationId;
-            this.subscribe(this.currentProjectId, convId);
+          // Auto-subscribe only if we have a real conversation (not 'new' and not null)
+          if (this.isAuthenticated && this.currentProjectId && !this.isSubscribed && 
+              this.currentConversationId && this.currentConversationId !== 'new') {
+            this.subscribe(this.currentProjectId, this.currentConversationId);
           }
           break;
 

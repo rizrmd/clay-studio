@@ -24,7 +24,6 @@ interface SidebarState {
   renameDialogOpen: boolean;
   renamingConversation: Conversation | null;
   newTitle: string;
-  claudeMdModalOpen: boolean;
   isMobileMenuOpen: boolean;
   
   // Recently updated tracking
@@ -46,7 +45,6 @@ export const sidebarStore = proxy<SidebarState>({
   renameDialogOpen: false,
   renamingConversation: null,
   newTitle: '',
-  claudeMdModalOpen: false,
   isMobileMenuOpen: false,
   
   // Recently updated tracking
@@ -114,14 +112,6 @@ export const sidebarActions = {
     sidebarStore.newTitle = title;
   },
   
-  openClaudeMdModal: () => {
-    sidebarStore.claudeMdModalOpen = true;
-  },
-  
-  closeClaudeMdModal: () => {
-    sidebarStore.claudeMdModalOpen = false;
-  },
-  
   toggleMobileMenu: () => {
     sidebarStore.isMobileMenuOpen = !sidebarStore.isMobileMenuOpen;
   },
@@ -159,11 +149,13 @@ export const sidebarActions = {
   },
   
   toggleConversationSelection: (conversationId: string) => {
-    if (sidebarStore.selectedConversations.has(conversationId)) {
-      sidebarStore.selectedConversations.delete(conversationId);
+    const newSelected = new Set(sidebarStore.selectedConversations);
+    if (newSelected.has(conversationId)) {
+      newSelected.delete(conversationId);
     } else {
-      sidebarStore.selectedConversations.add(conversationId);
+      newSelected.add(conversationId);
     }
+    sidebarStore.selectedConversations = newSelected;
   },
   
   selectAllConversations: () => {

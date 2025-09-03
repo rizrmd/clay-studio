@@ -1,11 +1,10 @@
-import { useValtioAuth } from "@/hooks/use-valtio-auth";
+import { useAuth } from "@/hooks/use-auth";
 import { Navigate } from "react-router-dom";
 import { useEffect } from "react";
 import { useSnapshot } from "valtio";
 import api from "@/lib/utils/api";
 import { configPageStore, configPageActions } from "@/store/config-page-store";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AppHeader } from "@/components/layout/app-header";
 import { DomainManagement } from "@/components/root/domain-management";
 import { UserManagement } from "@/components/shared/user-management";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -15,7 +14,7 @@ import { Users, Globe } from "lucide-react";
 
 
 export function ConfigPage() {
-  const { user, isAuthenticated } = useValtioAuth();
+  const { user, isAuthenticated } = useAuth();
   const configSnapshot = useSnapshot(configPageStore);
 
   useEffect(() => {
@@ -65,7 +64,6 @@ export function ConfigPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      <AppHeader />
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}

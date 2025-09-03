@@ -2,12 +2,12 @@ import { useState, useEffect } from 'react'
 import { LoginForm } from '@/components/auth/login-form'
 import { RegisterForm } from '@/components/auth/register-form'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { useValtioAuth } from '@/hooks/use-valtio-auth'
+import { useAuth } from '@/hooks/use-auth'
 import { Navigate } from 'react-router-dom'
 
 export function AuthPage() {
   const [activeTab, setActiveTab] = useState<'login' | 'register'>('login')
-  const { registrationEnabled, firstClient, isAuthenticated, isSetupComplete } = useValtioAuth()
+  const { registrationEnabled, firstClient, isAuthenticated, isSetupComplete } = useAuth()
 
   // If registration is disabled, always show login tab
   useEffect(() => {

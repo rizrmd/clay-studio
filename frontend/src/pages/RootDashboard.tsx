@@ -23,13 +23,13 @@ import {
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { useValtioAuth } from "@/hooks/use-valtio-auth";
+import { useAuth } from "@/hooks/use-auth";
 
 export function RootDashboard() {
   const auth = useSnapshot(authStore);
   const rootDashboardSnapshot = useSnapshot(rootDashboardStore);
   const navigate = useNavigate();
-  const { logout } = useValtioAuth();
+  const { logout } = useAuth();
 
   useEffect(() => {
     // Check if user has root role
