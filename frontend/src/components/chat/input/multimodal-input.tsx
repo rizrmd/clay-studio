@@ -308,6 +308,8 @@ export function MultimodalInput({
     setInput(localInput);
     
     const allFiles = [...inputSnapshot.selectedFiles.map(f => f.file), ...externalFiles];
+    
+    // Call handleSubmit with the files
     handleSubmit(e, allFiles);
     
     // Clear local input and files
@@ -781,7 +783,7 @@ export function MultimodalInput({
                   }
                   type="submit"
                   disabled={
-                    !localInput.trim() || inputSnapshot.isUploading
+                    !localInput.trim() || inputSnapshot.isUploading || isLoading || isStreaming
                   }
                   className="h-8 w-8"
                 >

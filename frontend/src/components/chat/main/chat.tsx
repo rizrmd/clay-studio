@@ -9,6 +9,7 @@ import { useValtioChat } from "@/hooks/use-valtio-chat";
 import { useInputState } from "@/hooks/use-input-state";
 import { useViewportHeight } from "@/hooks/use-viewport-height";
 import { api } from "@/lib/utils/api";
+import { setConversationError } from "@/store/chat-store";
 import {
   AlertTriangle,
   FileText,
@@ -89,7 +90,16 @@ export function Chat({
   // Monitor WebSocket subscription status
   useEffect(() => {
     const checkSubscription = () => {
-      uiActions.setWsSubscribed(wsService.subscribed);
+      const isSubscribed = wsService.subscribed;
+      uiActions.setWsSubscribed(isSubscribed);
+      
+      // If not subscribed, try to reconnect
+      if (!isSubscribed && projectId && propConversationId) {
+        console.log('WebSocket not subscribed, attempting to reconnect...');
+        wsService.connect(projectId, propConversationId).catch(error => {
+          console.error('Failed to reconnect WebSocket:', error);
+        });
+      }
     };
 
     // Check every 500ms for subscription status changes
@@ -117,7 +127,9 @@ export function Chat({
 
   const handleSubmit = async (e: React.FormEvent, files?: File[]) => {
     e.preventDefault();
-    console.log('handleSubmit called with projectId:', projectId);
+    console.log('handleSubmit called with projectId:', projectId, 'conversationId:', propConversationId);
+    console.log('WebSocket subscribed:', wsService.subscribed);
+    console.log('Input:', input);
     if (!input.trim() || !projectId) return;
 
     // If there are forgotten messages, restore them first before sending
@@ -130,10 +142,23 @@ export function Chat({
     // Include any pending files from drag-drop along with form files
     const allFiles = [...(files || []), ...pendingFiles];
     setPendingFiles([]);
-    await sendMessage(
-      messageContent,
-      allFiles.length > 0 ? allFiles : undefined
-    );
+    
+    try {
+      // Ensure WebSocket is connected before sending
+      if (!wsService.subscribed) {
+        console.log('WebSocket not connected, attempting to connect...');
+        await wsService.connect(projectId, propConversationId || 'new');
+      }
+      
+      await sendMessage(
+        messageContent,
+        allFiles.length > 0 ? allFiles : undefined
+      );
+    } catch (error) {
+      console.error('Failed to send message:', error);
+      // Set error state to show to user
+      setConversationError(propConversationId || '', 'Failed to send message. Please try again.');
+    }
   };
 
   const handleResendMessage = async (message: any) => {
