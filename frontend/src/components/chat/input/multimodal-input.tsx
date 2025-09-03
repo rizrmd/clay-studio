@@ -785,6 +785,14 @@ export function MultimodalInput({
                   disabled={
                     !localInput.trim() || inputSnapshot.isUploading || isLoading || isStreaming
                   }
+                  onClick={(e) => {
+                    console.log('Send button clicked');
+                    console.log('Disabled state:', !localInput.trim() || inputSnapshot.isUploading || isLoading || isStreaming);
+                    console.log('localInput:', localInput);
+                    console.log('isUploading:', inputSnapshot.isUploading);
+                    console.log('isLoading:', isLoading);
+                    console.log('isStreaming:', isStreaming);
+                  }}
                   className="h-8 w-8"
                 >
                   <Send className="h-4 w-4" />

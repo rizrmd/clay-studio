@@ -130,6 +130,8 @@ export function Chat({
     console.log('handleSubmit called with projectId:', projectId, 'conversationId:', propConversationId);
     console.log('WebSocket subscribed:', wsService.subscribed);
     console.log('Input:', input);
+    console.log('sendMessage function:', sendMessage ? 'exists' : 'undefined');
+    console.log('WebSocket service methods:', Object.keys(wsService));
     if (!input.trim() || !projectId) return;
 
     // If there are forgotten messages, restore them first before sending
@@ -150,10 +152,37 @@ export function Chat({
         await wsService.connect(projectId, propConversationId || 'new');
       }
       
-      await sendMessage(
-        messageContent,
-        allFiles.length > 0 ? allFiles : undefined
-      );
+      console.log('Calling sendMessage with:', { messageContent, fileCount: allFiles.length });
+      
+      // Check if sendMessage is a function
+      if (typeof sendMessage === 'function') {
+        const result = await sendMessage(
+          messageContent,
+          allFiles.length > 0 ? allFiles : undefined
+        );
+        console.log('sendMessage completed:', result);
+      } else {
+        console.error('sendMessage is not a function');
+        // Try to send directly through WebSocket service if available
+        if (typeof wsService.sendMessage === 'function') {
+          try {
+            await wsService.sendMessage({
+              type: 'user_message',
+              content: messageContent,
+              files: allFiles.length > 0 ? allFiles.map(f => ({
+                name: f.name,
+                type: f.type,
+                size: f.size
+              })) : undefined
+            });
+            console.log('Message sent directly through WebSocket service');
+          } catch (wsError) {
+            console.error('Failed to send via WebSocket service:', wsError);
+          }
+        } else {
+          console.error('WebSocket service does not have sendMessage method');
+        }
+      }
     } catch (error) {
       console.error('Failed to send message:', error);
       // Set error state to show to user
