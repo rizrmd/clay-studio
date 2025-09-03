@@ -456,31 +456,36 @@ export const MessageListItem = memo(
                     />
                   </div>
                 )}
-              {/* Show tools used for messages (both streaming and completed) */}
-              {getToolNamesFromMessage(message as any).length > 0 &&
-                !message.isQueued && (
-                  <div className=" flex items-center gap-2">
-                    <div className="border px-1 py-[2px] rounded-sm">
-                      <ToolCallIndicator
-                        tools={getToolNamesFromMessage(message as any)}
-                        variant="compact"
-                        isCompleted={!isStreaming} // Show as in-progress while streaming
-                        messageId={message.id}
-                        toolUsages={message.tool_usages}
-                      />
-                    </div>
-                    <div className="text-xs">
-                      {(message.createdAt instanceof Date
-                        ? message.createdAt
-                        : new Date(message.createdAt)
-                      ).toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                        hour12: false,
-                      })}
-                    </div>
-                  </div>
-                )}
+               {/* Show tools used for messages (both streaming and completed) */}
+               {getToolNamesFromMessage(message as any).length > 0 &&
+                 !message.isQueued && (
+                   <div className=" flex items-center gap-2">
+                     <div className="border px-1 py-[2px] rounded-sm">
+                       <ToolCallIndicator
+                         tools={getToolNamesFromMessage(message as any)}
+                         variant="compact"
+                         isCompleted={!isStreaming} // Show as in-progress while streaming
+                         messageId={message.id}
+                         toolUsages={message.tool_usages}
+                       />
+                     </div>
+                     <div className="text-xs">
+                       {(message.createdAt instanceof Date
+                         ? message.createdAt
+                         : new Date(message.createdAt)
+                       ).toLocaleTimeString([], {
+                         hour: "2-digit",
+                         minute: "2-digit",
+                         hour12: false,
+                       })}
+                       {message.role === "assistant" && message.processing_time_ms && (
+                         <span className="ml-2 text-muted-foreground">
+                           • {Math.round(message.processing_time_ms / 1000)}s
+                         </span>
+                       )}
+                     </div>
+                   </div>
+                 )}
               <div className="text-xs text-muted-foreground">
                 {isQueued && !isEditing ? (
                   <div className="flex items-center gap-2">
@@ -504,14 +509,21 @@ export const MessageListItem = memo(
                   </div>
                 ) : !isQueued &&
                   !(getToolNamesFromMessage(message as any).length > 0) ? (
-                  (message.createdAt instanceof Date
-                    ? message.createdAt
-                    : new Date(message.createdAt)
-                  ).toLocaleTimeString([], {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                    hour12: false,
-                  })
+                  <>
+                    {(message.createdAt instanceof Date
+                      ? message.createdAt
+                      : new Date(message.createdAt)
+                    ).toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      hour12: false,
+                    })}
+                    {message.role === "assistant" && message.processing_time_ms && (
+                      <span className="ml-2 text-muted-foreground">
+                        • {Math.round(message.processing_time_ms / 1000)}s
+                      </span>
+                    )}
+                  </>
                 ) : null}
               </div>
             </div>

@@ -116,7 +116,6 @@ pub async fn handle_prompt_stream(
                 "mcp__data-analysis__schema_search".to_string(),
                 "mcp__data-analysis__schema_get".to_string(),
                 // Interaction Tools
-                "mcp__interaction__ask_user".to_string(),
                 "mcp__interaction__show_table".to_string(),
                 "mcp__interaction__show_chart".to_string(),
             ]),

@@ -7,7 +7,7 @@ import { uiStore, uiActions } from '../store/ui-store';
  * This preserves sidebar toggles, active tabs, and other UI preferences
  */
 export function useUIState() {
-  const snapshot = useSnapshot(uiStore);
+  const snapshot = useSnapshot(uiStore, { sync: true });
 
   const toggleSidebar = useCallback(() => {
     uiActions.toggleMainSidebar();

@@ -1,5 +1,6 @@
-import { useRef, useEffect, useCallback, useState } from "react";
+import { useRef, useEffect } from "react";
 import { useSnapshot } from "valtio";
+import { multimodalInputActions } from "@/store/multimodal-input-store";
 import {
   Send,
   Paperclip,
@@ -21,6 +22,7 @@ import { Input } from "@/components/ui/input";
 import { API_BASE_URL } from "@/lib/utils/url";
 import { FileBrowser } from "./file-browser";
 import { inputStore, inputActions } from "@/store/input-store";
+import { conversationStore } from "@/store/chat/conversation-store";
 
 interface ComponentFileWithDescription extends File {
   description?: string;
@@ -37,7 +39,7 @@ interface StoreFileWithDescription {
 interface MultimodalInputProps {
   input: string;
   setInput: (input: string) => void;
-  handleSubmit: (e: React.FormEvent, files?: ComponentFileWithDescription[]) => void;
+  handleSubmit: (e: React.FormEvent, message: string, files?: ComponentFileWithDescription[]) => void;
   isLoading?: boolean;
   isStreaming?: boolean;
   projectId?: string;
@@ -70,34 +72,19 @@ export function MultimodalInput({
 }: MultimodalInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const inputSnapshot = useSnapshot(inputStore);
-  const [localInput, setLocalInput] = useState(input);
-  const [uploadAbortController, setUploadAbortController] = useState<AbortController | null>(null);
-  const [editingDescription, setEditingDescription] = useState<{ [key: string]: boolean }>({});
-  const [fileDescriptions, setFileDescriptions] = useState<{ [key: string]: string }>({});
-  const [filePreviews, setFilePreviews] = useState<{ [key: string]: string }>({});
+  const inputSnapshot = useSnapshot(inputStore, { sync: true });
   const dragCounter = useRef(0);
-  const updateTimeout = useRef<NodeJS.Timeout>();
-  
-  // Sync local input with prop input when it changes externally
-  useEffect(() => {
-    setLocalInput(input);
-  }, [input]);
+
+  // Get active conversation ID - fallback to 'new' if not set
+  const activeConversationId = conversationStore.activeConversationId || 'new';
 
   // Sync local input with prop input when it changes externally
   useEffect(() => {
-    setLocalInput(input);
-  }, [input]);
-
-  // Debounced update to parent
-  const debouncedSetInput = useCallback((value: string) => {
-    if (updateTimeout.current) {
-      clearTimeout(updateTimeout.current);
+    if (activeConversationId) {
+      multimodalInputActions.setLocalInput(activeConversationId, input);
     }
-    updateTimeout.current = setTimeout(() => {
-      setInput(value);
-    }, 100);
-  }, [setInput]);
+  }, [input, activeConversationId]);
+
 
 
   // Focus the textarea when shouldFocus is true
@@ -114,6 +101,34 @@ export function MultimodalInput({
     }
   }, [projectId]);
 
+  // Debug logging for input state
+  useEffect(() => {
+    const isDisabled = inputSnapshot.isDragging || inputSnapshot.isUploading;
+    if (isDisabled) {
+      console.debug('Chat input disabled:', {
+        isDragging: inputSnapshot.isDragging,
+        isUploading: inputSnapshot.isUploading,
+        conversationId: activeConversationId
+      });
+    }
+  }, [inputSnapshot.isDragging, inputSnapshot.isUploading, activeConversationId]);
+
+  // Manual reset function for development/debugging
+  const resetInputState = () => {
+    inputActions.setDragging(false);
+    inputActions.setUploading(false);
+    inputActions.clearUploadProgress();
+    dragCounter.current = 0;
+    console.log('Manually reset input state');
+  };
+
+  // Expose reset function to window for debugging (only in development)
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'development') {
+      (window as any).resetChatInput = resetInputState;
+    }
+  }, []);
+
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
@@ -124,10 +139,7 @@ export function MultimodalInput({
         const reader = new FileReader();
         reader.onload = (e) => {
           if (e.target?.result) {
-            setFilePreviews((prev) => ({
-              ...prev,
-              [file?.name]: e.target!.result as string,
-            }));
+            multimodalInputActions.setFilePreview(activeConversationId, file.name, e.target!.result as string);
           }
         };
         reader.readAsDataURL(file);
@@ -151,9 +163,16 @@ export function MultimodalInput({
 
     inputActions.setUploading(true);
     const abortController = new AbortController();
-    setUploadAbortController(abortController);
+    multimodalInputActions.setUploadAbortController(activeConversationId, abortController);
 
     const uploadedFilesList: ComponentFileWithDescription[] = [];
+
+    // Ensure upload state is reset even if something goes wrong
+    const cleanup = () => {
+      inputActions.setUploading(false);
+      multimodalInputActions.setUploadAbortController(activeConversationId, null);
+      inputActions.clearUploadProgress();
+    };
 
     try {
       for (const file of files) {
@@ -180,19 +199,16 @@ export function MultimodalInput({
               const result = JSON.parse(xhr.responseText);
               const uploadedFile: ComponentFileWithDescription = {
                 ...file,
-                description: result.description || fileDescriptions[file?.name],
+                description: result.description || multimodalInputActions.getFileDescription(activeConversationId, file.name),
                 autoDescription: result.auto_description,
-                preview: filePreviews[file?.name]
+                preview: multimodalInputActions.getFilePreview(activeConversationId, file.name)
               };
               uploadedFilesList.push(uploadedFile);
 
               // Store the description
-              if (result.description || fileDescriptions[file?.name]) {
-                setFileDescriptions((prev) => ({
-                  ...prev,
-                  [file?.name]:
-                    result.description || fileDescriptions[file?.name] || "",
-                }));
+              if (result.description || multimodalInputActions.getFileDescription(activeConversationId, file.name)) {
+                multimodalInputActions.setFileDescription(activeConversationId, file.name,
+                  result.description || multimodalInputActions.getFileDescription(activeConversationId, file.name) || "");
               }
 
               resolve(result);
@@ -227,58 +243,49 @@ export function MultimodalInput({
         const fileWithDesc: StoreFileWithDescription = {
           file,
           description: file.description || '',
-          id: Date.now().toString() + Math.random().toString(36).substr(2, 9)
+          id: Date.now().toString() + Math.random().toString(36).substring(2, 11)
         };
         inputActions.addSelectedFile(fileWithDesc);
       });
     } catch (error) {
       // Upload error
+      console.error('Upload failed:', error);
       // Clear all progress on error
       inputActions.clearUploadProgress();
     } finally {
-      inputActions.setUploading(false);
-      setUploadAbortController(null);
+      cleanup();
     }
   };
 
   const cancelUpload = () => {
-    if (uploadAbortController) {
-      uploadAbortController.abort();
-      setUploadAbortController(null);
-      inputActions.setUploading(false);
-      inputActions.clearUploadProgress();
+    const abortController = multimodalInputActions.getUploadAbortController(activeConversationId);
+    if (abortController) {
+      abortController.abort();
     }
+    // Always reset state, even if no abort controller exists
+    multimodalInputActions.setUploadAbortController(activeConversationId, null);
+    inputActions.setUploading(false);
+    inputActions.clearUploadProgress();
   };
 
   const removeFile = (index: number) => {
     const file = inputSnapshot.selectedFiles[index];
     if (file) {
       // Clean up preview and description
-      setFilePreviews((prev) => {
-        const newPreviews = { ...prev };
-        delete newPreviews[file.file.name];
-        return newPreviews;
-      });
-      setFileDescriptions((prev) => {
-        const newDescriptions = { ...prev };
-        delete newDescriptions[file.file.name];
-        return newDescriptions;
-      });
-      setEditingDescription((prev) => {
-        const newEditing = { ...prev };
-        delete newEditing[file.file.name];
-        return newEditing;
-      });
+      multimodalInputActions.clearFilePreview(activeConversationId, file.file.name);
+      multimodalInputActions.clearFileDescription(activeConversationId, file.file.name);
+      multimodalInputActions.setEditingDescription(activeConversationId, file.file.name, false);
     }
     inputActions.removeSelectedFile(file?.id || index.toString());
   };
 
   const toggleEditDescription = (fileName: string) => {
-    setEditingDescription((prev) => ({ ...prev, [fileName]: !prev[fileName] }));
+    const currentEditing = multimodalInputActions.getEditingDescription(activeConversationId, fileName);
+    multimodalInputActions.setEditingDescription(activeConversationId, fileName, !currentEditing);
   };
 
   const updateFileDescription = (fileName: string, description: string) => {
-    setFileDescriptions((prev) => ({ ...prev, [fileName]: description }));
+    multimodalInputActions.setFileDescription(activeConversationId, fileName, description);
     // Update the file object if it exists - need to create new object due to valtio proxy
     const fileIndex = inputSnapshot.selectedFiles.findIndex(f => f.file?.name === fileName);
     if (fileIndex !== -1) {
@@ -295,25 +302,17 @@ export function MultimodalInput({
     e.preventDefault();
 
     // Don't submit if files are uploading or no input
-    if (inputSnapshot.isUploading || !localInput.trim()) {
+    if (inputSnapshot.isUploading || !input.trim()) {
       return;
     }
 
-    // Clear any pending debounced updates
-    if (updateTimeout.current) {
-      clearTimeout(updateTimeout.current);
-    }
-
-    // Ensure parent has the latest input value
-    setInput(localInput);
-    
     const allFiles = [...inputSnapshot.selectedFiles.map(f => f.file), ...externalFiles];
-    
-    // Call handleSubmit with the files
-    handleSubmit(e, allFiles);
-    
-    // Clear local input and files
-    setLocalInput("");
+
+    // Call handleSubmit with the message content and files
+    handleSubmit(e, input.trim(), allFiles);
+
+    // Clear local input and files after submit
+    multimodalInputActions.setLocalInput(activeConversationId, "");
     inputActions.clearSelectedFiles();
     onExternalFilesChange?.([]);
   };
@@ -331,7 +330,7 @@ export function MultimodalInput({
   const handleDragLeave = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    dragCounter.current--;
+    dragCounter.current = Math.max(0, dragCounter.current - 1);
     if (dragCounter.current === 0) {
       inputActions.setDragging(false);
     }
@@ -357,10 +356,7 @@ export function MultimodalInput({
           const reader = new FileReader();
           reader.onload = (e) => {
             if (e.target?.result) {
-              setFilePreviews((prev) => ({
-                ...prev,
-                [file?.name]: e.target!.result as string,
-              }));
+              multimodalInputActions.setFilePreview(activeConversationId, file.name, e.target!.result as string);
             }
           };
           reader.readAsDataURL(file);
@@ -372,6 +368,30 @@ export function MultimodalInput({
       e.dataTransfer.clearData();
     }
   };
+
+  // Add cleanup effect for drag state
+  useEffect(() => {
+    const handleGlobalDragEnd = () => {
+      inputActions.setDragging(false);
+      dragCounter.current = 0;
+    };
+
+    // Reset drag state on window blur/focus to handle edge cases
+    const handleWindowBlur = () => {
+      inputActions.setDragging(false);
+      dragCounter.current = 0;
+    };
+
+    window.addEventListener('blur', handleWindowBlur);
+    window.addEventListener('dragend', handleGlobalDragEnd);
+    document.addEventListener('dragend', handleGlobalDragEnd);
+
+    return () => {
+      window.removeEventListener('blur', handleWindowBlur);
+      window.removeEventListener('dragend', handleGlobalDragEnd);
+      document.removeEventListener('dragend', handleGlobalDragEnd);
+    };
+  }, []);
 
   // If not subscribed to WebSocket, show connecting message
   if (!isSubscribed) {
@@ -468,9 +488,9 @@ export function MultimodalInput({
                 {inputSnapshot.selectedFiles.map((fileData, index) => {
                   const file = fileData.file;
                   const isImage = file.type.startsWith("image/");
-                  const preview = filePreviews[file?.name];
-                  const isEditingDesc = editingDescription[file?.name];
-                  const description = fileDescriptions[file?.name] || fileData.description || "";
+                  const preview = multimodalInputActions.getFilePreview(activeConversationId, file.name);
+                  const isEditingDesc = multimodalInputActions.getEditingDescription(activeConversationId, file.name);
+                  const description = multimodalInputActions.getFileDescription(activeConversationId, file.name) || fileData.description || "";
 
                   return (
                     <div
@@ -572,11 +592,11 @@ export function MultimodalInput({
                 })}
                 {externalFiles.map((file, index) => {
                   const isImage = file.type.startsWith("image/");
-                  const preview = filePreviews[file?.name];
+                  const preview = multimodalInputActions.getFilePreview(activeConversationId, file.name);
                   const isEditingDesc =
-                    editingDescription[`external-${file?.name}`];
+                    multimodalInputActions.getEditingDescription(activeConversationId, `external-${file.name}`);
                   const description =
-                    fileDescriptions[`external-${file?.name}`] ||
+                    multimodalInputActions.getFileDescription(activeConversationId, `external-${file.name}`) ||
                     (file as ComponentFileWithDescription).description ||
                     "";
 
@@ -607,24 +627,14 @@ export function MultimodalInput({
                             </span>
                             <button
                               type="button"
-                              onClick={() => {
-                                onExternalFilesChange?.(
-                                  externalFiles.filter((_, i) => i !== index)
-                                );
-                                // Clean up preview and description
-                                setFilePreviews((prev) => {
-                                  const newPreviews = { ...prev };
-                                  delete newPreviews[file.name];
-                                  return newPreviews;
-                                });
-                                setFileDescriptions((prev) => {
-                                  const newDescriptions = { ...prev };
-                                  delete newDescriptions[
-                                    `external-${file.name}`
-                                  ];
-                                  return newDescriptions;
-                                });
-                              }}
+                                onClick={() => {
+                                  onExternalFilesChange?.(
+                                    externalFiles.filter((_, i) => i !== index)
+                                  );
+                                  // Clean up preview and description
+                                  multimodalInputActions.clearFilePreview(activeConversationId, file.name);
+                                  multimodalInputActions.clearFileDescription(activeConversationId, `external-${file.name}`);
+                                }}
                               className="ml-2 p-1 hover:text-destructive"
                             >
                               <X className="h-4 w-4" />
@@ -640,20 +650,14 @@ export function MultimodalInput({
                                   placeholder="Add a description..."
                                   value={description}
                                   onChange={(e) =>
-                                    setFileDescriptions((prev) => ({
-                                      ...prev,
-                                      [`external-${file?.name}`]: e.target.value,
-                                    }))
+                                    multimodalInputActions.setFileDescription(activeConversationId, `external-${file.name}`, e.target.value)
                                   }
                                   className="h-7 text-xs"
                                   autoFocus
                                   onKeyDown={(e) => {
                                     if (e.key === "Enter") {
                                       e.preventDefault();
-                                      setEditingDescription((prev) => ({
-                                        ...prev,
-                                        [`external-${file?.name}`]: false,
-                                      }));
+                                      multimodalInputActions.setEditingDescription(activeConversationId, `external-${file.name}`, false);
                                     }
                                   }}
                                 />
@@ -663,10 +667,7 @@ export function MultimodalInput({
                                   variant="ghost"
                                   className="h-7 w-7"
                                   onClick={() =>
-                                    setEditingDescription((prev) => ({
-                                      ...prev,
-                                      [`external-${file?.name}`]: false,
-                                    }))
+                                    multimodalInputActions.setEditingDescription(activeConversationId, `external-${file.name}`, false)
                                   }
                                 >
                                   <Check className="h-3 w-3" />
@@ -687,10 +688,7 @@ export function MultimodalInput({
                                   variant="ghost"
                                   className="h-5 w-5 opacity-0 group-hover:opacity-100 transition-opacity"
                                   onClick={() =>
-                                    setEditingDescription((prev) => ({
-                                      ...prev,
-                                      [`external-${file?.name}`]: true,
-                                    }))
+                                    multimodalInputActions.setEditingDescription(activeConversationId, `external-${file.name}`, true)
                                   }
                                 >
                                   <Edit2 className="h-3 w-3" />
@@ -710,11 +708,11 @@ export function MultimodalInput({
       )}
       <Textarea
         ref={textareaRef}
-        value={localInput}
+        value={input}
         autoFocus
         onChange={(e) => {
-          setLocalInput(e.target.value);
-          debouncedSetInput(e.target.value);
+          setInput(e.target.value);
+          multimodalInputActions.setLocalInput(activeConversationId, e.target.value);
         }}
         onEnterSubmit={(e) => handleFormSubmit(e as any)}
         placeholder={
@@ -775,7 +773,7 @@ export function MultimodalInput({
                 <Button
                   size="icon"
                   variant={
-                    !localInput.trim() || inputSnapshot.isUploading
+                    !input.trim() || inputSnapshot.isUploading
                       ? "outline"
                       : isLoading || isStreaming
                       ? "secondary"
@@ -783,16 +781,8 @@ export function MultimodalInput({
                   }
                   type="submit"
                   disabled={
-                    !localInput.trim() || inputSnapshot.isUploading || isLoading || isStreaming
+                    !input.trim() || inputSnapshot.isUploading || isLoading || isStreaming
                   }
-                  onClick={(e) => {
-                    console.log('Send button clicked');
-                    console.log('Disabled state:', !localInput.trim() || inputSnapshot.isUploading || isLoading || isStreaming);
-                    console.log('localInput:', localInput);
-                    console.log('isUploading:', inputSnapshot.isUploading);
-                    console.log('isLoading:', isLoading);
-                    console.log('isStreaming:', isStreaming);
-                  }}
                   className="h-8 w-8"
                 >
                   <Send className="h-4 w-4" />
@@ -838,7 +828,7 @@ export function MultimodalInput({
               const storeFile: StoreFileWithDescription = {
                 file,
                 description: (file as any).description || '',
-                id: (file as any).fileId || Date.now().toString() + Math.random().toString(36).substr(2, 9)
+                id: (file as any).fileId || Date.now().toString() + Math.random().toString(36).substring(2, 11)
               };
               inputActions.addSelectedFile(storeFile);
             });
@@ -851,10 +841,7 @@ export function MultimodalInput({
                 (file as any).autoDescription ||
                 "";
               if (description) {
-                setFileDescriptions((prev) => ({
-                  ...prev,
-                  [file?.name]: description,
-                }));
+                multimodalInputActions.setFileDescription(activeConversationId, file.name, description);
               }
 
               // Generate preview for image files
@@ -863,10 +850,7 @@ export function MultimodalInput({
                 if (clientId && projectId) {
                   const fileName = (file as any).filePath.split("/").pop();
                   const previewUrl = `${API_BASE_URL}/uploads/${clientId}/${projectId}/${fileName}`;
-                  setFilePreviews((prev) => ({
-                    ...prev,
-                    [file?.name]: previewUrl,
-                  }));
+                  multimodalInputActions.setFilePreview(activeConversationId, file.name, previewUrl);
                 }
               }
             });

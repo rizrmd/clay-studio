@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useEffect } from 'react';
+import { useSnapshot } from 'valtio';
 import { FileText, Edit2, Save, X, Loader2, Info } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,6 +11,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { api } from '@/lib/utils/api';
+import { fileManagerStore, fileManagerActions } from '@/store/file-manager-store';
 
 interface FileUpload {
   id: string;
@@ -32,11 +34,7 @@ interface FileManagerProps {
 }
 
 export function FileManager({ projectId, conversationId, onFileSelect }: FileManagerProps) {
-  const [files, setFiles] = useState<FileUpload[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [editingFile, setEditingFile] = useState<string | null>(null);
-  const [editDescription, setEditDescription] = useState('');
-  const [savingDescription, setSavingDescription] = useState(false);
+  const fileManagerSnapshot = useSnapshot(fileManagerStore);
 
   useEffect(() => {
     fetchFiles();
@@ -44,6 +42,7 @@ export function FileManager({ projectId, conversationId, onFileSelect }: FileMan
 
   const fetchFiles = async () => {
     try {
+      fileManagerActions.setLoading(true);
       const clientId = localStorage.getItem('activeClientId');
       if (!clientId) return;
 
@@ -51,7 +50,7 @@ export function FileManager({ projectId, conversationId, onFileSelect }: FileMan
         client_id: clientId,
         project_id: projectId,
       });
-      
+
       if (conversationId) {
         params.append('conversation_id', conversationId);
       }
@@ -60,27 +59,17 @@ export function FileManager({ projectId, conversationId, onFileSelect }: FileMan
 
       if (response.ok) {
         const data = await response.json();
-        setFiles(data);
+        fileManagerActions.setFiles(data);
       }
     } catch (error) {
       // Failed to fetch files
     } finally {
-      setLoading(false);
+      fileManagerActions.setLoading(false);
     }
   };
 
-  const startEditDescription = (file: FileUpload) => {
-    setEditingFile(file.id);
-    setEditDescription(file.description || file.auto_description || '');
-  };
-
-  const cancelEdit = () => {
-    setEditingFile(null);
-    setEditDescription('');
-  };
-
   const saveDescription = async (fileId: string) => {
-    setSavingDescription(true);
+    fileManagerActions.setSavingDescription(true);
     try {
       const response = await api.fetchStream(`/uploads/${fileId}/description`, {
         method: 'PUT',
@@ -88,20 +77,20 @@ export function FileManager({ projectId, conversationId, onFileSelect }: FileMan
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          description: editDescription,
+          description: fileManagerSnapshot.editDescription,
         }),
       });
 
       if (response.ok) {
         const updatedFile = await response.json();
-        setFiles(files.map(f => f.id === fileId ? updatedFile : f));
-        setEditingFile(null);
-        setEditDescription('');
+        fileManagerActions.updateFile(fileId, updatedFile);
+        fileManagerActions.setEditingFile(null);
+        fileManagerActions.setEditDescription('');
       }
     } catch (error) {
       // Failed to update description
     } finally {
-      setSavingDescription(false);
+      fileManagerActions.setSavingDescription(false);
     }
   };
 
@@ -120,7 +109,7 @@ export function FileManager({ projectId, conversationId, onFileSelect }: FileMan
     });
   };
 
-  if (loading) {
+  if (fileManagerSnapshot.loading) {
     return (
       <div className="flex items-center justify-center p-8">
         <Loader2 className="h-6 w-6 animate-spin" />
@@ -128,7 +117,7 @@ export function FileManager({ projectId, conversationId, onFileSelect }: FileMan
     );
   }
 
-  if (files.length === 0) {
+  if (fileManagerSnapshot.files.length === 0) {
     return (
       <div className="text-center p-8 text-muted-foreground">
         No files uploaded yet
@@ -139,11 +128,11 @@ export function FileManager({ projectId, conversationId, onFileSelect }: FileMan
   return (
     <div className="space-y-4">
       <div className="text-sm text-muted-foreground">
-        {files.length} file{files.length !== 1 ? 's' : ''} uploaded
+        {fileManagerSnapshot.files.length} file{fileManagerSnapshot.files.length !== 1 ? 's' : ''} uploaded
       </div>
-      
+
       <div className="grid gap-3">
-        {files.map((file) => (
+        {fileManagerSnapshot.files.map((file: FileUpload) => (
           <Card key={file.id} className="hover:shadow-md transition-shadow">
             <CardHeader className="pb-3">
               <div className="flex items-start justify-between">
@@ -165,22 +154,22 @@ export function FileManager({ projectId, conversationId, onFileSelect }: FileMan
             </CardHeader>
             
             <CardContent className="pt-0">
-              {editingFile === file.id ? (
+              {fileManagerSnapshot.editingFile === file.id ? (
                 <div className="flex gap-2">
                   <Input
-                    value={editDescription}
-                    onChange={(e) => setEditDescription(e.target.value)}
+                    value={fileManagerSnapshot.editDescription}
+                    onChange={(e) => fileManagerActions.setEditDescription(e.target.value)}
                     placeholder="Add a description..."
                     className="flex-1"
-                    disabled={savingDescription}
+                    disabled={fileManagerSnapshot.savingDescription}
                   />
                   <Button
                     size="icon"
                     variant="ghost"
                     onClick={() => saveDescription(file.id)}
-                    disabled={savingDescription}
+                    disabled={fileManagerSnapshot.savingDescription}
                   >
-                    {savingDescription ? (
+                    {fileManagerSnapshot.savingDescription ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (
                       <Save className="h-4 w-4" />
@@ -189,8 +178,8 @@ export function FileManager({ projectId, conversationId, onFileSelect }: FileMan
                   <Button
                     size="icon"
                     variant="ghost"
-                    onClick={cancelEdit}
-                    disabled={savingDescription}
+                    onClick={fileManagerActions.cancelEdit}
+                    disabled={fileManagerSnapshot.savingDescription}
                   >
                     <X className="h-4 w-4" />
                   </Button>
@@ -214,26 +203,26 @@ export function FileManager({ projectId, conversationId, onFileSelect }: FileMan
                           </TooltipProvider>
                         )}
                       </div>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-6 w-6"
-                        onClick={() => startEditDescription(file)}
-                      >
-                        <Edit2 className="h-3 w-3" />
-                      </Button>
+                       <Button
+                         size="icon"
+                         variant="ghost"
+                         className="h-6 w-6"
+                         onClick={() => fileManagerActions.startEditDescription(file)}
+                       >
+                         <Edit2 className="h-3 w-3" />
+                       </Button>
                     </div>
                   )}
                   
                   {!file.description && !file.auto_description && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => startEditDescription(file)}
-                      className="text-xs"
-                    >
-                      Add description
-                    </Button>
+                     <Button
+                       size="sm"
+                       variant="ghost"
+                       onClick={() => fileManagerActions.startEditDescription(file)}
+                       className="text-xs"
+                     >
+                       Add description
+                     </Button>
                   )}
                   
                   {file.preview && (

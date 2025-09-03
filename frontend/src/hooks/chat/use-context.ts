@@ -1,7 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/utils/api";
-import { setConversationContext, cacheProjectContext } from "@/store/chat-store";
+import { cacheProjectContext } from "@/store/chat-store";
 
 /**
  * Hook for managing conversation-specific context using Valtio
@@ -18,12 +18,25 @@ export function useConversationContext(conversationId: string | null) {
   } = useQuery({
     queryKey: ["conversationContext", conversationId],
     queryFn: async () => {
-      if (!conversationId) throw new Error("Conversation ID required");
+      if (!conversationId || conversationId === 'new') {
+        // Return empty context for new conversations
+        return {
+          conversation_id: 'new',
+          project_id: projectId || '',
+          messages: [],
+          summary: null,
+          data_sources: [],
+          available_tools: [],
+          project_settings: null,
+          total_messages: 0,
+          context_strategy: 'full_history',
+        };
+      }
 
       const response = await api.fetchStream(
         `/conversations/${conversationId}/context`
       );
-      
+
       if (!response.ok) {
         // If conversation doesn't exist (404), redirect to /new
         if (response.status === 404 && projectId) {
@@ -32,25 +45,9 @@ export function useConversationContext(conversationId: string | null) {
         throw new Error(`Failed to fetch conversation context: ${response.status}`);
       }
 
-      const data = await response.json();
-
-      // Cache the context in our store
-      if (conversationId) {
-        setConversationContext(conversationId, data);
-      }
-
-      return data;
+      return response.json();
     },
     enabled: !!conversationId,
-    staleTime: 1000 * 60 * 5, // Context is fresh for 5 minutes
-    gcTime: 1000 * 60 * 30, // Keep in cache for 30 minutes
-    retry: (failureCount, error: any) => {
-      // Don't retry on 404 errors
-      if (error?.message?.includes('404')) {
-        return false;
-      }
-      return failureCount < 3;
-    },
   });
 
   return {

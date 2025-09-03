@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useSnapshot } from 'valtio'
 import { CreateClientRequest, rootService } from '@/lib/services/root-service'
+import { addClientDialogStore, addClientDialogActions } from '@/store/add-client-dialog-store'
 import {
   Dialog,
   DialogContent,
@@ -22,57 +23,47 @@ interface AddClientDialogProps {
 }
 
 export function AddClientDialog({ open, onOpenChange, onSuccess }: AddClientDialogProps) {
-  const [formData, setFormData] = useState<CreateClientRequest>({
-    name: '',
-    description: '',
-    domains: []
-  })
-  const [domainsInput, setDomainsInput] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const dialogSnapshot = useSnapshot(addClientDialogStore)
 
   const handleSubmit = async () => {
-    if (!formData.name.trim()) {
-      setError('Client name is required')
+    if (!dialogSnapshot.formData.name.trim()) {
+      addClientDialogActions.setError('Client name is required')
       return
     }
 
     try {
-      setLoading(true)
-      setError(null)
-      
+      addClientDialogActions.setLoading(true)
+      addClientDialogActions.setError(null)
+
       // Parse domains from comma-separated input
-      const domains = domainsInput
+      const domains = dialogSnapshot.domainsInput
         .split(',')
-        .map(d => d.trim())
-        .filter(d => d.length > 0)
-      
+        .map((d: string) => d.trim())
+        .filter((d: string) => d.length > 0)
+
       const requestData: CreateClientRequest = {
-        ...formData,
+        ...dialogSnapshot.formData,
         domains: domains.length > 0 ? domains : undefined
       }
-      
+
       await rootService.createClient(requestData)
-      
+
       // Reset form
-      setFormData({ name: '', description: '', domains: [] })
-      setDomainsInput('')
-      
+      addClientDialogActions.resetForm()
+
       // Close dialog and refresh
       onOpenChange(false)
       onSuccess()
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to create client')
+      addClientDialogActions.setError(err.response?.data?.error || 'Failed to create client')
     } finally {
-      setLoading(false)
+      addClientDialogActions.setLoading(false)
     }
   }
 
   const handleClose = () => {
     // Reset form when closing
-    setFormData({ name: '', description: '', domains: [] })
-    setDomainsInput('')
-    setError(null)
+    addClientDialogActions.resetForm()
     onOpenChange(false)
   }
 
@@ -89,10 +80,10 @@ export function AddClientDialog({ open, onOpenChange, onSuccess }: AddClientDial
           </DialogDescription>
         </DialogHeader>
         
-        {error && (
+        {dialogSnapshot.error && (
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
-            <AlertDescription>{error}</AlertDescription>
+            <AlertDescription>{dialogSnapshot.error}</AlertDescription>
           </Alert>
         )}
         
@@ -102,9 +93,9 @@ export function AddClientDialog({ open, onOpenChange, onSuccess }: AddClientDial
             <Input
               id="name"
               placeholder="e.g., Acme Corporation"
-              value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              disabled={loading}
+              value={dialogSnapshot.formData.name}
+              onChange={(e) => addClientDialogActions.updateFormData({ name: e.target.value })}
+              disabled={dialogSnapshot.loading}
             />
           </div>
           
@@ -113,9 +104,9 @@ export function AddClientDialog({ open, onOpenChange, onSuccess }: AddClientDial
             <Textarea
               id="description"
               placeholder="Brief description of the client..."
-              value={formData.description || ''}
-              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              disabled={loading}
+              value={dialogSnapshot.formData.description || ''}
+              onChange={(e) => addClientDialogActions.updateFormData({ description: e.target.value })}
+              disabled={dialogSnapshot.loading}
               rows={3}
             />
           </div>
@@ -128,9 +119,9 @@ export function AddClientDialog({ open, onOpenChange, onSuccess }: AddClientDial
             <Input
               id="domains"
               placeholder="e.g., example.com, app.example.com"
-              value={domainsInput}
-              onChange={(e) => setDomainsInput(e.target.value)}
-              disabled={loading}
+              value={dialogSnapshot.domainsInput}
+              onChange={(e) => addClientDialogActions.setDomainsInput(e.target.value)}
+              disabled={dialogSnapshot.loading}
             />
             <p className="text-xs text-muted-foreground">
               Optional: Restrict client access to specific domains
@@ -139,11 +130,11 @@ export function AddClientDialog({ open, onOpenChange, onSuccess }: AddClientDial
         </div>
         
         <DialogFooter>
-          <Button variant="outline" onClick={handleClose} disabled={loading}>
+          <Button variant="outline" onClick={handleClose} disabled={dialogSnapshot.loading}>
             Cancel
           </Button>
-          <Button onClick={handleSubmit} disabled={loading || !formData.name.trim()}>
-            {loading ? 'Creating...' : 'Create Client'}
+          <Button onClick={handleSubmit} disabled={dialogSnapshot.loading || !dialogSnapshot.formData.name.trim()}>
+            {dialogSnapshot.loading ? 'Creating...' : 'Create Client'}
           </Button>
         </DialogFooter>
       </DialogContent>

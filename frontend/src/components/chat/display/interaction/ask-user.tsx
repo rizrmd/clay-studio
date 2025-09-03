@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useMemo } from "react";
+import { useSnapshot } from "valtio";
+import { proxy } from "valtio";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,6 +12,13 @@ interface AskUserOption {
   value: string;
   label: string;
   description?: string;
+}
+
+interface AskUserState {
+  selectedValues: string[];
+  inputValue: string;
+  hasSubmitted: boolean;
+  selectedOption: string | null;
 }
 
 interface AskUserProps {
@@ -38,39 +47,51 @@ export function AskUser({
   selectedResponse,
   onScroll,
 }: AskUserProps) {
-  const [selectedValues, setSelectedValues] = useState<string[]>([]);
-  const [inputValue, setInputValue] = useState("");
-  const [hasSubmitted, setHasSubmitted] = useState(hasResponse);
+  // Create a local Valtio store for this component instance
+  const store = useMemo(() => proxy<AskUserState>({
+    selectedValues: (() => {
+      if (
+        hasResponse &&
+        Array.isArray(selectedResponse) &&
+        promptType === "checkbox"
+      ) {
+        return selectedResponse;
+      }
+      return [];
+    })(),
+    inputValue: "",
+    hasSubmitted: hasResponse,
+    selectedOption: (() => {
+      if (
+        hasResponse &&
+        typeof selectedResponse === "string" &&
+        promptType === "buttons"
+      ) {
+        // Find the option that matches the response content
+        const matchingOption = options.find(
+          (opt) =>
+            opt.label === selectedResponse || opt.value === selectedResponse
+        );
+        return matchingOption ? matchingOption.value : null;
+      }
+      return null;
+    })(),
+  }), [hasResponse, selectedResponse, promptType, options]);
 
-  // Determine the selected option from the response
-  const [selectedOption, setSelectedOption] = useState<string | null>(() => {
-    if (
-      hasResponse &&
-      typeof selectedResponse === "string" &&
-      promptType === "buttons"
-    ) {
-      // Find the option that matches the response content
-      const matchingOption = options.find(
-        (opt) =>
-          opt.label === selectedResponse || opt.value === selectedResponse
-      );
-      return matchingOption ? matchingOption.value : null;
-    }
-    return null;
-  });
+  const snapshot = useSnapshot(store);
 
   const handleCheckboxChange = (value: string, checked: boolean) => {
     if (checked) {
-      setSelectedValues([...selectedValues, value]);
+      store.selectedValues = [...snapshot.selectedValues, value];
     } else {
-      setSelectedValues(selectedValues.filter((v) => v !== value));
+      store.selectedValues = snapshot.selectedValues.filter((v: string) => v !== value);
     }
   };
 
   const handleButtonClick = (value: string) => {
-    if (hasSubmitted || isDisabled) return;
-    setSelectedOption(value);
-    setHasSubmitted(true);
+    if (snapshot.hasSubmitted || isDisabled) return;
+    store.selectedOption = value;
+    store.hasSubmitted = true;
     onSubmit(value);
 
     // Scroll to bottom after a short delay to show the response
@@ -82,9 +103,9 @@ export function AskUser({
   };
 
   const handleCheckboxSubmit = () => {
-    if (hasSubmitted || isDisabled || selectedValues.length === 0) return;
-    setHasSubmitted(true);
-    onSubmit(selectedValues);
+    if (snapshot.hasSubmitted || isDisabled || snapshot.selectedValues.length === 0) return;
+    store.hasSubmitted = true;
+    onSubmit([...snapshot.selectedValues]);
 
     // Scroll to bottom after a short delay to show the response
     if (onScroll) {
@@ -95,9 +116,9 @@ export function AskUser({
   };
 
   const handleInputSubmit = () => {
-    if (hasSubmitted || isDisabled || !inputValue.trim()) return;
-    setHasSubmitted(true);
-    onSubmit(inputValue);
+    if (snapshot.hasSubmitted || isDisabled || !snapshot.inputValue.trim()) return;
+    store.hasSubmitted = true;
+    onSubmit(snapshot.inputValue);
 
     // Scroll to bottom after a short delay to show the response
     if (onScroll) {
@@ -107,7 +128,7 @@ export function AskUser({
     }
   };
 
-  const isFormDisabled = hasSubmitted || isDisabled || hasResponse;
+  const isFormDisabled = snapshot.hasSubmitted || isDisabled || hasResponse;
 
   return (
     <Card className={cn("p-4 border-blue-200 bg-blue-50/50")}>
@@ -139,10 +160,10 @@ export function AskUser({
                 className={cn(
                   "w-full justify-start text-left",
                   option.description && "min-h-[60px]",
-                  selectedOption === option.value &&
+                  snapshot.selectedOption === option.value &&
                     "bg-green-50 border-green-200 hover:bg-green-100",
                   isFormDisabled &&
-                    selectedOption !== option.value &&
+                    snapshot.selectedOption !== option.value &&
                     "opacity-40",
                   isFormDisabled && "cursor-default"
                 )}
@@ -156,7 +177,7 @@ export function AskUser({
                       </div>
                     )}
                   </div>
-                  {selectedOption === option.value && (
+                  {snapshot.selectedOption === option.value && (
                     <Check className="h-4 w-4 text-green-600 ml-2" />
                   )}
                 </div>
@@ -173,7 +194,7 @@ export function AskUser({
                   <input
                     type="checkbox"
                     id={option.value}
-                    checked={selectedValues.includes(option.value)}
+                     checked={snapshot.selectedValues.includes(option.value)}
                     onChange={(e) =>
                       handleCheckboxChange(option.value, e.target.checked)
                     }
@@ -201,7 +222,7 @@ export function AskUser({
             </div>
             <Button
               onClick={handleCheckboxSubmit}
-              disabled={isFormDisabled || selectedValues.length === 0}
+              disabled={isFormDisabled || snapshot.selectedValues.length === 0}
               size="sm"
               className="w-full"
             >
@@ -215,8 +236,8 @@ export function AskUser({
           <div className="space-y-3">
             <Input
               type={inputType}
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
+              value={snapshot.inputValue}
+              onChange={(e) => store.inputValue = e.target.value}
               placeholder={placeholder}
               disabled={isFormDisabled}
               className="bg-white"
@@ -229,7 +250,7 @@ export function AskUser({
             />
             <Button
               onClick={handleInputSubmit}
-              disabled={isFormDisabled || !inputValue.trim()}
+              disabled={isFormDisabled || !snapshot.inputValue.trim()}
               size="sm"
               className="w-full"
             >
@@ -240,7 +261,7 @@ export function AskUser({
         )}
 
         {/* Status indicator for input and checkbox types */}
-        {hasSubmitted && promptType !== "buttons" && (
+        {snapshot.hasSubmitted && promptType !== "buttons" && (
           <div className="text-xs text-green-600 flex items-center gap-1">
             <UserCheck className="h-3 w-3" />
             Response submitted

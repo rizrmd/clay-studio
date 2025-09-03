@@ -40,6 +40,7 @@ export interface DisplayMessage extends Message {
   isQueued?: boolean;
   queuePosition?: number;
   isEditing?: boolean;
+  processing_time_ms?: number;
 }
 
 export interface MessagesProps {

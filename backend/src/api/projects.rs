@@ -71,27 +71,29 @@ pub async fn get_project_context(
     
     // Fetch project details from database
     let project_row = sqlx::query(
-        "SELECT name, settings, organization_settings, created_at, updated_at 
-         FROM projects 
+        "SELECT name, settings, organization_settings, created_at, updated_at, client_id
+         FROM projects
          WHERE id = $1"
     )
     .bind(&project_id)
     .fetch_optional(&state.db_pool)
     .await
     .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
-    
-    let (project_name, project_settings_json, org_settings_json) = if let Some(row) = project_row {
+
+    let (project_name, project_settings_json, org_settings_json, project_client_id) = if let Some(row) = project_row {
         (
             row.get::<String, _>("name"),
             row.get::<Option<serde_json::Value>, _>("settings").unwrap_or_else(|| serde_json::json!({})),
-            row.get::<Option<serde_json::Value>, _>("organization_settings").unwrap_or_else(|| serde_json::json!({}))
+            row.get::<Option<serde_json::Value>, _>("organization_settings").unwrap_or_else(|| serde_json::json!({})),
+            row.get::<Uuid, _>("client_id")
         )
     } else {
         // Default values if project not found
         (
             "Unknown Project".to_string(),
             serde_json::json!({}),
-            serde_json::json!({})
+            serde_json::json!({}),
+            Uuid::nil() // This will cause an error if used, but project should exist
         )
     };
     
@@ -164,14 +166,8 @@ pub async fn get_project_context(
     recent_activity.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
     recent_activity.truncate(10); // Keep only the 10 most recent activities
 
-    // Update CLAUDE.md with current datasource information if client is available
-    if let Ok(Some(client_row)) = sqlx::query(
-        "SELECT id FROM clients WHERE status = 'active' LIMIT 1"
-    )
-    .fetch_optional(&state.db_pool)
-    .await {
-        let client_id: Uuid = client_row.get("id");
-        
+    // Generate enhanced CLAUDE.md with datasource information if datasources exist
+    if !data_sources.is_empty() {
         // Get datasources for CLAUDE.md generation
         let datasource_values: Vec<serde_json::Value> = data_sources.iter().map(|ds| {
             serde_json::json!({
@@ -181,17 +177,19 @@ pub async fn get_project_context(
                 "schema_info": ds.schema_info,
             })
         }).collect();
-        
+
         // Generate enhanced CLAUDE.md with datasource information
         let claude_md_content = claude_md_template::generate_claude_md_with_datasources(
             &project_id,
             &project_name,
             datasource_values
         ).await;
-        
-        // Save the updated CLAUDE.md
-        let project_manager = ProjectManager::new();
-        let _ = project_manager.save_claude_md_content(client_id, &project_id, &claude_md_content);
+
+        // Save the updated CLAUDE.md using the project's client_id
+        if !project_client_id.is_nil() {
+            let project_manager = ProjectManager::new();
+            let _ = project_manager.save_claude_md_content(project_client_id, &project_id, &claude_md_content);
+        }
     }
 
     let project_context = ProjectContextResponse {
@@ -527,6 +525,100 @@ pub async fn save_claude_md(
     
     res.render(Json(SaveClaudeMdResponse {
         message: "CLAUDE.md saved successfully".to_string(),
+    }));
+    Ok(())
+}
+
+#[handler]
+pub async fn refresh_claude_md(
+    req: &mut Request,
+    depot: &mut Depot,
+    res: &mut Response,
+) -> Result<(), AppError> {
+    let state = depot.obtain::<AppState>().unwrap();
+    let project_id = req.param::<String>("project_id")
+        .ok_or(AppError::BadRequest("Missing project_id".to_string()))?;
+
+    // Get current user's client_id
+    let client_id = get_current_client_id(depot)?;
+
+    // Verify the project belongs to the current user (unless they're root)
+    let project_exists = if is_current_user_root(depot) {
+        sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM projects WHERE id = $1 AND deleted_at IS NULL)"
+        )
+        .bind(&project_id)
+        .fetch_one(&state.db_pool)
+        .await
+        .unwrap_or(false)
+    } else {
+        sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM projects WHERE id = $1 AND client_id = $2 AND deleted_at IS NULL)"
+        )
+        .bind(&project_id)
+        .bind(client_id)
+        .fetch_one(&state.db_pool)
+        .await
+        .unwrap_or(false)
+    };
+
+    if !project_exists {
+        return Err(AppError::NotFound("Project not found".to_string()));
+    }
+
+    // Get project name and datasources
+    let project_row = sqlx::query(
+        "SELECT name FROM projects WHERE id = $1"
+    )
+    .bind(&project_id)
+    .fetch_one(&state.db_pool)
+    .await
+    .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
+
+    let project_name: String = project_row.get("name");
+
+    // Get datasources for CLAUDE.md generation
+    let data_sources = sqlx::query(
+        "SELECT id, name, source_type, schema_info FROM data_sources WHERE project_id = $1 AND deleted_at IS NULL"
+    )
+    .bind(&project_id)
+    .fetch_all(&state.db_pool)
+    .await
+    .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
+
+    // Generate enhanced CLAUDE.md with datasource information if datasources exist
+    let claude_md_content = if !data_sources.is_empty() {
+        let datasource_values: Vec<serde_json::Value> = data_sources.iter().map(|ds| {
+            serde_json::json!({
+                "id": ds.get::<String, _>("id"),
+                "name": ds.get::<String, _>("name"),
+                "source_type": ds.get::<String, _>("source_type"),
+                "schema_info": ds.get::<Option<String>, _>("schema_info"),
+            })
+        }).collect();
+
+        claude_md_template::generate_claude_md_with_datasources(
+            &project_id,
+            &project_name,
+            datasource_values
+        ).await
+    } else {
+        claude_md_template::generate_claude_md(&project_id, &project_name)
+    };
+
+    // Save the updated CLAUDE.md
+    let project_manager = ProjectManager::new();
+    project_manager.save_claude_md_content(client_id, &project_id, &claude_md_content)?;
+
+    #[derive(Serialize)]
+    struct RefreshClaudeMdResponse {
+        message: String,
+        datasources_count: usize,
+    }
+
+    res.render(Json(RefreshClaudeMdResponse {
+        message: "CLAUDE.md refreshed successfully with latest datasource information".to_string(),
+        datasources_count: data_sources.len(),
     }));
     Ok(())
 }

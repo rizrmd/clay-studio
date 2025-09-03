@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect } from "react";
 import { useSnapshot } from "valtio";
+import { rootDashboardStore, rootDashboardActions } from "@/store/root-dashboard-store";
+import { useNavigate } from "react-router-dom";
 import { authStore } from "@/store/auth-store";
 import { rootService, ClientRootResponse } from "@/lib/services/root-service";
 import { ClientManagement } from "@/components/root/client-management";
@@ -26,18 +27,9 @@ import { useValtioAuth } from "@/hooks/use-valtio-auth";
 
 export function RootDashboard() {
   const auth = useSnapshot(authStore);
+  const rootDashboardSnapshot = useSnapshot(rootDashboardStore);
   const navigate = useNavigate();
   const { logout } = useValtioAuth();
-  const [clients, setClients] = useState<ClientRootResponse[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [addDialogOpen, setAddDialogOpen] = useState(false);
-  const [stats, setStats] = useState({
-    totalClients: 0,
-    activeClients: 0,
-    totalUsers: 0,
-    totalConversations: 0,
-  });
 
   useEffect(() => {
     // Check if user has root role
@@ -51,10 +43,10 @@ export function RootDashboard() {
 
   const loadClients = async () => {
     try {
-      setLoading(true);
-      setError(null);
+      rootDashboardActions.setLoading(true);
+      rootDashboardActions.setError(null);
       const data = await rootService.getClientsRoot();
-      setClients(data);
+      rootDashboardActions.setClients(data);
 
       // Calculate stats
       const activeClients = data.filter((c: any) => c.status === "active").length;
@@ -64,16 +56,16 @@ export function RootDashboard() {
         0
       );
 
-      setStats({
+      rootDashboardActions.setStats({
         totalClients: data.length,
         activeClients,
         totalUsers,
         totalConversations,
       });
     } catch (err: any) {
-      setError(err.response?.data?.error || "Failed to load clients");
+      rootDashboardActions.setError(err.response?.data?.error || "Failed to load clients");
     } finally {
-      setLoading(false);
+      rootDashboardActions.setLoading(false);
     }
   };
 
@@ -142,7 +134,7 @@ export function RootDashboard() {
             <CardContent>
               <div className="flex items-center gap-2">
                 <Server className="h-4 w-4 text-muted-foreground" />
-                <span className="text-2xl font-bold">{stats.totalClients}</span>
+                <span className="text-2xl font-bold">{rootDashboardSnapshot.stats.totalClients}</span>
               </div>
             </CardContent>
           </Card>
@@ -157,7 +149,7 @@ export function RootDashboard() {
               <div className="flex items-center gap-2">
                 <Activity className="h-4 w-4 text-green-500" />
                 <span className="text-2xl font-bold">
-                  {stats.activeClients}
+                  {rootDashboardSnapshot.stats.activeClients}
                 </span>
               </div>
             </CardContent>
@@ -170,7 +162,7 @@ export function RootDashboard() {
             <CardContent>
               <div className="flex items-center gap-2">
                 <Users className="h-4 w-4 text-muted-foreground" />
-                <span className="text-2xl font-bold">{stats.totalUsers}</span>
+                <span className="text-2xl font-bold">{rootDashboardSnapshot.stats.totalUsers}</span>
               </div>
             </CardContent>
           </Card>
@@ -185,7 +177,7 @@ export function RootDashboard() {
               <div className="flex items-center gap-2">
                 <Activity className="h-4 w-4 text-muted-foreground" />
                 <span className="text-2xl font-bold">
-                  {stats.totalConversations}
+                  {rootDashboardSnapshot.stats.totalConversations}
                 </span>
               </div>
             </CardContent>
@@ -196,18 +188,18 @@ export function RootDashboard() {
       {/* Main Content */}
       <div className="flex-1 overflow-auto px-6 pb-6">
         <ClientManagement
-          clients={clients}
-          loading={loading}
-          error={error}
+          clients={rootDashboardSnapshot.clients as ClientRootResponse[]}
+          loading={rootDashboardSnapshot.loading}
+          error={rootDashboardSnapshot.error}
           onRefresh={loadClients}
-          onAddClient={() => setAddDialogOpen(true)}
+          onAddClient={() => rootDashboardActions.setAddDialogOpen(true)}
         />
       </div>
 
       {/* Add Client Dialog */}
       <AddClientDialog
-        open={addDialogOpen}
-        onOpenChange={setAddDialogOpen}
+        open={rootDashboardSnapshot.addDialogOpen}
+        onOpenChange={rootDashboardActions.setAddDialogOpen}
         onSuccess={loadClients}
       />
     </div>

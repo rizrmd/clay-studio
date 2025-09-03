@@ -11,8 +11,10 @@ import {
   Trash2,
   Loader2,
   ChevronLeft,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -335,6 +337,12 @@ export function ConversationSidebar({
   ) => {
     e.preventDefault();
 
+    // If in delete mode, toggle selection instead of navigating
+    if (sidebarSnapshot.isDeleteMode) {
+      sidebarActions.toggleConversationSelection(conversationId);
+      return;
+    }
+
     // Remove from recently updated set when clicked
     sidebarStore.recentlyUpdatedConversations.delete(conversationId);
 
@@ -428,53 +436,17 @@ export function ConversationSidebar({
     }
   };
 
-  // Handle conversation delete
-  const handleDeleteConversation = async (conversation: Conversation) => {
-    if (
-      !confirm(
-        `Are you sure you want to delete "${
-          conversation.title || "New Conversation"
-        }"?`
-      )
-    ) {
-      return;
-    }
 
-    try {
-      const response = await api.fetchStream(
-        `/conversations/${conversation.id}`,
-        {
-          method: "DELETE",
-        }
-      );
 
-      if (!response.ok) {
-        throw new Error("Failed to delete conversation");
-      }
+  // Handle creating new conversation
+  const handleCreateNewConversation = () => {
+    if (!projectId) return;
 
-      // Update local state
-      sidebarActions.removeConversation(conversation.id);
+    // Navigate to new conversation state without creating conversation yet
+    navigate(`/chat/${projectId}/new`);
 
-      // Clean up the deleted conversation from store
-      if (conversationStoreSnapshot.conversations[conversation.id]) {
-        ConversationManager.getInstance().clearConversation(conversation.id);
-      }
-
-      // Clear from localStorage if this was the last viewed conversation
-      const lastConversationKey = `last_conversation_${projectId}`;
-      const lastConversationId = localStorage.getItem(lastConversationKey);
-      if (lastConversationId === conversation.id) {
-        localStorage.removeItem(lastConversationKey);
-      }
-
-      // If we're currently viewing this conversation, navigate away
-      if (actualConversationId === conversation.id) {
-        // Navigate to new conversation
-        navigate("/projects");
-      }
-    } catch (err) {
-      sidebarActions.setError("Failed to delete conversation");
-    }
+    // Close mobile menu after navigation
+    sidebarActions.setMobileMenuOpen(false);
   };
 
   // Open rename dialog
@@ -506,22 +478,109 @@ export function ConversationSidebar({
       >
         {/* Header with back to projects and new chat */}
         <div className="px-1 py-2 border-b">
-          <div className="flex items-center justify-between">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                // Always navigate back to projects
-                navigate("/projects");
-                // Also close mobile menu if open
-                sidebarActions.setMobileMenuOpen(false);
-              }}
-              className="pl-1 gap-1 h-[25px] border border-transparent hover:border-gray-200"
-            >
-              <ChevronLeft size={10} />
-              <span className="text-xs">Projects</span>
-            </Button>
+           <div className="flex items-center justify-between">
+             {!sidebarSnapshot.isDeleteMode && (
+               <Button
+                 variant="ghost"
+                 size="sm"
+                 onClick={() => {
+                   // Navigate back to projects
+                   navigate("/projects");
+                   // Also close mobile menu if open
+                   sidebarActions.setMobileMenuOpen(false);
+                 }}
+                 className="pl-1 gap-1 h-[25px] border border-transparent hover:border-gray-200"
+               >
+                 <ChevronLeft size={10} />
+                 <span className="text-xs">Projects</span>
+               </Button>
+             )}
 
+             {sidebarSnapshot.isDeleteMode ? (
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => sidebarActions.exitDeleteMode()}
+                  className="gap-1 h-[25px] border border-transparent hover:border-gray-200"
+                  title="Cancel"
+                >
+                  <X size={10} />
+                  <span className="text-xs">Cancel</span>
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={async () => {
+                    // Handle bulk delete
+                    const selectedCount = sidebarSnapshot.selectedConversations.size;
+                    if (selectedCount === 0) {
+                      alert("No conversations selected");
+                      return;
+                    }
+                    
+                    if (!confirm(`Are you sure you want to delete ${selectedCount} conversation${selectedCount > 1 ? 's' : ''}?`)) {
+                      return;
+                    }
+                    
+                    // Delete each selected conversation
+                    const deletePromises = Array.from(sidebarSnapshot.selectedConversations).map(async (conversationId) => {
+                      try {
+                        const response = await api.fetchStream(`/conversations/${conversationId}`, {
+                          method: "DELETE",
+                        });
+                        if (!response.ok) {
+                          throw new Error("Failed to delete conversation");
+                        }
+                        // Remove from store
+                        sidebarActions.removeConversation(conversationId);
+                        // Clean up from conversation store
+                        if (conversationStoreSnapshot.conversations[conversationId]) {
+                          ConversationManager.getInstance().clearConversation(conversationId);
+                        }
+                        return { success: true, id: conversationId };
+                      } catch (error) {
+                        logger.error(`Failed to delete conversation ${conversationId}:`, error);
+                        return { success: false, id: conversationId };
+                      }
+                    });
+                    
+                    const results = await Promise.all(deletePromises);
+                    const failedCount = results.filter(r => !r.success).length;
+                    
+                    if (failedCount > 0) {
+                      sidebarActions.setError(`Failed to delete ${failedCount} conversation${failedCount > 1 ? 's' : ''}`);
+                    }
+                    
+                    // Check if current conversation was deleted
+                    if (actualConversationId && sidebarSnapshot.selectedConversations.has(actualConversationId)) {
+                      navigate("/projects");
+                    }
+                    
+                    // Exit delete mode
+                    sidebarActions.exitDeleteMode();
+                  }}
+                  className="gap-1 h-[25px] border border-transparent hover:border-red-500 hover:text-red-600"
+                  title="Delete Selected"
+                >
+                  <Trash2 size={10} />
+                  <span className="text-xs">Delete ({sidebarSnapshot.selectedConversations.size})</span>
+                </Button>
+              </div>
+             ) : (
+               <div className="flex items-center gap-1">
+                 <Button
+                   variant="ghost"
+                   size="sm"
+                   onClick={handleCreateNewConversation}
+                   className="gap-1 h-[25px] border border-transparent hover:border-gray-200"
+                   title="New Chat"
+                 >
+                   <MessageSquare size={10} />
+                   <span className="text-xs">New</span>
+                 </Button>
+               </div>
+             )}
           </div>
         </div>
 
@@ -550,74 +609,94 @@ export function ConversationSidebar({
                 {sidebarSnapshot.conversations.map((conversation) => (
                   <div
                     key={conversation.id}
-                    className={cn(
-                      "block w-full group text-left p-2 rounded-md hover:bg-muted border border-transparent transition-colors mb-1 group cursor-pointer relative",
-                      actualConversationId === conversation.id &&
-                        "bg-muted border-blue-700/30"
-                    )}
+                     className={cn(
+                       "block w-full group text-left p-2 rounded-md hover:bg-muted border border-transparent transition-colors mb-1 group cursor-pointer relative",
+                       actualConversationId === conversation.id &&
+                         "bg-muted border-blue-700/30",
+                       sidebarSnapshot.isDeleteMode &&
+                         sidebarSnapshot.selectedConversations.has(conversation.id) &&
+                         "bg-red-50 dark:bg-red-900/20 border-red-500/30",
+                       sidebarSnapshot.isDeleteMode && "hover:bg-red-50 dark:hover:bg-red-900/10"
+                     )}
                     onClick={(e) => handleConversationClick(conversation.id, e)}
-                    onMouseEnter={() => handleConversationHover(conversation.id)}
+                    onMouseEnter={() => !sidebarSnapshot.isDeleteMode && handleConversationHover(conversation.id)}
                   >
-                    <div
-                      className={cn(
-                        "flex items-start gap-2 overflow-hidden group-hover:pr-8"
-                      )}
-                    >
-                      <div className="relative flex flex-col items-center pt-1">
-                        {/* Check streaming state from conversationStore */}
-                        {conversationStoreSnapshot.conversations[conversation.id]?.status === 'streaming' ? (
-                          <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />
-                        ) : conversationStoreSnapshot.conversations[conversation.id]?.status === 'loading' ? (
-                          <Loader2 className="h-4 w-4 text-muted-foreground animate-spin" />
-                        ) : (
-                          <MessageSquare
-                            className={cn(
-                              "h-4 w-4",
-                              sidebarSnapshot.recentlyUpdatedConversations.has(conversation.id) && 
-                              actualConversationId !== conversation.id
-                                ? "text-green-500"
-                                : "text-muted-foreground"
-                            )}
-                          />
-                        )}
-                        {/* Green notification dot for new messages in non-active conversations */}
-                        {sidebarSnapshot.recentlyUpdatedConversations.has(conversation.id) && 
-                         actualConversationId !== conversation.id && (
-                          <div className="h-[6px] w-[6px] rounded-full bg-green-500 mt-1 animate-pulse" />
-                        )}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p
-                          className={cn(
-                            "text-sm font-medium truncate",
-                            sidebarSnapshot.recentlyUpdatedConversations.has(conversation.id) &&
-                            actualConversationId !== conversation.id &&
-                              "text-green-500 font-semibold"
-                          )}
-                        >
-                          {conversation.title || "New Conversation"}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {conversation.message_count} chat
-                          {conversation.message_count !== 1 ? "s" : ""} •{" "}
-                          {new Date(
-                            conversation.updated_at
-                          ).toLocaleDateString()}{" "}
-                          {new Date(conversation.updated_at).toLocaleTimeString(
-                            [],
-                            {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                              hour12: false,
-                            }
-                          )}
-                        </p>
-                      </div>
-                    </div>
+                     <div
+                       className={cn(
+                         "flex items-start gap-2 overflow-hidden",
+                         !sidebarSnapshot.isDeleteMode && "group-hover:pr-8"
+                       )}
+                     >
+                       {/* Icon section - always on left */}
+                       <div className="relative flex flex-col items-center pt-1">
+                         {/* Check streaming state from conversationStore */}
+                         {conversationStoreSnapshot.conversations[conversation.id]?.status === 'streaming' ? (
+                           <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />
+                         ) : conversationStoreSnapshot.conversations[conversation.id]?.status === 'loading' ? (
+                           <Loader2 className="h-4 w-4 text-muted-foreground animate-spin" />
+                         ) : (
+                           <MessageSquare
+                             className={cn(
+                               "h-4 w-4",
+                               sidebarSnapshot.recentlyUpdatedConversations.has(conversation.id) &&
+                               actualConversationId !== conversation.id
+                                 ? "text-green-500"
+                                 : "text-muted-foreground"
+                             )}
+                           />
+                         )}
+                         {/* Green notification dot for new messages in non-active conversations */}
+                         {sidebarSnapshot.recentlyUpdatedConversations.has(conversation.id) &&
+                          actualConversationId !== conversation.id && (
+                           <div className="h-[6px] w-[6px] rounded-full bg-green-500 mt-1 animate-pulse" />
+                         )}
+                       </div>
 
-                    {/* Actions dropdown */}
-                    <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <DropdownMenu>
+                       {/* Content section - flexible width */}
+                       <div className="flex-1 min-w-0">
+                         <p
+                           className={cn(
+                             "text-sm font-medium truncate",
+                             sidebarSnapshot.recentlyUpdatedConversations.has(conversation.id) &&
+                             actualConversationId !== conversation.id &&
+                               "text-green-500 font-semibold"
+                           )}
+                         >
+                           {conversation.title || "New Conversation"}
+                         </p>
+                         <p className="text-xs text-muted-foreground">
+                           {conversation.message_count} chat
+                           {conversation.message_count !== 1 ? "s" : ""} •{" "}
+                           {new Date(
+                             conversation.updated_at
+                           ).toLocaleDateString()}{" "}
+                           {new Date(conversation.updated_at).toLocaleTimeString(
+                             [],
+                             {
+                               hour: "2-digit",
+                               minute: "2-digit",
+                               hour12: false,
+                             }
+                           )}
+                         </p>
+                       </div>
+
+                       {/* Checkbox on the right in delete mode */}
+                       {sidebarSnapshot.isDeleteMode && (
+                         <div className="pt-1 flex-shrink-0">
+                           <Checkbox
+                             checked={sidebarSnapshot.selectedConversations.has(conversation.id)}
+                             onCheckedChange={() => sidebarActions.toggleConversationSelection(conversation.id)}
+                             onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                           />
+                         </div>
+                       )}
+                     </div>
+
+                    {/* Actions dropdown - hidden in delete mode */}
+                    {!sidebarSnapshot.isDeleteMode && (
+                      <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button
                             variant="ghost"
@@ -638,19 +717,20 @@ export function ConversationSidebar({
                             <Edit className="h-4 w-4 mr-2" />
                             Rename
                           </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDeleteConversation(conversation);
-                            }}
-                            className="text-red-600 focus:text-red-600"
-                          >
-                            <Trash2 className="h-4 w-4 mr-2" />
-                            Delete
-                          </DropdownMenuItem>
+                           <DropdownMenuItem
+                             onClick={(e) => {
+                               e.stopPropagation();
+                               sidebarActions.enterDeleteMode(conversation.id);
+                             }}
+                             className="text-red-600 focus:text-red-600"
+                           >
+                             <Trash2 className="h-4 w-4 mr-2" />
+                             Delete
+                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </div>
+                  )}
                   </div>
                 ))}
               </div>

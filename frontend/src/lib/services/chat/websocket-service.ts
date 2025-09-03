@@ -3,6 +3,7 @@ import { ConversationManager } from '@/store/chat/conversation-manager';
 import { conversationStore } from '@/store/chat/conversation-store';
 import { chatEventBus } from './event-bus';
 import { MessageCacheService } from './message-cache';
+import { uiActions } from '@/store/ui-store';
 import type { Message } from '@/types/chat';
 
 // WebSocket message types from server
@@ -129,8 +130,8 @@ export class WebSocketService {
     });
 
     try {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      let wsUrl = `${protocol}//${window.location.host}/api/ws`;
+      // Use relative URL to ensure Vite proxy handles WebSocket connections correctly
+      let wsUrl = `/api/ws`;
       
       // First try without session parameter to use standard cookie auth
       // Only add session parameter if cookies aren't working (fallback)
@@ -175,15 +176,16 @@ export class WebSocketService {
         this.handleMessage(event.data);
       };
 
-      this.ws.onclose = (event) => {
-        this.isConnecting = false;
-        this.ws = null;
-        this.isSubscribed = false; // Reset subscription status on disconnect
-        
-        if (!event.wasClean && this.reconnectAttempts < this.maxReconnectAttempts) {
-          this.scheduleReconnect();
-        }
-      };
+        this.ws.onclose = (event) => {
+          this.isConnecting = false;
+          this.ws = null;
+          this.isSubscribed = false; // Reset subscription status on disconnect
+          uiActions.setWsSubscribed(false); // Update UI store
+
+          if (!event.wasClean && this.reconnectAttempts < this.maxReconnectAttempts) {
+            this.scheduleReconnect();
+          }
+        };
 
       this.ws.onerror = (error) => {
         logger.error('WebSocketService: Connection error', error);
@@ -263,6 +265,7 @@ export class WebSocketService {
     this.currentProjectId = projectId;
     this.currentConversationId = effectiveConversationId;
     this.isSubscribed = false; // Reset until we get confirmation
+    uiActions.setWsSubscribed(false); // Update UI store
     
     // Only send subscription if we're authenticated
     if (this.isAuthenticated) {
@@ -327,6 +330,7 @@ export class WebSocketService {
     this.currentProjectId = null;
     this.currentConversationId = null;
     this.isSubscribed = false;
+    uiActions.setWsSubscribed(false); // Update UI store
     
     
     this.sendMessage({
@@ -356,8 +360,9 @@ export class WebSocketService {
           
           // Auto-subscribe to current project and conversation if we have them and we're authenticated
           // Only if we're not already subscribed (to prevent duplicates on reconnection)
-          if (this.isAuthenticated && this.currentProjectId && !this.isSubscribed) {
-            const convId = this.currentConversationId === null ? undefined : this.currentConversationId;
+          // Don't subscribe if the current conversation is 'new' (which would be null)
+          if (this.isAuthenticated && this.currentProjectId && !this.isSubscribed && this.currentConversationId !== null) {
+            const convId = this.currentConversationId;
             this.subscribe(this.currentProjectId, convId);
           }
           break;
@@ -376,6 +381,7 @@ export class WebSocketService {
 
         case 'subscribed':
           this.isSubscribed = true;
+          uiActions.setWsSubscribed(true);
           break;
 
         case 'conversation_history':
@@ -557,6 +563,7 @@ export class WebSocketService {
     // The backend has already updated our subscription, so we just need to track it locally
     if (this.currentProjectId) {
       this.isSubscribed = true; // We remain subscribed, just to a different conversation
+      uiActions.setWsSubscribed(true); // Update UI store
     }
     
     // Ensure the conversation manager knows about the new conversation
@@ -751,7 +758,7 @@ export class WebSocketService {
   private async handleToolUseEvent(tool: string, toolUsageId: string | undefined, conversationId: string): Promise<void> {
     
     // Use the provided tool_usage_id or generate a temporary one
-    const effectiveId = toolUsageId || `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const effectiveId = toolUsageId || `temp-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
     await this.conversationManager.addActiveTool(conversationId, tool, effectiveId);
     
     // Create the new tool usage with the actual ID from backend
@@ -1019,6 +1026,7 @@ export class WebSocketService {
     this.authenticationPromise = null;
     this.authenticationResolver = null;
     this.isSubscribed = false;
+    uiActions.setWsSubscribed(false); // Update UI store
   }
 
   // Force reconnect with new authentication

@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
+import { useSnapshot } from 'valtio'
 import { ClientRootResponse, rootService } from '@/lib/services/root-service'
+import { clientDetailStore, clientDetailActions } from '@/store/client-detail-store'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -29,30 +31,25 @@ import { UserManagement } from '@/components/shared/user-management'
 export function ClientDetailPage() {
   const { clientId } = useParams()
   const navigate = useNavigate()
-  const [client, setClient] = useState<ClientRootResponse | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [actionLoading, setActionLoading] = useState(false)
-  const [editDialogOpen, setEditDialogOpen] = useState(false)
-  const [claudeDialogOpen, setClaudeDialogOpen] = useState(false)
+  const clientDetailSnapshot = useSnapshot(clientDetailStore)
 
   const fetchClient = async () => {
     if (!clientId) return
-    
+
     try {
-      setLoading(true)
-      setError(null)
+      clientDetailActions.setLoading(true)
+      clientDetailActions.setError(null)
       const clients = await rootService.getClientsRoot()
       const foundClient = clients.find((c: ClientRootResponse) => c.id === clientId)
       if (foundClient) {
-        setClient(foundClient)
+        clientDetailActions.setClient(foundClient)
       } else {
-        setError('Client not found')
+        clientDetailActions.setError('Client not found')
       }
     } catch (err: any) {
-      setError(err.message || 'Failed to fetch client details')
+      clientDetailActions.setError(err.message || 'Failed to fetch client details')
     } finally {
-      setLoading(false)
+      clientDetailActions.setLoading(false)
     }
   }
 
@@ -61,66 +58,66 @@ export function ClientDetailPage() {
   }, [clientId])
 
   const handleEnableClient = async () => {
-    if (!client) return
-    
+    if (!clientDetailSnapshot.client) return
+
     try {
-      setActionLoading(true)
-      await rootService.enableClient(client.id)
+      clientDetailActions.setActionLoading(true)
+      await rootService.enableClient(clientDetailSnapshot.client.id)
       await fetchClient()
     } catch (err) {
       console.error('Failed to enable client:', err)
     } finally {
-      setActionLoading(false)
+      clientDetailActions.setActionLoading(false)
     }
   }
 
   const handleReactivateClient = async () => {
-    if (!client) return
-    
+    if (!clientDetailSnapshot.client) return
+
     try {
-      setActionLoading(true)
-      await rootService.enableClient(client.id)
+      clientDetailActions.setActionLoading(true)
+      await rootService.enableClient(clientDetailSnapshot.client.id)
       await fetchClient()
     } catch (err) {
       console.error('Failed to reactivate client:', err)
     } finally {
-      setActionLoading(false)
+      clientDetailActions.setActionLoading(false)
     }
   }
 
   const handleSuspendClient = async () => {
-    if (!client) return
-    
+    if (!clientDetailSnapshot.client) return
+
     if (!confirm('Are you sure you want to suspend this client? Users will not be able to access it.')) {
       return
     }
-    
+
     try {
-      setActionLoading(true)
-      await rootService.suspendClient(client.id)
+      clientDetailActions.setActionLoading(true)
+      await rootService.suspendClient(clientDetailSnapshot.client.id)
       await fetchClient()
     } catch (err) {
       console.error('Failed to suspend client:', err)
     } finally {
-      setActionLoading(false)
+      clientDetailActions.setActionLoading(false)
     }
   }
 
   const handleDeleteClient = async () => {
-    if (!client) return
-    
+    if (!clientDetailSnapshot.client) return
+
     if (!confirm('Are you sure you want to delete this client? This action cannot be undone.')) {
       return
     }
-    
+
     try {
-      setActionLoading(true)
-      await rootService.deleteClient(client.id)
+      clientDetailActions.setActionLoading(true)
+      await rootService.deleteClient(clientDetailSnapshot.client.id)
       navigate('/root')
     } catch (err: any) {
       alert(err.response?.data?.error || 'Failed to delete client')
     } finally {
-      setActionLoading(false)
+      clientDetailActions.setActionLoading(false)
     }
   }
 
@@ -141,7 +138,7 @@ export function ClientDetailPage() {
     }
   }
 
-  if (loading) {
+  if (clientDetailSnapshot.loading) {
     return (
       <div className="min-h-screen bg-background">
         <div className="container mx-auto py-8 px-4">
@@ -155,12 +152,12 @@ export function ClientDetailPage() {
     )
   }
 
-  if (error || !client) {
+  if (clientDetailSnapshot.error || !clientDetailSnapshot.client) {
     return (
       <div className="min-h-screen bg-background">
         <div className="container mx-auto py-8 px-4">
           <Alert variant="destructive">
-            <AlertDescription>{error || 'Client not found'}</AlertDescription>
+            <AlertDescription>{clientDetailSnapshot.error || 'Client not found'}</AlertDescription>
           </Alert>
           <Button className="mt-4" onClick={() => navigate('/root')}>
             <ArrowLeft className="h-4 w-4 mr-2" />
@@ -186,18 +183,18 @@ export function ClientDetailPage() {
                 <ArrowLeft className="h-4 w-4 mr-2" />
                 Back
               </Button>
-              <div>
-                <h1 className="text-2xl font-bold">{client.name}</h1>
-                {client.description && (
-                  <p className="text-muted-foreground">{client.description}</p>
-                )}
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button onClick={() => setEditDialogOpen(true)} variant="outline">
-                <Edit className="h-4 w-4 mr-2" />
-                Edit
-              </Button>
+               <div>
+                 <h1 className="text-2xl font-bold">{clientDetailSnapshot.client.name}</h1>
+                 {clientDetailSnapshot.client.description && (
+                   <p className="text-muted-foreground">{clientDetailSnapshot.client.description}</p>
+                 )}
+               </div>
+             </div>
+             <div className="flex items-center gap-2">
+               <Button onClick={() => clientDetailActions.setEditDialogOpen(true)} variant="outline">
+                 <Edit className="h-4 w-4 mr-2" />
+                 Edit
+               </Button>
               <Button onClick={fetchClient} variant="outline">
                 <RefreshCw className="h-4 w-4 mr-2" />
                 Refresh
@@ -211,78 +208,78 @@ export function ClientDetailPage() {
               <div className="flex items-center gap-4">
                 <div>
                   <p className="text-sm text-muted-foreground">Status</p>
-                  <div className="flex items-center gap-2 mt-1">
-                    {getStatusBadge(client.status)}
-                    {client.hasClaudeToken && (
-                      <Badge variant="outline" className="text-xs">
-                        Claude ✓
-                      </Badge>
-                    )}
-                  </div>
-                </div>
-                <div className="border-l pl-4">
-                  <p className="text-sm text-muted-foreground">Created</p>
-                  <div className="flex items-center gap-1 mt-1">
-                    <Calendar className="h-3 w-3 text-muted-foreground" />
-                    <span className="text-sm font-medium">
-                      {format(new Date(client.createdAt), 'MMM d, yyyy')}
-                    </span>
-                  </div>
-                </div>
-              </div>
-              
-              <div className="flex items-center gap-2">
-                {client.status === 'active' ? (
-                  <Button 
-                    onClick={handleSuspendClient}
-                    variant="outline"
-                    className="text-orange-600"
-                    disabled={actionLoading}
-                  >
-                    {actionLoading ? (
-                      <RefreshCw className="h-4 w-4 animate-spin mr-2" />
-                    ) : (
-                      <Pause className="h-4 w-4 mr-2" />
-                    )}
-                    Suspend
-                  </Button>
-                ) : client.status === 'suspended' ? (
-                  <Button 
-                    onClick={handleReactivateClient}
-                    variant="outline"
-                    className="text-green-600"
-                    disabled={actionLoading}
-                  >
-                    {actionLoading ? (
-                      <RefreshCw className="h-4 w-4 animate-spin mr-2" />
-                    ) : (
-                      <Power className="h-4 w-4 mr-2" />
-                    )}
-                    Reactivate
-                  </Button>
-                ) : (
-                  <Button 
-                    onClick={handleEnableClient}
-                    variant="outline"
-                    className="text-green-600"
-                    disabled={actionLoading}
-                  >
-                    {actionLoading ? (
-                      <RefreshCw className="h-4 w-4 animate-spin mr-2" />
-                    ) : (
-                      <Power className="h-4 w-4 mr-2" />
-                    )}
-                    Enable
-                  </Button>
-                )}
-                <Button
-                  onClick={handleDeleteClient}
-                  variant="destructive"
-                  disabled={actionLoading}
-                >
-                  <Trash2 className="h-4 w-4 mr-2" />
-                  Delete
-                </Button>
+                   <div className="flex items-center gap-2 mt-1">
+                     {getStatusBadge(clientDetailSnapshot.client.status)}
+                     {clientDetailSnapshot.client.hasClaudeToken && (
+                       <Badge variant="outline" className="text-xs">
+                         Claude ✓
+                       </Badge>
+                     )}
+                   </div>
+                 </div>
+                 <div className="border-l pl-4">
+                   <p className="text-sm text-muted-foreground">Created</p>
+                   <div className="flex items-center gap-1 mt-1">
+                     <Calendar className="h-3 w-3 text-muted-foreground" />
+                     <span className="text-sm font-medium">
+                       {format(new Date(clientDetailSnapshot.client.createdAt), 'MMM d, yyyy')}
+                     </span>
+                   </div>
+                 </div>
+               </div>
+
+               <div className="flex items-center gap-2">
+                 {clientDetailSnapshot.client.status === 'active' ? (
+                   <Button
+                     onClick={handleSuspendClient}
+                     variant="outline"
+                     className="text-orange-600"
+                     disabled={clientDetailSnapshot.actionLoading}
+                   >
+                     {clientDetailSnapshot.actionLoading ? (
+                       <RefreshCw className="h-4 w-4 animate-spin mr-2" />
+                     ) : (
+                       <Pause className="h-4 w-4 mr-2" />
+                     )}
+                     Suspend
+                   </Button>
+                 ) : clientDetailSnapshot.client.status === 'suspended' ? (
+                   <Button
+                     onClick={handleReactivateClient}
+                     variant="outline"
+                     className="text-green-600"
+                     disabled={clientDetailSnapshot.actionLoading}
+                   >
+                     {clientDetailSnapshot.actionLoading ? (
+                       <RefreshCw className="h-4 w-4 animate-spin mr-2" />
+                     ) : (
+                       <Power className="h-4 w-4 mr-2" />
+                     )}
+                     Reactivate
+                   </Button>
+                 ) : (
+                   <Button
+                     onClick={handleEnableClient}
+                     variant="outline"
+                     className="text-green-600"
+                     disabled={clientDetailSnapshot.actionLoading}
+                   >
+                     {clientDetailSnapshot.actionLoading ? (
+                       <RefreshCw className="h-4 w-4 animate-spin mr-2" />
+                     ) : (
+                       <Power className="h-4 w-4 mr-2" />
+                     )}
+                     Enable
+                   </Button>
+                 )}
+                 <Button
+                   onClick={handleDeleteClient}
+                   variant="destructive"
+                   disabled={clientDetailSnapshot.actionLoading}
+                 >
+                   <Trash2 className="h-4 w-4 mr-2" />
+                   Delete
+                 </Button>
               </div>
             </CardContent>
           </Card>
@@ -299,80 +296,80 @@ export function ClientDetailPage() {
 
             <TabsContent value="overview" className="space-y-4">
               {/* Domain Management Section */}
-              <DomainManagement
-                clientId={client.id}
-                initialDomains={client.domains || []}
-                onUpdate={fetchClient}
-              />
+                <DomainManagement
+                  clientId={clientDetailSnapshot.client.id}
+                  initialDomains={[...(clientDetailSnapshot.client.domains || [])]}
+                  onUpdate={fetchClient}
+                />
 
-              {/* Stats Grid */}
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-sm font-medium">
-                      <Users className="h-4 w-4 inline mr-2" />
-                      Users
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-2xl font-bold">{client.userCount}</p>
-                    <p className="text-xs text-muted-foreground">Total users</p>
-                  </CardContent>
-                </Card>
+               {/* Stats Grid */}
+               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                 <Card>
+                   <CardHeader className="pb-3">
+                     <CardTitle className="text-sm font-medium">
+                       <Users className="h-4 w-4 inline mr-2" />
+                       Users
+                     </CardTitle>
+                   </CardHeader>
+                   <CardContent>
+                     <p className="text-2xl font-bold">{clientDetailSnapshot.client.userCount}</p>
+                     <p className="text-xs text-muted-foreground">Total users</p>
+                   </CardContent>
+                 </Card>
 
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-sm font-medium">
-                      <MessageSquare className="h-4 w-4 inline mr-2" />
-                      Conversations
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-2xl font-bold">{client.conversationCount}</p>
-                    <p className="text-xs text-muted-foreground">Total conversations</p>
-                  </CardContent>
-                </Card>
+                 <Card>
+                   <CardHeader className="pb-3">
+                     <CardTitle className="text-sm font-medium">
+                       <MessageSquare className="h-4 w-4 inline mr-2" />
+                       Conversations
+                     </CardTitle>
+                   </CardHeader>
+                   <CardContent>
+                     <p className="text-2xl font-bold">{clientDetailSnapshot.client.conversationCount}</p>
+                     <p className="text-xs text-muted-foreground">Total conversations</p>
+                   </CardContent>
+                 </Card>
 
 
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-sm font-medium">
-                      <Shield className="h-4 w-4 inline mr-2" />
-                      Security
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm">API Access</span>
-                        {client.config?.apiKey ? (
-                          <Badge variant="outline" className="text-xs">Enabled</Badge>
-                        ) : (
-                          <Badge variant="secondary" className="text-xs">Disabled</Badge>
-                        )}
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm">Claude Token</span>
-                        {client.hasClaudeToken ? (
-                          <Badge variant="outline" className="text-xs">Configured</Badge>
-                        ) : (
-                          <Badge variant="secondary" className="text-xs">Not Set</Badge>
-                        )}
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
+                 <Card>
+                   <CardHeader className="pb-3">
+                     <CardTitle className="text-sm font-medium">
+                       <Shield className="h-4 w-4 inline mr-2" />
+                       Security
+                     </CardTitle>
+                   </CardHeader>
+                   <CardContent>
+                     <div className="space-y-2">
+                       <div className="flex items-center justify-between">
+                         <span className="text-sm">API Access</span>
+                         {clientDetailSnapshot.client.config?.apiKey ? (
+                           <Badge variant="outline" className="text-xs">Enabled</Badge>
+                         ) : (
+                           <Badge variant="secondary" className="text-xs">Disabled</Badge>
+                         )}
+                       </div>
+                       <div className="flex items-center justify-between">
+                         <span className="text-sm">Claude Token</span>
+                         {clientDetailSnapshot.client.hasClaudeToken ? (
+                           <Badge variant="outline" className="text-xs">Configured</Badge>
+                         ) : (
+                           <Badge variant="secondary" className="text-xs">Not Set</Badge>
+                         )}
+                       </div>
+                     </div>
+                   </CardContent>
+                 </Card>
 
               </div>
             </TabsContent>
 
-            <TabsContent value="users">
-              <UserManagement 
-                initialRegistrationEnabled={false}
-                initialRequireInviteCode={false}
-                clientId={client.id}
-              />
-            </TabsContent>
+             <TabsContent value="users">
+               <UserManagement
+                 initialRegistrationEnabled={false}
+                 initialRequireInviteCode={false}
+                 clientId={clientDetailSnapshot.client.id}
+               />
+             </TabsContent>
 
             <TabsContent value="configuration">
               <Card>
@@ -386,39 +383,39 @@ export function ClientDetailPage() {
                   <div>
                     <h3 className="font-medium mb-2">API Configuration</h3>
                     <div className="space-y-2">
-                      <div className="flex items-center justify-between py-2 border-b">
-                        <span className="text-sm">API Key</span>
-                        {client.config?.apiKey ? (
-                          <Badge variant="outline">Configured</Badge>
-                        ) : (
-                          <Badge variant="secondary">Not configured</Badge>
-                        )}
-                      </div>
-                      <div className="flex items-center justify-between py-2 border-b">
-                        <div>
-                          <span className="text-sm">Claude Token</span>
-                          {!client.hasClaudeToken && (
-                            <p className="text-xs text-muted-foreground mt-1">
-                              Required for AI features
-                            </p>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {client.hasClaudeToken ? (
-                            <Badge variant="outline">Configured</Badge>
-                          ) : (
-                            <Badge variant="secondary">Not configured</Badge>
-                          )}
-                          <Button
-                            size="sm"
-                            variant={client.hasClaudeToken ? "outline" : "default"}
-                            onClick={() => setClaudeDialogOpen(true)}
-                          >
-                            <Key className="h-4 w-4 mr-2" />
-                            {client.hasClaudeToken ? "Update Token" : "Setup Claude"}
-                          </Button>
-                        </div>
-                      </div>
+                         <div className="flex items-center justify-between py-2 border-b">
+                           <span className="text-sm">API Key</span>
+                           {clientDetailSnapshot.client.config?.apiKey ? (
+                             <Badge variant="outline">Configured</Badge>
+                           ) : (
+                             <Badge variant="secondary">Not configured</Badge>
+                           )}
+                         </div>
+                         <div className="flex items-center justify-between py-2 border-b">
+                           <div>
+                             <span className="text-sm">Claude Token</span>
+                             {!clientDetailSnapshot.client.hasClaudeToken && (
+                               <p className="text-xs text-muted-foreground mt-1">
+                                 Required for AI features
+                               </p>
+                             )}
+                           </div>
+                           <div className="flex items-center gap-2">
+                             {clientDetailSnapshot.client.hasClaudeToken ? (
+                               <Badge variant="outline">Configured</Badge>
+                             ) : (
+                               <Badge variant="secondary">Not configured</Badge>
+                             )}
+                             <Button
+                               size="sm"
+                               variant={clientDetailSnapshot.client.hasClaudeToken ? "outline" : "default"}
+                               onClick={() => clientDetailActions.setClaudeDialogOpen(true)}
+                             >
+                               <Key className="h-4 w-4 mr-2" />
+                               {clientDetailSnapshot.client.hasClaudeToken ? "Update Token" : "Setup Claude"}
+                             </Button>
+                           </div>
+                         </div>
                     </div>
                   </div>
                 </CardContent>
@@ -442,11 +439,11 @@ export function ClientDetailPage() {
                           Allow API access for this client
                         </p>
                       </div>
-                      {client.config?.apiKey ? (
-                        <Badge variant="outline">Enabled</Badge>
-                      ) : (
-                        <Badge variant="secondary">Disabled</Badge>
-                      )}
+                       {clientDetailSnapshot.client.config?.apiKey ? (
+                         <Badge variant="outline">Enabled</Badge>
+                       ) : (
+                         <Badge variant="secondary">Disabled</Badge>
+                       )}
                     </div>
                   </div>
                 </CardContent>
@@ -472,22 +469,25 @@ export function ClientDetailPage() {
         </div>
 
         {/* Edit Dialog */}
-        {client && (
+        {clientDetailSnapshot.client && (
           <ClientDetailDialog
-            client={client}
-            open={editDialogOpen}
-            onOpenChange={setEditDialogOpen}
+            client={{
+              ...clientDetailSnapshot.client,
+              domains: [...(clientDetailSnapshot.client.domains || [])]
+            }}
+            open={clientDetailSnapshot.editDialogOpen}
+            onOpenChange={clientDetailActions.setEditDialogOpen}
             onUpdate={fetchClient}
           />
         )}
 
         {/* Setup Claude Dialog */}
-        {client && (
+        {clientDetailSnapshot.client && (
           <SetupClaudeDialog
-            clientId={client.id}
-            clientName={client.name}
-            open={claudeDialogOpen}
-            onOpenChange={setClaudeDialogOpen}
+            clientId={clientDetailSnapshot.client.id}
+            clientName={clientDetailSnapshot.client.name}
+            open={clientDetailSnapshot.claudeDialogOpen}
+            onOpenChange={clientDetailActions.setClaudeDialogOpen}
             onSuccess={fetchClient}
           />
         )}

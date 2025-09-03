@@ -20,7 +20,7 @@ import type { Message } from "../types/chat";
  */
 export function useChat(projectId: string, conversationId: string) {
   const navigate = useNavigate();
-  const snapshot = useSnapshot(conversationStore);
+  const snapshot = useSnapshot(conversationStore, { sync: true });
 
   // Service instances
   const conversationManager = useMemo(
@@ -41,8 +41,8 @@ export function useChat(projectId: string, conversationId: string) {
     }
   }, [currentConversationId]);
 
-  // Get conversation state from snapshot
-  const conversationState = snapshot.conversations[currentConversationId];
+  // Get conversation state from snapshot (ensure it exists)
+  const conversationState = snapshot.conversations[currentConversationId] || getOrCreateConversationState(currentConversationId);
 
   // Load context
   const { context: conversationContext } = useConversationContext(conversationId);
@@ -56,7 +56,17 @@ export function useChat(projectId: string, conversationId: string) {
   // Handle conversation switching and WebSocket subscription
   useEffect(() => {
     if (previousConversationId.current !== currentConversationId) {
-      
+
+      // Skip WebSocket subscription and message loading for 'new' conversations
+      if (currentConversationId === 'new') {
+        // Just set up a minimal state for the new conversation
+        conversationStore.activeConversationId = currentConversationId;
+        conversationManager.switchConversation(currentConversationId);
+        conversationManager.updateStatus(currentConversationId, 'idle');
+        previousConversationId.current = currentConversationId;
+        return;
+      }
+
       // First, ensure the active conversation is properly set
       // This is critical for preventing message bleeding
       conversationStore.activeConversationId = currentConversationId;
@@ -64,7 +74,7 @@ export function useChat(projectId: string, conversationId: string) {
       // Update WebSocket service's current conversation
       const wsService = WebSocketService.getInstance();
       wsService.setCurrentConversation(currentConversationId);
-      
+
       // Subscribe to WebSocket for this project and conversation
       // This handles both initial subscription and conversation switches
       wsService.subscribe(projectId, currentConversationId);
@@ -74,23 +84,23 @@ export function useChat(projectId: string, conversationId: string) {
 
       // Check for cached messages first for instant loading
       const cachedMessages = messageCache.getCachedMessages(currentConversationId);
-      
+
       if (cachedMessages && cachedMessages.length > 0) {
         // Load cached messages immediately for instant experience
         conversationManager.setMessages(currentConversationId, cachedMessages);
         conversationManager.updateStatus(currentConversationId, 'idle');
-        
+
         logger.debug(`Loaded ${cachedMessages.length} cached messages for conversation ${currentConversationId}`);
       } else {
         // No cache available - check existing state
         const existingState = conversationStore.conversations[currentConversationId];
         const hasMessages = existingState && existingState.messages && existingState.messages.length > 0;
         const isStreaming = existingState && existingState.status === 'streaming';
-        
+
         // Only show loading if truly necessary (no cache, no messages, not streaming)
-        if (!hasMessages && !isStreaming && currentConversationId !== 'new') {
+        if (!hasMessages && !isStreaming) {
           conversationManager.updateStatus(currentConversationId, 'loading');
-          
+
           // Much shorter timeout since cache miss is rare
           const timeoutId = setTimeout(() => {
             const currentState = conversationStore.conversations[currentConversationId];
@@ -99,11 +109,11 @@ export function useChat(projectId: string, conversationId: string) {
               conversationManager.updateStatus(currentConversationId, 'idle');
             }
           }, 2000); // Reduced to 2 seconds
-          
+
           return () => clearTimeout(timeoutId);
         }
       }
-      
+
       // WebSocket will still send fresh data and update the cache
 
       previousConversationId.current = currentConversationId;
@@ -125,7 +135,7 @@ export function useChat(projectId: string, conversationId: string) {
           event.type === "CONVERSATION_REDIRECT" &&
           (event.oldConversationId === conversationId || event.oldConversationId === 'new')
         ) {
-          navigate(`/project/${projectId}/chat/${event.newConversationId}`, { replace: true });
+          navigate(`/chat/${projectId}/${event.newConversationId}`, { replace: true });
         }
       }
     );
@@ -271,7 +281,7 @@ export function useChat(projectId: string, conversationId: string) {
   const effectiveState = conversationState || {
     id: currentConversationId || '',
     status: "idle" as const,
-    messages: [],
+    messages: [] as Message[],
     error: null,
     uploadedFiles: [],
     forgottenAfterMessageId: null,
@@ -289,7 +299,7 @@ export function useChat(projectId: string, conversationId: string) {
 
   return {
     // Messages and state
-    messages: effectiveState.messages as Message[],
+    messages: (effectiveState.messages || []) as Message[],
     isLoading:
       effectiveState.status === "loading" ||
       effectiveState.status === "streaming",

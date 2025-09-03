@@ -290,6 +290,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Router::with_path("/projects/{project_id}/claude-md")
                 .get(projects::get_claude_md)
                 .put(projects::save_claude_md)
+                .post(projects::refresh_claude_md)
         )
         .push(
             Router::with_path("/projects/{project_id}")
@@ -346,6 +347,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .push(
             Router::with_path("/uploads/{client_id}/{project_id}/{file_name}")
                 .get(upload::handle_file_download)
+        )
+        .push(
+            Router::with_path("/files/excel/{client_id}/{project_id}/{export_id}")
+                .get(upload::handle_excel_download)
         )
 ;
 

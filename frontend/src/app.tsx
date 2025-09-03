@@ -20,11 +20,7 @@ function App() {
       <Routes>
         <Route
           path="/"
-          element={
-            <SetupRoute>
-              <MainApp />
-            </SetupRoute>
-          }
+          element={<Navigate to="/projects" replace />}
         />
         <Route
           path="/chat/:projectId"

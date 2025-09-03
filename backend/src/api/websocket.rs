@@ -664,15 +664,12 @@ pub async fn broadcast_to_subscribers(
     message: ServerMessage,
 ) {
     let connections = WS_CONNECTIONS.read().await;
-    tracing::info!("Broadcasting message to {} connections. project_id: {}, conversation_id: {}", connections.len(), project_id, conversation_id);
     
     for (connection_id, conn) in connections.iter() {
-        tracing::info!("Checking connection {}: user_id: {}, project_id: {:?}, conversation_id: {:?}", connection_id, conn.user_id, conn.project_id, conn.conversation_id);
         
         // Check if connection is subscribed to this project/conversation
         if let (Some(user_project), Some(user_conversation)) = (&conn.project_id, &conn.conversation_id) {
             if user_project == project_id && user_conversation == conversation_id {
-                tracing::info!("Sending message to connection {}", connection_id);
                 if conn.sender.send(message.clone()).is_ok() {
                     // sent
                 } else {

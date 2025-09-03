@@ -285,24 +285,84 @@ pub async fn handle_file_download(
         .ok_or_else(|| AppError::BadRequest("Missing project_id".to_string()))?;
     let file_name = req.param::<String>("file_name")
         .ok_or_else(|| AppError::BadRequest("Missing file_name".to_string()))?;
-    
+
     let client_uuid = Uuid::parse_str(&client_id)
         .map_err(|_| AppError::BadRequest("Invalid client_id".to_string()))?;
-    
+
     let file_path = PathBuf::from(".clients")
         .join(client_uuid.to_string())
         .join(&project_id)
         .join("uploads")
         .join(&file_name);
-    
+
     if !file_path.exists() {
         return Err(AppError::NotFound("File not found".to_string()));
     }
-    
+
     NamedFile::builder(file_path)
         .send(req.headers(), res)
         .await;
-    
+
+    Ok(())
+}
+
+#[handler]
+pub async fn handle_excel_download(
+    req: &mut Request,
+    depot: &mut Depot,
+    res: &mut Response,
+) -> Result<(), AppError> {
+    let client_id = req.param::<String>("client_id")
+        .ok_or_else(|| AppError::BadRequest("Missing client_id".to_string()))?;
+    let project_id = req.param::<String>("project_id")
+        .ok_or_else(|| AppError::BadRequest("Missing project_id".to_string()))?;
+    let export_id = req.param::<String>("export_id")
+        .ok_or_else(|| AppError::BadRequest("Missing export_id".to_string()))?;
+
+    // Get current user's client_id for authorization
+    let current_client_id = get_current_client_id(depot)?;
+
+    let client_uuid = Uuid::parse_str(&client_id)
+        .map_err(|_| AppError::BadRequest("Invalid client_id".to_string()))?;
+
+    // Ensure requested client_id matches current user's client_id (unless root)
+    if !is_current_user_root(depot) && client_uuid != current_client_id {
+        return Err(AppError::Forbidden("Cannot access Excel files from different client".to_string()));
+    }
+
+    // Find the Excel file with the export_id
+    let export_dir = PathBuf::from(".clients")
+        .join(client_uuid.to_string())
+        .join(&project_id)
+        .join("excel_exports");
+
+    if !export_dir.exists() {
+        return Err(AppError::NotFound("Excel export directory not found".to_string()));
+    }
+
+    // Find the file that starts with the export_id
+    let mut file_path = None;
+    if let Ok(entries) = std::fs::read_dir(&export_dir) {
+        for entry in entries.flatten() {
+            if let Ok(file_name) = entry.file_name().into_string() {
+                if file_name.starts_with(&format!("{}_", export_id)) && file_name.ends_with(".xlsx") {
+                    file_path = Some(entry.path());
+                    break;
+                }
+            }
+        }
+    }
+
+    let file_path = file_path.ok_or_else(|| AppError::NotFound("Excel file not found".to_string()))?;
+
+    if !file_path.exists() {
+        return Err(AppError::NotFound("Excel file not found".to_string()));
+    }
+
+    NamedFile::builder(file_path)
+        .send(req.headers(), res)
+        .await;
+
     Ok(())
 }
 

@@ -29,6 +29,10 @@ interface SidebarState {
   
   // Recently updated tracking
   recentlyUpdatedConversations: Set<string>;
+  
+  // Delete mode
+  isDeleteMode: boolean;
+  selectedConversations: Set<string>;
 }
 
 export const sidebarStore = proxy<SidebarState>({
@@ -47,6 +51,10 @@ export const sidebarStore = proxy<SidebarState>({
   
   // Recently updated tracking
   recentlyUpdatedConversations: new Set(),
+  
+  // Delete mode
+  isDeleteMode: false,
+  selectedConversations: new Set(),
 });
 
 export const sidebarActions = {
@@ -133,5 +141,38 @@ export const sidebarActions = {
   
   clearRecentlyUpdated: () => {
     sidebarStore.recentlyUpdatedConversations.clear();
+  },
+  
+  // Delete mode actions
+  enterDeleteMode: (currentConversationId?: string) => {
+    sidebarStore.isDeleteMode = true;
+    sidebarStore.selectedConversations.clear();
+    // Auto-select current conversation if provided
+    if (currentConversationId) {
+      sidebarStore.selectedConversations.add(currentConversationId);
+    }
+  },
+  
+  exitDeleteMode: () => {
+    sidebarStore.isDeleteMode = false;
+    sidebarStore.selectedConversations.clear();
+  },
+  
+  toggleConversationSelection: (conversationId: string) => {
+    if (sidebarStore.selectedConversations.has(conversationId)) {
+      sidebarStore.selectedConversations.delete(conversationId);
+    } else {
+      sidebarStore.selectedConversations.add(conversationId);
+    }
+  },
+  
+  selectAllConversations: () => {
+    sidebarStore.conversations.forEach(conv => {
+      sidebarStore.selectedConversations.add(conv.id);
+    });
+  },
+  
+  deselectAllConversations: () => {
+    sidebarStore.selectedConversations.clear();
   },
 };

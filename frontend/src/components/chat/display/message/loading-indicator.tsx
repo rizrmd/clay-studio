@@ -46,23 +46,24 @@ export function LoadingIndicator({
           <div className="flex flex-col gap-2 max-w-[70%] items-start">
             <div className="rounded-lg p-3 text-sm bg-muted">
               <div className="flex items-center space-x-2">
-                {activeTools.length === 0 ? (
-                  <div className="flex items-center space-x-2 flex-1">
-                    <div className="flex items-center space-x-1">
-                      <div className="h-1 w-1 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.3s]"></div>
-                      <div className="h-1 w-1 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.15s]"></div>
-                      <div className="h-1 w-1 animate-bounce rounded-full bg-muted-foreground"></div>
-                    </div>
+                <div className="flex items-center space-x-2 flex-1">
+                  <div className="flex items-center space-x-1">
+                    <div className="h-1 w-1 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.3s]"></div>
+                    <div className="h-1 w-1 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.15s]"></div>
+                    <div className="h-1 w-1 animate-bounce rounded-full bg-muted-foreground"></div>
+                  </div>
+                  {activeTools.length === 0 ? (
                     <span className="text-muted-foreground text-sm animate-pulse font-medium">
                       {thinkingWord}...
                     </span>
-                  </div>
-                ) : (
-                  <span className="text-muted-foreground text-sm animate-pulse font-medium flex items-center flex-1">
-                    {thinkingWord} {activeTools.length}{" "}
-                    {activeTools.length > 1 ? "tools" : "tool"}...
-                  </span>
-                )}
+                  ) : (
+                    <span className="text-muted-foreground text-sm animate-pulse font-medium flex items-center flex-1">
+                      {thinkingWord} {activeTools.length}{" "}
+                      {activeTools.length > 1 ? "tools" : "tool"}...
+                    </span>
+                  )}
+                </div>
+
                 {canStop && onStop && (
                   <div className="pl-6">
                     <Button

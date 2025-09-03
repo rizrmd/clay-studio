@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { FileText, Save, RotateCcw, Loader2, X } from "lucide-react";
+import { FileText, Save, RotateCcw, Loader2, X, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -21,6 +21,7 @@ export function ClaudeMdModal({ projectId, isOpen, onOpenChange }: ClaudeMdModal
   const [originalContent, setOriginalContent] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasChanges, setHasChanges] = useState(false);
 
@@ -105,6 +106,29 @@ Add any project-specific context or instructions here that Claude should be awar
     setHasChanges(false);
   };
 
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    setError(null);
+    try {
+      const response = await api.fetchStream(`/projects/${projectId}/claude-md`, {
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to refresh CLAUDE.md");
+      }
+
+      const data = await response.json();
+      setContent(data.content);
+      setOriginalContent(data.content);
+      setHasChanges(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to refresh CLAUDE.md");
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent className="min-w-[90vw] max-w-[90vw] min-h-[80vh] max-h-[80vh] flex flex-col">
@@ -163,9 +187,24 @@ Add any project-specific context or instructions here that Claude should be awar
                   <RotateCcw className="h-4 w-4 mr-2" />
                   Reset
                 </Button>
-                
+
+                <Button
+                  onClick={handleRefresh}
+                  disabled={refreshing}
+                  variant="outline"
+                  size="sm"
+                  title="Refresh CLAUDE.md with latest datasource information"
+                >
+                  {refreshing ? (
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  ) : (
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                  )}
+                  Refresh
+                </Button>
+
                 <div className="flex-1" />
-                
+
                 <Button
                   onClick={() => onOpenChange(false)}
                   variant="outline"

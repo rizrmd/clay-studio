@@ -46,10 +46,41 @@ export class MessageService {
       return;
     }
 
+    // Handle 'new' conversation - create it first
+    let effectiveConversationId = conversationId;
+
     try {
       this.sendingMessages.add(messageKey);
+      if (conversationId === 'new') {
+        try {
+          const response = await api.fetchStream("/conversations", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              project_id: projectId,
+            }),
+          });
 
-      const state = conversationStore.conversations[conversationId];
+          if (!response.ok) {
+            throw new Error("Failed to create new conversation");
+          }
+
+          const newConversation = await response.json();
+          effectiveConversationId = newConversation.id;
+
+          // Update the conversation store to use the new ID
+          conversationStore.activeConversationId = effectiveConversationId;
+
+          logger.debug(`Created new conversation ${effectiveConversationId} for project ${projectId}`);
+        } catch (error) {
+          logger.error("Failed to create conversation:", error);
+          throw new Error("Failed to create new conversation");
+        }
+      }
+
+      const state = conversationStore.conversations[effectiveConversationId];
 
       // Queue message if busy (unless it's from queue to prevent infinite loop)
       if (
@@ -65,7 +96,7 @@ export class MessageService {
         };
 
         await this.conversationManager.addToQueue(
-          conversationId,
+          effectiveConversationId,
           queuedMessage
         );
         return;
@@ -74,8 +105,8 @@ export class MessageService {
       // Note: WebSocket doesn't need abort controllers like SSE did
 
       // Update status
-      await this.conversationManager.updateStatus(conversationId, "streaming");
-      await this.conversationManager.setError(conversationId, null);
+      await this.conversationManager.updateStatus(effectiveConversationId, "streaming");
+      await this.conversationManager.setError(effectiveConversationId, null);
 
       // Upload files if any
       let uploadedFilePaths: string[] = [];
@@ -83,7 +114,7 @@ export class MessageService {
         uploadedFilePaths = await this.uploadFiles(
           files,
           projectId,
-          conversationId
+          effectiveConversationId
         );
       }
 
@@ -102,12 +133,12 @@ export class MessageService {
         content: messageContent,
         createdAt: new Date().toISOString(),
       };
-      await this.conversationManager.addMessage(conversationId, userMessage);
+      await this.conversationManager.addMessage(effectiveConversationId, userMessage);
 
       // Start streaming
       await chatEventBus.emit({
         type: "STREAMING_STARTED",
-        conversationId,
+        conversationId: effectiveConversationId,
       });
 
       // Use WebSocket to send message instead of SSE
@@ -116,28 +147,37 @@ export class MessageService {
 
       // Only subscribe if not already subscribed to this conversation
       // The useChat hook should have already established the subscription
-      wsService.subscribe(projectId, conversationId);
-      wsService.setCurrentConversation(conversationId);
+      wsService.subscribe(projectId, effectiveConversationId);
+      wsService.setCurrentConversation(effectiveConversationId);
 
       // Send the message via WebSocket
       wsService.sendChatMessage(
         projectId,
-        conversationId,
+        effectiveConversationId,
         content,
         uploadedFilePaths
       );
+
+      // If this was a 'new' conversation, emit a redirect event to update the URL
+      if (conversationId === 'new') {
+        await chatEventBus.emit({
+          type: 'CONVERSATION_REDIRECT',
+          oldConversationId: 'new',
+          newConversationId: effectiveConversationId,
+        });
+      }
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Failed to send message";
-      await this.conversationManager.setError(conversationId, errorMessage);
+      await this.conversationManager.setError(effectiveConversationId, errorMessage);
       // Only set to idle if there was an error
-      await this.conversationManager.updateStatus(conversationId, "idle");
+      await this.conversationManager.updateStatus(effectiveConversationId, "idle");
       throw error;
     } finally {
       this.sendingMessages.delete(messageKey);
       // Don't set status to idle here - let streaming service handle it
       // The streaming has already been handled, so we can process queue
-      await this.processQueue(projectId, conversationId);
+      await this.processQueue(projectId, effectiveConversationId);
     }
   }
 

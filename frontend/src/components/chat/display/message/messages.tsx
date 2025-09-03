@@ -2,6 +2,8 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { ArrowDown } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSnapshot } from "valtio";
+import { messageUIStore, messageUIActions } from "@/store/message-ui-store";
 import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
 import { LoadingIndicator } from "./loading-indicator";
 import { MessageListItem } from "./message-list-item";
@@ -31,15 +33,10 @@ export function Messages({
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const previousConversationId = useRef(conversationId);
-  const [showNewMessageAlert, setShowNewMessageAlert] = useState(false);
-  const [editingQueuedId, setEditingQueuedId] = useState<string | null>(null);
-  const [editingContent, setEditingContent] = useState("");
-  const [isAtBottom, setIsAtBottom] = useState(true);
+  const messageUISnapshot = useSnapshot(messageUIStore);
+  const conversationState = messageUIActions.getConversationState(conversationId || "");
   const previousMessageCount = useRef(messages.length);
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const [isInitialized, setIsInitialized] = useState(false);
-  const [showVirtuoso, setShowVirtuoso] = useState(false);
-  const [isVirtuosoReady, setIsVirtuosoReady] = useState(false);
   const scrollerRef = useRef<HTMLElement | null>(null);
   const contentStableTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const scrollHeightRef = useRef<number>(0);
@@ -49,22 +46,19 @@ export function Messages({
   const handleStartEdit = (messageId: string) => {
     const queuedMessage = messageQueue.find((m) => m.id === messageId);
     if (queuedMessage) {
-      setEditingQueuedId(messageId);
-      setEditingContent(queuedMessage.content);
+      messageUIActions.startEditingQueued(messageId, queuedMessage.content);
     }
   };
 
   const handleSaveEdit = () => {
-    if (editingQueuedId && onEditQueued) {
-      onEditQueued(editingQueuedId, editingContent);
-      setEditingQueuedId(null);
-      setEditingContent("");
+    if (messageUISnapshot.editingQueuedId && onEditQueued) {
+      onEditQueued(messageUISnapshot.editingQueuedId, messageUISnapshot.editingContent);
+      messageUIActions.stopEditingQueued();
     }
   };
 
   const handleCancelEdit = () => {
-    setEditingQueuedId(null);
-    setEditingContent("");
+    messageUIActions.stopEditingQueued();
   };
 
   // Fun thinking words to display while loading
@@ -183,14 +177,14 @@ export function Messages({
         items.push({
           id: queuedMsg.id,
           content:
-            editingQueuedId === queuedMsg.id
-              ? editingContent
+            messageUISnapshot.editingQueuedId === queuedMsg.id
+              ? messageUISnapshot.editingContent
               : queuedMsg.content,
           role: "user" as const,
           createdAt: queuedMsg.timestamp,
           isQueued: true,
           queuePosition: index + 1,
-          isEditing: editingQueuedId === queuedMsg.id,
+          isEditing: messageUISnapshot.editingQueuedId === queuedMsg.id,
           file_attachments: queuedMsg.files?.map((f) => ({
             id: `file-${f.name}`,
             file_name: f.name,
@@ -207,8 +201,8 @@ export function Messages({
     messages,
     isLoading,
     messageQueue,
-    editingQueuedId,
-    editingContent,
+    messageUISnapshot.editingQueuedId,
+    messageUISnapshot.editingContent,
     activeTools.length,
   ]);
 
@@ -288,17 +282,17 @@ export function Messages({
 
   // Initialize Virtuoso when messages are available
   useEffect(() => {
-    if (!isInitialized && messages.length > 0) {
-      setIsInitialized(true);
-      setIsVirtuosoReady(false);
+    if (!messageUISnapshot.isInitialized && messages.length > 0) {
+      messageUIActions.setInitialized(true);
+      messageUIActions.setVirtuosoReady(false);
       // Don't show immediately - wait for Virtuoso to signal it's ready
     }
-  }, [messages.length, isInitialized]);
+  }, [messages.length, messageUISnapshot.isInitialized]);
 
   // Reset ready state when allItems changes significantly (for re-initialization)
   useEffect(() => {
-    if (isInitialized && !showVirtuoso) {
-      setIsVirtuosoReady(false);
+    if (messageUISnapshot.isInitialized && !messageUISnapshot.showVirtuoso) {
+      messageUIActions.setVirtuosoReady(false);
     }
   }, [allItems.length]);
 
@@ -319,24 +313,24 @@ export function Messages({
 
   // Show Virtuoso when it's ready
   useEffect(() => {
-    if (isVirtuosoReady && isInitialized && !showVirtuoso) {
+    if (messageUISnapshot.isVirtuosoReady && messageUISnapshot.isInitialized && !messageUISnapshot.showVirtuoso) {
       // Show immediately for instant experience
-      setShowVirtuoso(true);
+      messageUIActions.setShowVirtuoso(true);
       // Scroll after next frame
       requestAnimationFrame(() => {
         scrollToBottom("auto");
       });
     }
-  }, [isVirtuosoReady, isInitialized, showVirtuoso]);
+  }, [messageUISnapshot.isVirtuosoReady, messageUISnapshot.isInitialized, messageUISnapshot.showVirtuoso]);
 
   // Hide Virtuoso immediately when conversation changes (before messages update)
   useEffect(() => {
     // Reset immediately when conversation ID changes
     if (conversationId !== previousConversationId.current) {
       // Hide Virtuoso immediately to prevent flash
-      setShowVirtuoso(false);
-      setIsVirtuosoReady(false);
-      setIsInitialized(false);
+      messageUIActions.setShowVirtuoso(false);
+      messageUIActions.setVirtuosoReady(false);
+      messageUIActions.setInitialized(false);
 
       // Clear any pending timeouts
       if (contentStableTimeoutRef.current) {
@@ -348,7 +342,7 @@ export function Messages({
         scrollStabilityCheckRef.current = null;
       }
 
-      setShowNewMessageAlert(false);
+      messageUIActions.setShowNewMessageAlert(false, conversationId);
       scrollHeightRef.current = 0; // Reset scroll height tracking
       previousConversationId.current = conversationId;
       previousMessageCount.current = 0; // Reset to 0 so we can detect when new messages arrive
@@ -360,13 +354,13 @@ export function Messages({
     if (
       conversationId === previousConversationId.current &&
       messages.length > 0 &&
-      !isInitialized
+      !messageUISnapshot.isInitialized
     ) {
-      setIsInitialized(true);
+      messageUIActions.setInitialized(true);
       previousMessageCount.current = messages.length;
       // Wait for Virtuoso to signal it's ready
     }
-  }, [messages.length, conversationId, isInitialized]);
+  }, [messages.length, conversationId, messageUISnapshot.isInitialized]);
 
   // Handle new messages and content changes scrolling behavior
   useEffect(() => {
@@ -382,53 +376,40 @@ export function Messages({
         requestAnimationFrame(() => {
           scrollToBottom("smooth");
         });
-        setShowNewMessageAlert(false);
+        messageUIActions.setShowNewMessageAlert(false, conversationId);
       }
       // For assistant messages
       else if (lastMessage.role === "assistant") {
         // Scroll immediately if at bottom
-        if (isAtBottom) {
+        if (conversationState.isAtBottom) {
           requestAnimationFrame(() => {
             scrollToBottom("smooth");
           });
         } else {
           // Show alert if user has scrolled up
-          setShowNewMessageAlert(true);
+          messageUIActions.setShowNewMessageAlert(true, conversationId);
         }
       }
       previousMessageCount.current = messages.length;
-    } else if (isAtBottom && messages.length > 0) {
+    } else if (conversationState.isAtBottom && messages.length > 0) {
       // No new message but content might have changed (tool results, streaming, etc.)
       // Auto-scroll to bottom if user is already at bottom to maintain position
       scrollToBottom("auto");
     }
-  }, [messages, isAtBottom]);
-
-  // Handle streaming content updates (when message content changes but count doesn't)
-  useEffect(() => {
-    if (_isStreaming && isAtBottom && messages.length > 0) {
-      const lastMessage = messages[messages.length - 1];
-      if (lastMessage.role === "assistant") {
-        // Immediate scroll for streaming
-        requestAnimationFrame(() => {
-          scrollToBottom("auto");
-        });
-      }
-    }
-  }, [messages.map((m) => m.content).join(""), _isStreaming, isAtBottom]);
+  }, [messages, conversationState.isAtBottom]);
 
   // Handle loading state changes (when loading indicator appears/disappears)
   useEffect(() => {
-    if (isLoading && isAtBottom) {
+    if (isLoading && conversationState.isAtBottom) {
       requestAnimationFrame(() => {
         scrollToBottom("auto");
       });
     }
-  }, [isLoading, isAtBottom]);
+  }, [isLoading, conversationState.isAtBottom]);
 
   const handleScrollToBottom = () => {
     scrollToBottom("smooth");
-    setShowNewMessageAlert(false);
+    messageUIActions.setShowNewMessageAlert(false, conversationId);
   };
 
   const portal = document.getElementById("portal-body");
@@ -438,7 +419,7 @@ export function Messages({
         createPortal(
           <div
             className={cn(
-              !showVirtuoso
+              !messageUISnapshot.showVirtuoso
                 ? "opacity-100 transition-opacity duration-200"
                 : "opacity-0 pointer-events-none",
               "hidden md:fixed right-0 bottom-0 top-0 w-[50px]"
@@ -458,7 +439,7 @@ export function Messages({
         <div
           className={cn(
             "absolute inset-0 transition-all",
-            showVirtuoso ? "opacity-100" : "opacity-0"
+            messageUISnapshot.showVirtuoso ? "opacity-100" : "opacity-0"
           )}
         >
           <Virtuoso
@@ -471,7 +452,7 @@ export function Messages({
             fixedItemHeight={undefined}
             scrollerRef={(ref) => {
               scrollerRef.current = ref as HTMLElement;
-              if (ref && !isVirtuosoReady) {
+              if (ref && !messageUISnapshot.isVirtuosoReady) {
                 // Clear any existing timeouts
                 if (scrollStabilityCheckRef.current) {
                   clearTimeout(scrollStabilityCheckRef.current);
@@ -489,7 +470,7 @@ export function Messages({
                     // Quick check for async content
                     const waitTime = hasAsyncContent ? 100 : 20;
                     scrollStabilityCheckRef.current = setTimeout(() => {
-                      setIsVirtuosoReady(true);
+                      messageUIActions.setVirtuosoReady(true);
                     }, waitTime);
                   } else {
                     // No height yet, check again
@@ -512,9 +493,9 @@ export function Messages({
               }
             }}
             atBottomStateChange={(atBottom) => {
-              setIsAtBottom(atBottom);
+              messageUIActions.setIsAtBottom(atBottom, conversationId);
               if (atBottom) {
-                setShowNewMessageAlert(false);
+                messageUIActions.setShowNewMessageAlert(false, conversationId);
               }
             }}
             atBottomThreshold={50}
@@ -575,8 +556,8 @@ export function Messages({
                     onSaveEdit={handleSaveEdit}
                     onCancelEdit={handleCancelEdit}
                     onCancelQueued={onCancelQueued}
-                    editingContent={editingContent}
-                    setEditingContent={setEditingContent}
+                    editingContent={messageUISnapshot.editingContent}
+                    setEditingContent={messageUIActions.updateEditingContent}
                     onResendMessage={onResendMessage}
                     isLastUserMessage={item.id === lastUserMessageId}
                     onNewChatFromHere={onNewChatFromHere}
@@ -609,7 +590,7 @@ export function Messages({
         </div>
 
         {/* Show loading or welcome screen as overlay when Virtuoso is hidden or has no data */}
-        {(allItems.length === 0 || !showVirtuoso) && (
+        {(allItems.length === 0 || !messageUISnapshot.showVirtuoso) && (
           <div className="absolute inset-0 bg-background flex justify-center items-center">
             {messages.length === 0 && !isLoading ? (
               <WelcomeScreen />
@@ -622,7 +603,7 @@ export function Messages({
         )}
 
         {/* New message indicator */}
-        {showNewMessageAlert && (
+        {conversationState.showNewMessageAlert && (
           <div className="absolute bottom-[60px] left-1/2 transform -translate-x-1/2 z-20">
             <Button
               onClick={handleScrollToBottom}

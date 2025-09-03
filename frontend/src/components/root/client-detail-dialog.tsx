@@ -1,5 +1,7 @@
-import { useState } from 'react'
+import { useEffect } from 'react'
+import { useSnapshot } from 'valtio'
 import { ClientRootResponse, rootService } from '@/lib/services/root-service'
+import { clientDetailDialogStore, clientDetailDialogActions } from '@/store/client-detail-dialog-store'
 import {
   Dialog,
   DialogContent,
@@ -35,121 +37,111 @@ interface ClientDetailDialogProps {
   onUpdate: () => void
 }
 
-export function ClientDetailDialog({ 
-  client, 
-  open, 
-  onOpenChange, 
-  onUpdate 
+export function ClientDetailDialog({
+  client,
+  open,
+  onOpenChange,
+  onUpdate
 }: ClientDetailDialogProps) {
-  const [activeTab, setActiveTab] = useState('details')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  
-  // Form states
-  const [name, setName] = useState(client.name)
-  const [description, setDescription] = useState(client.description || '')
-  const [domains, setDomains] = useState<string[]>(client.domains || [])
-  const [newDomain, setNewDomain] = useState('')
-  const [config, setConfig] = useState(JSON.stringify(client.config, null, 2))
-  
+  const dialogSnapshot = useSnapshot(clientDetailDialogStore)
+
+  // Initialize state when client changes
+  useEffect(() => {
+    clientDetailDialogActions.initializeFromClient(client)
+  }, [client])
+
   // Parse config for UI controls
   const configObj = typeof client.config === 'object' ? client.config : {}
-  const [registrationEnabled, setRegistrationEnabled] = useState(configObj.registration_enabled || false)
-  const [requireInviteCode, setRequireInviteCode] = useState(configObj.require_invite_code || false)
-  const [inviteCode, setInviteCode] = useState(configObj.invite_code || '')
 
   const handleSaveDetails = async () => {
     try {
-      setLoading(true)
-      setError(null)
-      const updateData: any = { name }
-      if (description && description.trim()) {
-        updateData.description = description
+      clientDetailDialogActions.setLoading(true)
+      clientDetailDialogActions.setError(null)
+      const updateData: any = { name: dialogSnapshot.name }
+      if (dialogSnapshot.description && dialogSnapshot.description.trim()) {
+        updateData.description = dialogSnapshot.description
       }
       await rootService.updateClient(client.id, updateData)
       onUpdate()
       onOpenChange(false)
     } catch (err: any) {
-      const errorMsg = typeof err.response?.data?.error === 'string' 
-        ? err.response?.data?.error 
+      const errorMsg = typeof err.response?.data?.error === 'string'
+        ? err.response?.data?.error
         : (err.response?.data?.error?.brief || err.response?.data?.error?.name || 'Failed to update client')
-      setError(errorMsg)
+      clientDetailDialogActions.setError(errorMsg)
     } finally {
-      setLoading(false)
+      clientDetailDialogActions.setLoading(false)
     }
   }
 
   const handleSaveDomains = async () => {
     try {
-      setLoading(true)
-      setError(null)
-      await rootService.updateClientDomains(client.id, domains)
+      clientDetailDialogActions.setLoading(true)
+      clientDetailDialogActions.setError(null)
+      await rootService.updateClientDomains(client.id, [...dialogSnapshot.domains])
       onUpdate()
       onOpenChange(false)
     } catch (err: any) {
-      const errorMsg = typeof err.response?.data?.error === 'string' 
-        ? err.response?.data?.error 
+      const errorMsg = typeof err.response?.data?.error === 'string'
+        ? err.response?.data?.error
         : (err.response?.data?.error?.brief || err.response?.data?.error?.name || 'Failed to update domains')
-      setError(errorMsg)
+      clientDetailDialogActions.setError(errorMsg)
     } finally {
-      setLoading(false)
+      clientDetailDialogActions.setLoading(false)
     }
   }
 
   const handleSaveConfig = async () => {
     try {
-      setLoading(true)
-      setError(null)
-      const configObj = JSON.parse(config)
+      clientDetailDialogActions.setLoading(true)
+      clientDetailDialogActions.setError(null)
+      const configObj = JSON.parse(dialogSnapshot.config)
       await rootService.updateClientConfig(client.id, configObj)
       onUpdate()
       onOpenChange(false)
     } catch (err: any) {
       if (err instanceof SyntaxError) {
-        setError('Invalid JSON format')
+        clientDetailDialogActions.setError('Invalid JSON format')
       } else {
-        const errorMsg = typeof err.response?.data?.error === 'string' 
-          ? err.response?.data?.error 
+        const errorMsg = typeof err.response?.data?.error === 'string'
+          ? err.response?.data?.error
           : (err.response?.data?.error?.brief || err.response?.data?.error?.name || 'Failed to update configuration')
-        setError(errorMsg)
+        clientDetailDialogActions.setError(errorMsg)
       }
     } finally {
-      setLoading(false)
+      clientDetailDialogActions.setLoading(false)
     }
   }
 
   const handleSaveRegistrationSettings = async () => {
     try {
-      setLoading(true)
-      setError(null)
+      clientDetailDialogActions.setLoading(true)
+      clientDetailDialogActions.setError(null)
       const updatedConfig = {
         ...configObj,
-        registration_enabled: registrationEnabled,
-        require_invite_code: requireInviteCode,
-        invite_code: inviteCode || undefined
+        registration_enabled: dialogSnapshot.registrationEnabled,
+        require_invite_code: dialogSnapshot.requireInviteCode,
+        invite_code: dialogSnapshot.inviteCode || undefined
       }
       await rootService.updateClientConfig(client.id, updatedConfig)
       onUpdate()
       onOpenChange(false)
     } catch (err: any) {
-      const errorMsg = typeof err.response?.data?.error === 'string' 
-        ? err.response?.data?.error 
+      const errorMsg = typeof err.response?.data?.error === 'string'
+        ? err.response?.data?.error
         : (err.response?.data?.error?.brief || err.response?.data?.error?.name || 'Failed to update registration settings')
-      setError(errorMsg)
+      clientDetailDialogActions.setError(errorMsg)
     } finally {
-      setLoading(false)
+      clientDetailDialogActions.setLoading(false)
     }
   }
 
   const handleAddDomain = () => {
-    if (newDomain && !domains.includes(newDomain)) {
-      setDomains([...domains, newDomain])
-      setNewDomain('')
-    }
+    clientDetailDialogActions.addDomain(dialogSnapshot.newDomain)
   }
 
   const handleRemoveDomain = (domain: string) => {
-    setDomains(domains.filter(d => d !== domain))
+    clientDetailDialogActions.removeDomain(domain)
   }
 
   return (
@@ -162,15 +154,15 @@ export function ClientDetailDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {error && (
+        {dialogSnapshot.error && (
           <Alert variant="destructive">
             <AlertDescription>
-              {typeof error === 'string' ? error : JSON.stringify(error)}
+              {typeof dialogSnapshot.error === 'string' ? dialogSnapshot.error : JSON.stringify(dialogSnapshot.error)}
             </AlertDescription>
           </Alert>
         )}
 
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <Tabs value={dialogSnapshot.activeTab} onValueChange={clientDetailDialogActions.setActiveTab}>
           <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="details">Details</TabsTrigger>
             <TabsTrigger value="domains">Domains</TabsTrigger>
@@ -184,18 +176,18 @@ export function ClientDetailDialog({
                 <Label htmlFor="name">Name</Label>
                 <Input
                   id="name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
+                  value={dialogSnapshot.name}
+                  onChange={(e) => clientDetailDialogActions.setName(e.target.value)}
                   placeholder="Client name"
                 />
               </div>
-              
+
               <div>
                 <Label htmlFor="description">Description</Label>
                 <Textarea
                   id="description"
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
+                  value={dialogSnapshot.description}
+                  onChange={(e) => clientDetailDialogActions.setDescription(e.target.value)}
                   placeholder="Client description"
                   rows={3}
                 />
@@ -220,10 +212,10 @@ export function ClientDetailDialog({
                 <Button variant="outline" onClick={() => onOpenChange(false)}>
                   Cancel
                 </Button>
-                <Button onClick={handleSaveDetails} disabled={loading}>
-                  <Save className="h-4 w-4 mr-2" />
-                  Save Changes
-                </Button>
+                 <Button onClick={handleSaveDetails} disabled={dialogSnapshot.loading}>
+                   <Save className="h-4 w-4 mr-2" />
+                   Save Changes
+                 </Button>
               </div>
             </div>
           </TabsContent>
@@ -238,49 +230,49 @@ export function ClientDetailDialog({
               </div>
 
               <div className="flex gap-2">
-                <Input
-                  value={newDomain}
-                  onChange={(e) => setNewDomain(e.target.value)}
-                  placeholder="Enter domain (e.g., example.com)"
-                  onKeyPress={(e) => e.key === 'Enter' && handleAddDomain()}
-                />
-                <Button onClick={handleAddDomain} size="sm">
-                  <Plus className="h-4 w-4" />
-                </Button>
-              </div>
+                 <Input
+                   value={dialogSnapshot.newDomain}
+                   onChange={(e) => clientDetailDialogActions.setNewDomain(e.target.value)}
+                   placeholder="Enter domain (e.g., example.com)"
+                   onKeyPress={(e) => e.key === 'Enter' && handleAddDomain()}
+                 />
+                 <Button onClick={handleAddDomain} size="sm">
+                   <Plus className="h-4 w-4" />
+                 </Button>
+               </div>
 
-              <div className="space-y-2">
-                {domains.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    No domains configured (accessible from any domain)
-                  </p>
-                ) : (
-                  domains.map((domain) => (
-                    <div key={domain} className="flex items-center justify-between p-2 border rounded">
-                      <div className="flex items-center gap-2">
-                        <Globe className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-sm">{domain}</span>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleRemoveDomain(domain)}
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  ))
-                )}
-              </div>
+               <div className="space-y-2">
+                 {dialogSnapshot.domains.length === 0 ? (
+                   <p className="text-sm text-muted-foreground">
+                     No domains configured (accessible from any domain)
+                   </p>
+                 ) : (
+                   dialogSnapshot.domains.map((domain: string) => (
+                     <div key={domain} className="flex items-center justify-between p-2 border rounded">
+                       <div className="flex items-center gap-2">
+                         <Globe className="h-4 w-4 text-muted-foreground" />
+                         <span className="text-sm">{domain}</span>
+                       </div>
+                       <Button
+                         variant="ghost"
+                         size="sm"
+                         onClick={() => handleRemoveDomain(domain)}
+                       >
+                         <X className="h-4 w-4" />
+                       </Button>
+                     </div>
+                   ))
+                 )}
+               </div>
 
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => onOpenChange(false)}>
-                  Cancel
-                </Button>
-                <Button onClick={handleSaveDomains} disabled={loading}>
-                  <Save className="h-4 w-4 mr-2" />
-                  Save Domains
-                </Button>
+               <div className="flex justify-end gap-2">
+                 <Button variant="outline" onClick={() => onOpenChange(false)}>
+                   Cancel
+                 </Button>
+                 <Button onClick={handleSaveDomains} disabled={dialogSnapshot.loading}>
+                   <Save className="h-4 w-4 mr-2" />
+                   Save Domains
+                 </Button>
               </div>
             </div>
           </TabsContent>
@@ -300,53 +292,53 @@ export function ClientDetailDialog({
                         Allow new users to create accounts
                       </p>
                     </div>
-                    <Switch
-                      id="registration-enabled"
-                      checked={registrationEnabled}
-                      onCheckedChange={setRegistrationEnabled}
-                    />
-                  </div>
+                     <Switch
+                       id="registration-enabled"
+                       checked={dialogSnapshot.registrationEnabled}
+                       onCheckedChange={clientDetailDialogActions.setRegistrationEnabled}
+                     />
+                   </div>
 
-                  {registrationEnabled && (
-                    <>
-                      <div className="flex items-center justify-between">
-                        <div className="space-y-1">
-                          <Label htmlFor="require-invite">Require Invite Code</Label>
-                          <p className="text-sm text-muted-foreground">
-                            Users must provide a code to register
-                          </p>
-                        </div>
-                        <Switch
-                          id="require-invite"
-                          checked={requireInviteCode}
-                          onCheckedChange={setRequireInviteCode}
-                        />
-                      </div>
+                   {dialogSnapshot.registrationEnabled && (
+                     <>
+                       <div className="flex items-center justify-between">
+                         <div className="space-y-1">
+                           <Label htmlFor="require-invite">Require Invite Code</Label>
+                           <p className="text-sm text-muted-foreground">
+                             Users must provide a code to register
+                           </p>
+                         </div>
+                         <Switch
+                           id="require-invite"
+                           checked={dialogSnapshot.requireInviteCode}
+                           onCheckedChange={clientDetailDialogActions.setRequireInviteCode}
+                         />
+                       </div>
 
-                      {requireInviteCode && (
-                        <div>
-                          <Label htmlFor="invite-code">Invite Code</Label>
-                          <Input
-                            id="invite-code"
-                            type="text"
-                            value={inviteCode}
-                            onChange={(e) => setInviteCode(e.target.value)}
-                            placeholder="Enter invite code"
-                            className="mt-1"
-                          />
-                          <p className="text-xs text-muted-foreground mt-1">
-                            Users will need this code to register
-                          </p>
-                        </div>
-                      )}
-                    </>
-                  )}
+                       {dialogSnapshot.requireInviteCode && (
+                         <div>
+                           <Label htmlFor="invite-code">Invite Code</Label>
+                           <Input
+                             id="invite-code"
+                             type="text"
+                             value={dialogSnapshot.inviteCode}
+                             onChange={(e) => clientDetailDialogActions.setInviteCode(e.target.value)}
+                             placeholder="Enter invite code"
+                             className="mt-1"
+                           />
+                           <p className="text-xs text-muted-foreground mt-1">
+                             Users will need this code to register
+                           </p>
+                         </div>
+                       )}
+                     </>
+                   )}
 
-                  <div className="flex justify-end gap-2 pt-2">
-                    <Button onClick={handleSaveRegistrationSettings} disabled={loading}>
-                      <Save className="h-4 w-4 mr-2" />
-                      Save Registration Settings
-                    </Button>
+                   <div className="flex justify-end gap-2 pt-2">
+                     <Button onClick={handleSaveRegistrationSettings} disabled={dialogSnapshot.loading}>
+                       <Save className="h-4 w-4 mr-2" />
+                       Save Registration Settings
+                     </Button>
                   </div>
                 </CardContent>
               </Card>
@@ -364,21 +356,21 @@ export function ClientDetailDialog({
                     </p>
                   </div>
 
-                  <Textarea
-                    value={config}
-                    onChange={(e) => setConfig(e.target.value)}
-                    className="font-mono text-xs"
-                    rows={10}
-                  />
+                   <Textarea
+                     value={dialogSnapshot.config}
+                     onChange={(e) => clientDetailDialogActions.setConfig(e.target.value)}
+                     className="font-mono text-xs"
+                     rows={10}
+                   />
 
-                  <div className="flex justify-end gap-2">
-                    <Button variant="outline" onClick={() => onOpenChange(false)}>
-                      Cancel
-                    </Button>
-                    <Button onClick={handleSaveConfig} disabled={loading}>
-                      <Save className="h-4 w-4 mr-2" />
-                      Save Raw Configuration
-                    </Button>
+                   <div className="flex justify-end gap-2">
+                     <Button variant="outline" onClick={() => onOpenChange(false)}>
+                       Cancel
+                     </Button>
+                     <Button onClick={handleSaveConfig} disabled={dialogSnapshot.loading}>
+                       <Save className="h-4 w-4 mr-2" />
+                       Save Raw Configuration
+                     </Button>
                   </div>
                 </CardContent>
               </Card>

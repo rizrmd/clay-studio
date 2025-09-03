@@ -33,20 +33,23 @@ export function MainApp() {
       // Try to get the last conversation from localStorage
       const lastConversationKey = `last_conversation_${projectId}`;
       const lastConversationId = localStorage.getItem(lastConversationKey);
-      
+
       if (lastConversationId) {
         // Redirect to the last conversation
         navigate(`/chat/${projectId}/${lastConversationId}`, { replace: true });
       } else {
-        // No last conversation, redirect to projects
-        navigate("/projects", { replace: true });
+        // No last conversation, start a new conversation
+        navigate(`/chat/${projectId}/new`, { replace: true });
       }
     }
   }, [projectId, conversationId, navigate]);
 
+  // Handle 'new' conversation ID - don't save it to localStorage
+  const effectiveConversationId = conversationId === 'new' ? undefined : conversationId;
+
   // Save current conversation ID to localStorage when it changes
   useEffect(() => {
-    if (projectId && conversationId) {
+    if (projectId && conversationId && conversationId !== 'new') {
       const lastConversationKey = `last_conversation_${projectId}`;
       localStorage.setItem(lastConversationKey, conversationId);
     }
@@ -89,12 +92,12 @@ export function MainApp() {
         isCollapsed={uiSnapshot.isMobile ? true : uiSnapshot.isSidebarCollapsed}
         onToggle={toggleSidebar}
         projectId={projectId}
-        currentConversationId={conversationId}
+        currentConversationId={effectiveConversationId}
         onConversationSelect={handleConversationSelect}
       />
       <div className="flex flex-1 flex-col min-w-0">
-        <MemoizedChat 
-          projectId={projectId} 
+        <MemoizedChat
+          projectId={projectId}
           conversationId={conversationId}
           onToggleSidebar={toggleSidebar}
           isSidebarCollapsed={uiSnapshot.isMobile ? true : uiSnapshot.isSidebarCollapsed}

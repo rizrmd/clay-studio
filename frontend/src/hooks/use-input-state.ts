@@ -1,14 +1,17 @@
 import { useCallback } from 'react';
-import { inputActions } from '../store/input-store';
+import { useSnapshot } from 'valtio';
+import { inputStore, inputActions } from '../store/input-store';
 
 /**
  * Hook for managing input state for a specific conversation
  * This preserves draft messages, attachments, and typing state across conversation switches
  */
 export function useInputState(conversationId: string) {
-  const draftMessage = inputActions.getDraftMessage(conversationId);
-  const attachments = inputActions.getAttachments(conversationId);
-  const isTyping = inputActions.getTyping(conversationId);
+  const snapshot = useSnapshot(inputStore, { sync: true });
+  
+  const draftMessage = snapshot.draftMessages[conversationId] || '';
+  const attachments = snapshot.attachments[conversationId] || [];
+  const isTyping = snapshot.isTyping[conversationId] || false;
 
   const setDraftMessage = useCallback((draft: string) => {
     inputActions.setDraftMessage(conversationId, draft);

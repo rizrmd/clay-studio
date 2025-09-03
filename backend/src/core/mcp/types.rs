@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::fmt;
 
 // JSON-RPC types
 #[derive(Debug, Deserialize)]
@@ -28,6 +29,14 @@ pub struct JsonRpcError {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<Value>,
 }
+
+impl fmt::Display for JsonRpcError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "JSON-RPC error {}: {}", self.code, self.message)
+    }
+}
+
+impl std::error::Error for JsonRpcError {}
 
 // MCP Protocol types
 #[derive(Debug, Serialize)]
@@ -102,6 +111,13 @@ pub struct ToolContent {
     #[serde(rename = "type")]
     pub content_type: String,
     pub text: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DataSourceInfo {
+    pub name: String,
+    pub source_type: String,
+    pub connection_config: Value,
 }
 
 // Error codes

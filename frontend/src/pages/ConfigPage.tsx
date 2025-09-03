@@ -1,7 +1,9 @@
 import { useValtioAuth } from "@/hooks/use-valtio-auth";
 import { Navigate } from "react-router-dom";
-import { useState, useEffect } from "react";
+import { useEffect } from "react";
+import { useSnapshot } from "valtio";
 import api from "@/lib/utils/api";
+import { configPageStore, configPageActions } from "@/store/config-page-store";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AppHeader } from "@/components/layout/app-header";
 import { DomainManagement } from "@/components/root/domain-management";
@@ -10,26 +12,16 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
 import { Users, Globe } from "lucide-react";
 
-interface SystemConfig {
-  registrationEnabled: boolean;
-  requireInviteCode: boolean;
-  allowedDomains: string[];
-}
+
 
 export function ConfigPage() {
   const { user, isAuthenticated } = useValtioAuth();
-  const [loading, setLoading] = useState(true);
-  const [config, setConfig] = useState<SystemConfig>({
-    registrationEnabled: false,
-    requireInviteCode: false,
-    allowedDomains: [],
-  });
-  const [clientId, setClientId] = useState<string | null>(null);
+  const configSnapshot = useSnapshot(configPageStore);
 
   useEffect(() => {
     if (isAuthenticated && (user?.role === "admin" || user?.role === "root")) {
       const storedClientId = localStorage.getItem('activeClientId');
-      setClientId(storedClientId);
+      configPageActions.setClientId(storedClientId);
       fetchConfig();
     }
   }, [isAuthenticated, user]);
@@ -37,15 +29,15 @@ export function ConfigPage() {
   const fetchConfig = async () => {
     try {
       const response = await api.get("/admin/config");
-      
-      setConfig({
+
+      configPageActions.setConfig({
         ...response,
         allowedDomains: response.allowedDomains || [],
       });
     } catch (error) {
       console.error("Failed to load configuration:", error);
     } finally {
-      setLoading(false);
+      configPageActions.setLoading(false);
     }
   };
 
@@ -59,7 +51,7 @@ export function ConfigPage() {
     return <Navigate to="/" replace />;
   }
 
-  if (loading) {
+  if (configSnapshot.loading) {
     return (
       <div className="container mx-auto py-8 space-y-6">
         <Skeleton className="h-10 w-48" />
@@ -99,23 +91,23 @@ export function ConfigPage() {
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="users" className="space-y-4">
-            <UserManagement
-              initialRegistrationEnabled={config.registrationEnabled}
-              initialRequireInviteCode={config.requireInviteCode}
-              {...(user?.role === "root" && clientId ? { clientId } : {})}
-              onUpdate={handleUpdate}
-            />
-          </TabsContent>
+           <TabsContent value="users" className="space-y-4">
+             <UserManagement
+               initialRegistrationEnabled={configSnapshot.config.registrationEnabled}
+               initialRequireInviteCode={configSnapshot.config.requireInviteCode}
+               {...(user?.role === "root" && configSnapshot.clientId ? { clientId: configSnapshot.clientId } : {})}
+               onUpdate={handleUpdate}
+             />
+           </TabsContent>
 
-          <TabsContent value="domains" className="space-y-4">
-            {clientId ? (
-              <DomainManagement
-                clientId={clientId}
-                initialDomains={config.allowedDomains}
-                onUpdate={handleUpdate}
-              />
-            ) : (
+           <TabsContent value="domains" className="space-y-4">
+             {configSnapshot.clientId ? (
+               <DomainManagement
+                 clientId={configSnapshot.clientId}
+                 initialDomains={[...configSnapshot.config.allowedDomains]}
+                 onUpdate={handleUpdate}
+               />
+             ) : (
               <Card>
                 <CardContent className="flex items-center justify-center py-16">
                   <p className="text-muted-foreground">

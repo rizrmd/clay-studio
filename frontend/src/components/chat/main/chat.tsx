@@ -33,7 +33,7 @@ export function Chat({
   onToggleSidebar,
   isSidebarCollapsed,
 }: ChatProps) {
-  const uiSnapshot = useSnapshot(uiStore);
+  const uiSnapshot = useSnapshot(uiStore, { sync: true });
   const dragCounter = useRef(0);
   const navigate = useNavigate();
   const { viewportHeight } = useViewportHeight();
@@ -93,10 +93,10 @@ export function Chat({
       const isSubscribed = wsService.subscribed;
       uiActions.setWsSubscribed(isSubscribed);
       
-      // If not subscribed, try to reconnect
-      if (!isSubscribed && projectId && propConversationId) {
+      // If not subscribed, try to reconnect (but not for 'new' conversations)
+      if (!isSubscribed && projectId && propConversationId && propConversationId !== 'new') {
         console.log('WebSocket not subscribed, attempting to reconnect...');
-        wsService.connect(projectId, propConversationId).catch(error => {
+        wsService.connect().catch(error => {
           console.error('Failed to reconnect WebSocket:', error);
         });
       }
@@ -125,21 +125,21 @@ export function Chat({
     }
   }, [projectId, propConversationId]);
 
-  const handleSubmit = async (e: React.FormEvent, files?: File[]) => {
+  const handleSubmit = async (e: React.FormEvent, message: string, files?: File[]) => {
     e.preventDefault();
     console.log('handleSubmit called with projectId:', projectId, 'conversationId:', propConversationId);
     console.log('WebSocket subscribed:', wsService.subscribed);
-    console.log('Input:', input);
-    console.log('sendMessage function:', sendMessage ? 'exists' : 'undefined');
+    console.log('Message:', message);
+    console.log('sendMessage function:', typeof sendMessage);
     console.log('WebSocket service methods:', Object.keys(wsService));
-    if (!input.trim() || !projectId) return;
+    if (!message.trim() || !projectId) return;
 
     // If there are forgotten messages, restore them first before sending
     if (hasForgottenMessages) {
       await restoreForgottenMessages();
     }
 
-    const messageContent = input.trim();
+    // Clear the input field
     setInput("");
     // Include any pending files from drag-drop along with form files
     const allFiles = [...(files || []), ...pendingFiles];
@@ -149,39 +149,21 @@ export function Chat({
       // Ensure WebSocket is connected before sending
       if (!wsService.subscribed) {
         console.log('WebSocket not connected, attempting to connect...');
-        await wsService.connect(projectId, propConversationId || 'new');
+        await wsService.connect();
       }
       
-      console.log('Calling sendMessage with:', { messageContent, fileCount: allFiles.length });
+      console.log('Calling sendMessage with:', { message, fileCount: allFiles.length });
       
       // Check if sendMessage is a function
       if (typeof sendMessage === 'function') {
         const result = await sendMessage(
-          messageContent,
+          message,
           allFiles.length > 0 ? allFiles : undefined
         );
         console.log('sendMessage completed:', result);
       } else {
         console.error('sendMessage is not a function');
-        // Try to send directly through WebSocket service if available
-        if (typeof wsService.sendMessage === 'function') {
-          try {
-            await wsService.sendMessage({
-              type: 'user_message',
-              content: messageContent,
-              files: allFiles.length > 0 ? allFiles.map(f => ({
-                name: f.name,
-                type: f.type,
-                size: f.size
-              })) : undefined
-            });
-            console.log('Message sent directly through WebSocket service');
-          } catch (wsError) {
-            console.error('Failed to send via WebSocket service:', wsError);
-          }
-        } else {
-          console.error('WebSocket service does not have sendMessage method');
-        }
+        // Fallback failed - sendMessage should always be a function from useValtioChat
       }
     } catch (error) {
       console.error('Failed to send message:', error);
