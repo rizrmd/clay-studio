@@ -25,7 +25,7 @@ const useToolUsage = () => ({
   updateToolUsage: (_id: string, _updates: any) => {},
   toggleExpanded: (_id: string) => {},
   getToolUsageById: (_id: string) => undefined,
-  fetchToolUsage: async (_id: string) => {},
+  fetchToolUsage: async (_id: string) => undefined,
 });
 import { ToolUsage } from "@/lib/types/chat";
 import { parseMcpToolName } from "./tool-call-utils";
@@ -64,10 +64,24 @@ export function ToolUsagePopover({
         setHasFetched(true);
       } else if (messageId) {
         // If no tool usages in props, fetch from API
-        fetchToolUsage(messageId, toolName).then((usage) => {
-          setToolUsage(usage);
+        try {
+          const result = fetchToolUsage(messageId);
+          if (result && typeof result.then === 'function') {
+            result.then((usage) => {
+              setToolUsage(usage || null);
+              setHasFetched(true);
+            }).catch(() => {
+              setToolUsage(null);
+              setHasFetched(true);
+            });
+          } else {
+            setToolUsage(null);
+            setHasFetched(true);
+          }
+        } catch {
+          setToolUsage(null);
           setHasFetched(true);
-        });
+        }
       } else {
         setHasFetched(true);
       }
@@ -459,13 +473,13 @@ export function ToolUsagePopover({
             <div className="space-y-2 flex flex-1 flex-col">
               <h4 className="text-sm font-medium text-muted-foreground items-center flex gap-2">
                 Output{" "}
-                {toolUsage.output?.status === "completed" && (
+                {Boolean(toolUsage.output && (toolUsage.output as any)?.status === "completed") && (
                   <CheckCircle className="h-4 w-4 inline mr-2 text-green-600" />
                 )}
               </h4>
               <div className="relative overflow-auto flex-1 min-h-[200px] border">
                 <div className="absolute inset-0">
-                  {renderOutput(toolUsage.output)}
+                  <div>{String(renderOutput(toolUsage.output))}</div>
                 </div>
               </div>
             </div>

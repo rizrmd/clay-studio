@@ -79,7 +79,7 @@ export function SetupPage() {
             } : { id: "", status: "" }}
             setupProgress={setupProgress.toString()}
             cliOutput={cliOutput}
-            error={error}
+            error={error || ""}
             onTokenSuccess={handleTokenSuccess}
             onTokenError={handleTokenError}
           />

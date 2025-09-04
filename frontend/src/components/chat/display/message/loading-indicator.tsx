@@ -80,31 +80,31 @@ export function LoadingIndicator({
               </div>
             </div>
             {/* Show TodoList if there's TodoWrite data */}
-            {latestTodoWrite && (
+            {latestTodoWrite && (latestTodoWrite as any).todos && (
               <div className="ml-3 mt-2">
-                <TodoList todos={latestTodoWrite.todos} />
+                <TodoList todos={(latestTodoWrite as any).todos} />
               </div>
             )}
 
             {activeTools.length > 0 && (
               <ToolCallIndicator
                 key={`active-tools-${activeTools
-                  .map((t) => t.tool_name)
+                  .map((t) => t.toolName)
                   .join("-")}`}
-                tools={activeTools.map((t) => t.tool_name)}
+                tools={activeTools.map((t) => t.toolName)}
                 variant="full"
                 isCompleted={false}
                 className="ml-3"
                 toolUsages={activeTools.map((tool) => {
                   // Use activeTools as the source of truth since it's most up-to-date
                   const messageToolUsage = streamingMessageTools?.find(
-                    (tu) => tu.tool_name === tool.tool_name
+                    (tu) => tu.tool_name === tool.toolName
                   );
 
                   return {
                     id: tool.tool_usage_id || messageToolUsage?.id || "",
                     message_id: messageToolUsage?.message_id || "",
-                    tool_name: tool.tool_name,
+                    tool_name: tool.toolName,
                     parameters: messageToolUsage?.parameters || null,
                     output:
                       tool.status === "completed"

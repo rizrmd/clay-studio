@@ -42,10 +42,11 @@ const categoryColors: Record<string, string> = {
 export function ToolsDisplay({ tools, className = '' }: ToolsDisplayProps) {
   // Group tools by category
   const toolsByCategory = tools.reduce((acc, tool) => {
-    if (!acc[tool.category]) {
-      acc[tool.category] = []
+    const category = (tool as any).category || 'general'
+    if (!acc[category]) {
+      acc[category] = []
     }
-    acc[tool.category].push(tool)
+    acc[category].push(tool)
     return acc
   }, {} as Record<string, ToolContext[]>)
 
@@ -100,7 +101,7 @@ export function ToolsDisplay({ tools, className = '' }: ToolsDisplayProps) {
                   <div className="pl-2 space-y-0.5">
                     {categoryTools.slice(0, 3).map((tool, idx) => (
                       <div key={idx} className="text-xs text-foreground">
-                        • {tool.name}
+                        • {(tool as any).name || 'Unnamed Tool'}
                       </div>
                     ))}
                     {categoryTools.length > 3 && (

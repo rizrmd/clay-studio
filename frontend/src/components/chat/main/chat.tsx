@@ -169,6 +169,8 @@ export function Chat() {
                     ...msg,
                     isQueued: false,
                     isEditing: false,
+                    file_attachments: msg.file_attachments ? [...msg.file_attachments] : undefined,
+                    tool_usages: msg.tool_usages ? [...msg.tool_usages] : undefined,
                   }))}
                   isLoading={false}
                   conversationId={conversationId || undefined}

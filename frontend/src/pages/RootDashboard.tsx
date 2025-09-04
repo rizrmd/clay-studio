@@ -1,44 +1,9 @@
 import { useEffect } from "react";
 import { useSnapshot } from "valtio";
-// import { rootDashboardStore, rootDashboardActions } from "@/store/root-dashboard-store";
-
-// Stub implementation
-const rootDashboardStore = {
-  stats: {
-    totalProjects: 0,
-    totalConversations: 0,
-    totalUsers: 0,
-    totalClients: 0,
-    activeClients: 0,
-  },
-  clients: [] as ClientRootResponse[],
-  loading: false,
-  isLoading: false,
-  error: null as string | null,
-  addDialogOpen: false,
-};
-
-const rootDashboardActions = {
-  setStats: (stats: any) => {
-    (rootDashboardStore as any).stats = stats;
-  },
-  setClients: (clients: ClientRootResponse[]) => {
-    (rootDashboardStore as any).clients = clients;
-  },
-  setLoading: (isLoading: boolean) => {
-    (rootDashboardStore as any).loading = isLoading;
-    (rootDashboardStore as any).isLoading = isLoading;
-  },
-  setError: (error: string | null) => {
-    (rootDashboardStore as any).error = error;
-  },
-  setAddDialogOpen: (open: boolean) => {
-    (rootDashboardStore as any).addDialogOpen = open;
-  },
-};
+import { rootDashboardStore, rootDashboardActions } from "@/lib/store/root-dashboard-store";
 import { useNavigate } from "react-router-dom";
 import { authStore } from "@/lib/store/auth-store";
-import { rootService, ClientRootResponse } from "@/lib/services/root-service";
+import { rootService } from "@/lib/services/root-service";
 import { ClientManagement } from "@/components/root/client-management";
 import { AddClientDialog } from "@/components/root/add-client-dialog";
 import {
@@ -96,6 +61,7 @@ export function RootDashboard() {
         activeClients,
         totalUsers,
         totalConversations,
+        totalProjects: 0, // TODO: Calculate actual project count
       });
     } catch (err: any) {
       rootDashboardActions.setError(err.response?.data?.error || "Failed to load clients");
@@ -223,7 +189,10 @@ export function RootDashboard() {
       {/* Main Content */}
       <div className="flex-1 overflow-auto px-6 pb-6">
         <ClientManagement
-          clients={[...rootDashboardSnapshot.clients]}
+          clients={rootDashboardSnapshot.clients.map(client => ({
+            ...client,
+            domains: client.domains ? [...client.domains] : undefined
+          }))}
           loading={rootDashboardSnapshot.loading}
           error={rootDashboardSnapshot.error}
           onRefresh={loadClients}

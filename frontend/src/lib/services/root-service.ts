@@ -18,6 +18,9 @@ export interface ClientRootResponse extends ClientAdminResponse {
   hasClaudeToken: boolean
   conversationCount: number
   deletedAt?: string | null
+  registrationEnabled?: boolean
+  requireInviteCode?: boolean
+  inviteCode?: string
 }
 
 export interface ClientUpdateRequest {

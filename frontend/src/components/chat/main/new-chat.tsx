@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useSnapshot } from "valtio";
 import { useNavigate } from "react-router-dom";
-import { Messages, WelcomeScreen } from "../display";
+import { WelcomeScreen } from "../display";
 import type { Message } from "@/lib/types/chat";
 import { MultimodalInput } from "../input";
 import { useChat } from "@/lib/hooks/use-chat";

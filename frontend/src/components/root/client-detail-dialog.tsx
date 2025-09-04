@@ -1,18 +1,7 @@
 import { useEffect } from 'react'
 import { useSnapshot } from 'valtio'
 import { ClientRootResponse, rootService } from '@/lib/services/root-service'
-// import { clientDetailDialogStore, clientDetailDialogActions } from '@/store/client-detail-dialog-store'
-
-// Stub implementation
-const clientDetailDialogStore = {
-  isOpen: false,
-  client: null,
-};
-
-const clientDetailDialogActions = {
-  open: (_client: any) => {},
-  close: () => {},
-};
+import { clientDetailDialogStore, clientDetailDialogActions } from '@/lib/store/client-detail-dialog-store'
 import {
   Dialog,
   DialogContent,

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ToolCallIndicator } from "../tool/tool-call-indicator";
 import { AskUser } from "../interaction/ask-user";
+import { TodoList } from "../interaction/todo-list";
 import {
   hasInteraction,
 } from "../interaction/interaction-renderer";
@@ -383,12 +384,12 @@ export const MessageListItem = memo(
                 </div>
               )}
               <FileAttachments attachments={message.file_attachments || []} />
-              {/* Show TodoList if this message has TodoWrite data AND */}
-              {/* {message.todoWrite && (
+              {/* Show TodoList if this message has TodoWrite data */}
+              {message.todoWrite && (message.todoWrite as any).todos && (
                 <div className="mt-3">
-                  <TodoList todos={message.todoWrite.todos} />
+                  <TodoList todos={(message.todoWrite as any).todos} />
                 </div>
-              )} */}
+              )}
               {/* Interaction Tool Rendering */}
               {(() => {
                 const interactionUsages = message.tool_usages?.filter(
@@ -472,10 +473,7 @@ export const MessageListItem = memo(
                        />
                      </div>
                      <div className="text-xs">
-                       {(message.createdAt instanceof Date
-                         ? message.createdAt
-                         : new Date(message.createdAt)
-                       ).toLocaleTimeString([], {
+                       {new Date(message.createdAt || Date.now()).toLocaleTimeString([], {
                          hour: "2-digit",
                          minute: "2-digit",
                          hour12: false,
@@ -512,10 +510,7 @@ export const MessageListItem = memo(
                 ) : !isQueued &&
                   !(getToolNamesFromMessage(message as any).length > 0) ? (
                   <>
-                    {(message.createdAt instanceof Date
-                      ? message.createdAt
-                      : new Date(message.createdAt)
-                    ).toLocaleTimeString([], {
+                    {new Date(message.createdAt || Date.now()).toLocaleTimeString([], {
                       hour: "2-digit",
                       minute: "2-digit",
                       hour12: false,
