@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { useSnapshot } from 'valtio'
 import { ClientRootResponse, rootService } from '@/lib/services/root-service'
-import { clientDetailDialogStore, clientDetailDialogActions } from '@/lib/store/client-detail-dialog-store'
+import { clientDetailDialogStore, clientDetailDialogActions } from '@/lib/store/ui/client-detail-dialog-store'
 import {
   Dialog,
   DialogContent,

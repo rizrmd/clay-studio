@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useSnapshot } from "valtio";
-import { rootDashboardStore, rootDashboardActions } from "@/lib/store/root-dashboard-store";
+import { rootDashboardStore, rootDashboardActions } from "@/lib/store/ui/root-dashboard-store";
 import { useNavigate } from "react-router-dom";
 import { authStore } from "@/lib/store/auth-store";
 import { rootService } from "@/lib/services/root-service";

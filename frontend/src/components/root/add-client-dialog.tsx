@@ -1,6 +1,6 @@
 import { useSnapshot } from 'valtio'
 import { CreateClientRequest, rootService } from '@/lib/services/root-service'
-import { addClientDialogStore, addClientDialogActions } from '@/lib/store/add-client-dialog-store'
+import { addClientDialogStore, addClientDialogActions } from '@/lib/store/ui/add-client-dialog-store'
 import {
   Dialog,
   DialogContent,
