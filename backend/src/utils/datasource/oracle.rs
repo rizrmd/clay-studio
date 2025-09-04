@@ -1,12 +1,12 @@
-use super::base::{DataSourceConnector, format_bytes};
-use serde_json::{json, Value};
-use oracle::Connection;
-use std::error::Error;
+use super::base::{format_bytes, DataSourceConnector};
 use async_trait::async_trait;
-use std::sync::Arc;
-use tokio::sync::{Mutex, Semaphore};
-use std::time::{Duration, Instant};
+use oracle::Connection;
+use serde_json::{json, Value};
 use std::collections::VecDeque;
+use std::error::Error;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tokio::sync::{Mutex, Semaphore};
 
 // Connection pool configuration
 #[derive(Clone)]
@@ -53,8 +53,8 @@ impl PooledConnection {
 
     fn is_expired(&self, config: &PoolConfig) -> bool {
         let now = Instant::now();
-        now.duration_since(self.created_at) > config.max_lifetime ||
-        now.duration_since(self.last_used) > config.idle_timeout
+        now.duration_since(self.created_at) > config.max_lifetime
+            || now.duration_since(self.last_used) > config.idle_timeout
     }
 }
 
@@ -69,7 +69,12 @@ struct ConnectionPool {
 }
 
 impl ConnectionPool {
-    fn new(username: String, password: String, connection_string: String, config: PoolConfig) -> Self {
+    fn new(
+        username: String,
+        password: String,
+        connection_string: String,
+        config: PoolConfig,
+    ) -> Self {
         Self {
             semaphore: Arc::new(Semaphore::new(config.max_connections)),
             config,
@@ -82,7 +87,10 @@ impl ConnectionPool {
 
     async fn get_connection(&self) -> Result<PooledConnection, Box<dyn Error + Send + Sync>> {
         // Acquire semaphore permit (limits concurrent connections)
-        let _permit = self.semaphore.acquire().await
+        let _permit = self
+            .semaphore
+            .acquire()
+            .await
             .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
 
         // Try to get an existing connection from the pool
@@ -99,9 +107,10 @@ impl ConnectionPool {
         }
 
         // No valid connection available, create a new one
-        let connection = Connection::connect(&self.username, &self.password, &self.connection_string)
-            .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
-            
+        let connection =
+            Connection::connect(&self.username, &self.password, &self.connection_string)
+                .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
+
         Ok(PooledConnection::new(connection))
     }
 
@@ -110,7 +119,7 @@ impl ConnectionPool {
         if !conn.is_expired(&self.config) {
             conn.update_last_used();
             let mut pool = self.connections.lock().await;
-            
+
             // Don't exceed max connections
             if pool.len() < self.config.max_connections {
                 pool.push_back(conn);
@@ -124,14 +133,14 @@ impl ConnectionPool {
     async fn cleanup_expired_connections(&self) {
         let mut pool = self.connections.lock().await;
         let mut valid_connections = VecDeque::new();
-        
+
         while let Some(conn) = pool.pop_front() {
             if !conn.is_expired(&self.config) {
                 valid_connections.push_back(conn);
             }
             // Expired connections are dropped
         }
-        
+
         *pool = valid_connections;
     }
 }
@@ -148,52 +157,63 @@ pub struct OracleConnector {
 impl OracleConnector {
     pub fn new(config: &Value) -> Result<Self, Box<dyn Error>> {
         // Get the schema name from config, default to username if not specified
-        let username = config.get("username")
+        let username = config
+            .get("username")
             .and_then(|v| v.as_str())
             .ok_or("Missing username")?
             .to_string();
-            
-        let schema = config.get("schema")
+
+        let schema = config
+            .get("schema")
             .and_then(|v| v.as_str())
             .unwrap_or(&username)
             .to_uppercase(); // Oracle schemas are typically uppercase
-        
+
         eprintln!("[DEBUG] Oracle connector using schema: '{}'", schema);
-        
+
         // Build connection string
         let connection_string = if let Some(url) = config.get("url").and_then(|v| v.as_str()) {
             url.to_string()
         } else {
             // Build from components
-            let host = config.get("host").and_then(|v| v.as_str()).unwrap_or("localhost");
+            let host = config
+                .get("host")
+                .and_then(|v| v.as_str())
+                .unwrap_or("localhost");
             let port = config.get("port").and_then(|v| v.as_u64()).unwrap_or(1521);
             let service_name = config.get("service_name").and_then(|v| v.as_str());
             let sid = config.get("sid").and_then(|v| v.as_str());
-            
+
             if let Some(service) = service_name {
                 format!("{}:{}/{}", host, port, service)
             } else if let Some(sid) = sid {
                 format!("{}:{}/{}", host, port, sid)
             } else {
-                return Err("Must provide either 'service_name' or 'sid' for Oracle connection".into());
+                return Err(
+                    "Must provide either 'service_name' or 'sid' for Oracle connection".into(),
+                );
             }
         };
-        
-        let password = config.get("password")
+
+        let password = config
+            .get("password")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
 
         // Create pool configuration from config
         let mut pool_config = PoolConfig::default();
-        
+
         if let Some(max_conn) = config.get("max_connections").and_then(|v| v.as_u64()) {
             pool_config.max_connections = max_conn as usize;
         }
         if let Some(min_conn) = config.get("min_connections").and_then(|v| v.as_u64()) {
             pool_config.min_connections = min_conn as usize;
         }
-        if let Some(timeout) = config.get("connection_timeout_secs").and_then(|v| v.as_u64()) {
+        if let Some(timeout) = config
+            .get("connection_timeout_secs")
+            .and_then(|v| v.as_u64())
+        {
             pool_config.connection_timeout = Duration::from_secs(timeout);
         }
         if let Some(idle_timeout) = config.get("idle_timeout_secs").and_then(|v| v.as_u64()) {
@@ -207,21 +227,27 @@ impl OracleConnector {
         if pool_config.min_connections > pool_config.max_connections {
             pool_config.min_connections = pool_config.max_connections;
         }
-        
+
         // Debug: Log the connection string (with password masked)
-        eprintln!("[DEBUG] Oracle connection string: {}@{}", username, connection_string);
-        eprintln!("[DEBUG] Oracle pool config: max={}, min={}, timeout={}s", 
-                  pool_config.max_connections, pool_config.min_connections, 
-                  pool_config.connection_timeout.as_secs());
-        
+        eprintln!(
+            "[DEBUG] Oracle connection string: {}@{}",
+            username, connection_string
+        );
+        eprintln!(
+            "[DEBUG] Oracle pool config: max={}, min={}, timeout={}s",
+            pool_config.max_connections,
+            pool_config.min_connections,
+            pool_config.connection_timeout.as_secs()
+        );
+
         let pool = Arc::new(ConnectionPool::new(
             username.clone(),
             password.clone(),
             connection_string.clone(),
             pool_config,
         ));
-        
-        Ok(Self { 
+
+        Ok(Self {
             connection_string,
             username: username.clone(),
             password,
@@ -229,7 +255,7 @@ impl OracleConnector {
             pool,
         })
     }
-    
+
     #[allow(dead_code)]
     async fn with_connection<F, R>(&self, operation: F) -> Result<R, Box<dyn Error + Send + Sync>>
     where
@@ -238,13 +264,13 @@ impl OracleConnector {
     {
         // Get connection from pool
         let pooled_conn = self.pool.get_connection().await?;
-        
+
         // Perform operation
         let result = operation(&pooled_conn.connection);
-        
+
         // Return connection to pool
         self.pool.return_connection(pooled_conn).await;
-        
+
         result
     }
 
@@ -254,7 +280,7 @@ impl OracleConnector {
         let pool = Arc::clone(&self.pool);
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(60)); // Run every minute
-            
+
             loop {
                 interval.tick().await;
                 pool.cleanup_expired_connections().await;
@@ -268,7 +294,7 @@ impl DataSourceConnector for OracleConnector {
     async fn test_connection(&mut self) -> Result<bool, Box<dyn Error>> {
         // Run in blocking context since oracle crate is synchronous
         let pool = Arc::clone(&self.pool);
-        
+
         tokio::task::spawn_blocking(move || -> Result<bool, Box<dyn Error + Send + Sync>> {
             // Create a test connection directly (not from pool for testing)
             match Connection::connect(&pool.username, &pool.password, &pool.connection_string) {
@@ -279,7 +305,7 @@ impl DataSourceConnector for OracleConnector {
                         Ok(_) => {
                             eprintln!("[SUCCESS] Oracle connection successful");
                             Ok(true)
-                        },
+                        }
                         Err(e) => {
                             eprintln!("[DEBUG] Oracle query test failed: {}", e);
                             Err(Box::new(e) as Box<dyn Error + Send + Sync>)
@@ -290,7 +316,7 @@ impl DataSourceConnector for OracleConnector {
                     eprintln!("[ERROR] ========== Oracle Connection Failed ==========");
                     eprintln!("[ERROR] Failed to create Oracle connection");
                     eprintln!("[ERROR] Error message: {}", e);
-                    
+
                     // Analyze error type
                     let error_string = e.to_string();
                     if error_string.contains("ORA-01017") {
@@ -308,51 +334,61 @@ impl DataSourceConnector for OracleConnector {
                     } else {
                         eprintln!("[DIAGNOSIS] Unrecognized Oracle error");
                     }
-                    
+
                     Err(Box::new(e) as Box<dyn Error + Send + Sync>)
                 }
             }
-        }).await.map_err(|e| Box::new(e) as Box<dyn Error>)?
-            .map_err(|e| e as Box<dyn Error>)
+        })
+        .await
+        .map_err(|e| Box::new(e) as Box<dyn Error>)?
+        .map_err(|e| e as Box<dyn Error>)
     }
-    
+
     async fn execute_query(&self, query: &str, limit: i32) -> Result<Value, Box<dyn Error>> {
         let query = query.to_string();
         let schema = self.schema.clone();
         let pool = Arc::clone(&self.pool);
-        
+
         tokio::task::spawn_blocking(move || -> Result<Value, Box<dyn Error + Send + Sync>> {
             // Use the connection pool
             let runtime = tokio::runtime::Handle::current();
             let pooled_conn = runtime.block_on(pool.get_connection())?;
-            
+
             // Set the current schema for this session
             let set_schema_sql = format!("ALTER SESSION SET CURRENT_SCHEMA = {}", schema);
-            pooled_conn.connection.execute(&set_schema_sql, &[])
+            pooled_conn
+                .connection
+                .execute(&set_schema_sql, &[])
                 .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
-            
+
             // Add ROWNUM limit if not already present and limit is specified
-            let modified_query = if limit > 0 && !query.to_uppercase().contains("ROWNUM") && !query.to_uppercase().contains("FETCH") {
+            let modified_query = if limit > 0
+                && !query.to_uppercase().contains("ROWNUM")
+                && !query.to_uppercase().contains("FETCH")
+            {
                 format!("SELECT * FROM ({}) WHERE ROWNUM <= {}", query, limit)
             } else {
                 query
             };
-            
+
             let start = std::time::Instant::now();
-            let rows = pooled_conn.connection.query(&modified_query, &[])
+            let rows = pooled_conn
+                .connection
+                .query(&modified_query, &[])
                 .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
             let execution_time_ms = start.elapsed().as_millis() as i64;
-            
+
             let mut results = Vec::new();
-            let columns: Vec<String> = rows.column_info()
+            let columns: Vec<String> = rows
+                .column_info()
                 .iter()
                 .map(|col| col.name().to_string())
                 .collect();
-            
+
             for row_result in rows {
                 let row = row_result.map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
                 let mut record = serde_json::Map::new();
-                
+
                 for (i, col_name) in columns.iter().enumerate() {
                     // Get value as a string representation for JSON
                     let json_value = if let Ok(v) = row.get::<_, Option<String>>(i) {
@@ -373,13 +409,13 @@ impl DataSourceConnector for OracleConnector {
                     } else {
                         Value::Null
                     };
-                    
+
                     record.insert(col_name.clone(), json_value);
                 }
-                
+
                 results.push(Value::Object(record));
             }
-            
+
             // Return connection to pool
             let result = json!({
                 "columns": columns,
@@ -387,17 +423,19 @@ impl DataSourceConnector for OracleConnector {
                 "row_count": results.len(),
                 "execution_time_ms": execution_time_ms
             });
-            
+
             runtime.block_on(pool.return_connection(pooled_conn));
             Ok(result)
-        }).await.map_err(|e| Box::new(e) as Box<dyn Error>)?
-            .map_err(|e| e as Box<dyn Error>)
+        })
+        .await
+        .map_err(|e| Box::new(e) as Box<dyn Error>)?
+        .map_err(|e| e as Box<dyn Error>)
     }
-    
+
     async fn fetch_schema(&self) -> Result<Value, Box<dyn Error>> {
         let schema = self.schema.clone();
         let pool = Arc::clone(&self.pool);
-        
+
         tokio::task::spawn_blocking(move || -> Result<Value, Box<dyn Error + Send + Sync>> {
             let runtime = tokio::runtime::Handle::current();
             let pooled_conn = runtime.block_on(pool.get_connection())?;
@@ -456,52 +494,63 @@ impl DataSourceConnector for OracleConnector {
         }).await.map_err(|e| Box::new(e) as Box<dyn Error>)?
             .map_err(|e| e as Box<dyn Error>)
     }
-    
+
     async fn list_tables(&self) -> Result<Vec<String>, Box<dyn Error>> {
         let schema = self.schema.clone();
         let pool = Arc::clone(&self.pool);
-        
-        tokio::task::spawn_blocking(move || -> Result<Vec<String>, Box<dyn Error + Send + Sync>> {
-            let runtime = tokio::runtime::Handle::current();
-            let pooled_conn = runtime.block_on(pool.get_connection())?;
-            
-            let sql = format!(
-                "SELECT table_name FROM all_tables WHERE owner = '{}' ORDER BY table_name",
-                schema
-            );
-            
-            let rows = pooled_conn.connection.query(&sql, &[])
-                .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
-            
-            let mut tables = Vec::new();
-            for row_result in rows {
-                let row = row_result.map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
-                let table_name: String = row.get(0).map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
-                tables.push(table_name);
-            }
-            
-            runtime.block_on(pool.return_connection(pooled_conn));
-            Ok(tables)
-        }).await.map_err(|e| Box::new(e) as Box<dyn Error>)?
-            .map_err(|e| e as Box<dyn Error>)
+
+        tokio::task::spawn_blocking(
+            move || -> Result<Vec<String>, Box<dyn Error + Send + Sync>> {
+                let runtime = tokio::runtime::Handle::current();
+                let pooled_conn = runtime.block_on(pool.get_connection())?;
+
+                let sql = format!(
+                    "SELECT table_name FROM all_tables WHERE owner = '{}' ORDER BY table_name",
+                    schema
+                );
+
+                let rows = pooled_conn
+                    .connection
+                    .query(&sql, &[])
+                    .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
+
+                let mut tables = Vec::new();
+                for row_result in rows {
+                    let row =
+                        row_result.map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
+                    let table_name: String = row
+                        .get(0)
+                        .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
+                    tables.push(table_name);
+                }
+
+                runtime.block_on(pool.return_connection(pooled_conn));
+                Ok(tables)
+            },
+        )
+        .await
+        .map_err(|e| Box::new(e) as Box<dyn Error>)?
+        .map_err(|e| e as Box<dyn Error>)
     }
-    
+
     async fn analyze_database(&self) -> Result<Value, Box<dyn Error>> {
         let schema = self.schema.clone();
         let username = self.username.clone();
         let connection_string = self.connection_string.clone();
         let pool = Arc::clone(&self.pool);
-        
+
         tokio::task::spawn_blocking(move || -> Result<Value, Box<dyn Error + Send + Sync>> {
             let runtime = tokio::runtime::Handle::current();
             let pooled_conn = runtime.block_on(pool.get_connection())?;
-            
+
             // Get database size - using user_segments if dba_segments is not accessible
-            let size_sql = format!(r#"
+            let size_sql = format!(
+                r#"
                 SELECT SUM(bytes) as total_bytes
                 FROM user_segments
-            "#);
-            
+            "#
+            );
+
             let mut total_size: u64 = 0;
             if let Ok(rows) = pooled_conn.connection.query(&size_sql, &[]) {
                 for row_result in rows {
@@ -513,24 +562,27 @@ impl DataSourceConnector for OracleConnector {
                     }
                 }
             }
-            
+
             // Get table count
-            let table_count_sql = format!(
-                "SELECT COUNT(*) FROM all_tables WHERE owner = '{}'",
-                schema
-            );
-            
-            let rows = pooled_conn.connection.query(&table_count_sql, &[])
+            let table_count_sql =
+                format!("SELECT COUNT(*) FROM all_tables WHERE owner = '{}'", schema);
+
+            let rows = pooled_conn
+                .connection
+                .query(&table_count_sql, &[])
                 .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
             let mut table_count = 0;
             for row_result in rows {
                 let row = row_result.map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
-                table_count = row.get::<_, i32>(0).map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
+                table_count = row
+                    .get::<_, i32>(0)
+                    .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)?;
                 break;
             }
-            
+
             // Get top tables by row count
-            let top_tables_sql = format!(r#"
+            let top_tables_sql = format!(
+                r#"
                 SELECT * FROM (
                     SELECT 
                         table_name,
@@ -540,8 +592,10 @@ impl DataSourceConnector for OracleConnector {
                     WHERE owner = '{}' AND num_rows IS NOT NULL
                     ORDER BY num_rows DESC
                 ) WHERE ROWNUM <= 10
-            "#, schema);
-            
+            "#,
+                schema
+            );
+
             let mut top_tables = Vec::new();
             if let Ok(rows) = pooled_conn.connection.query(&top_tables_sql, &[]) {
                 for row_result in rows {
@@ -549,7 +603,7 @@ impl DataSourceConnector for OracleConnector {
                         if let (Ok(name), Ok(row_count), Ok(size)) = (
                             row.get::<_, String>(0),
                             row.get::<_, Option<i64>>(1),
-                            row.get::<_, Option<u64>>(2)
+                            row.get::<_, Option<u64>>(2),
                         ) {
                             top_tables.push(json!({
                                 "name": name,
@@ -560,7 +614,7 @@ impl DataSourceConnector for OracleConnector {
                     }
                 }
             }
-            
+
             let result = json!({
                 "database": schema,
                 "total_size": format_bytes(total_size),
@@ -572,18 +626,20 @@ impl DataSourceConnector for OracleConnector {
                     "schema": schema
                 }
             });
-            
+
             runtime.block_on(pool.return_connection(pooled_conn));
             Ok(result)
-        }).await.map_err(|e| Box::new(e) as Box<dyn Error>)?
-            .map_err(|e| e as Box<dyn Error>)
+        })
+        .await
+        .map_err(|e| Box::new(e) as Box<dyn Error>)?
+        .map_err(|e| e as Box<dyn Error>)
     }
-    
+
     async fn get_tables_schema(&self, tables: Vec<&str>) -> Result<Value, Box<dyn Error>> {
         let schema = self.schema.clone();
         let tables = tables.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         let pool = Arc::clone(&self.pool);
-        
+
         tokio::task::spawn_blocking(move || -> Result<Value, Box<dyn Error + Send + Sync>> {
             let runtime = tokio::runtime::Handle::current();
             let pooled_conn = runtime.block_on(pool.get_connection())?;
@@ -642,12 +698,12 @@ impl DataSourceConnector for OracleConnector {
         }).await.map_err(|e| Box::new(e) as Box<dyn Error>)?
             .map_err(|e| e as Box<dyn Error>)
     }
-    
+
     async fn search_tables(&self, pattern: &str) -> Result<Value, Box<dyn Error>> {
         let schema = self.schema.clone();
         let pattern = pattern.to_string();
         let pool = Arc::clone(&self.pool);
-        
+
         tokio::task::spawn_blocking(move || -> Result<Value, Box<dyn Error + Send + Sync>> {
             let runtime = tokio::runtime::Handle::current();
             let pooled_conn = runtime.block_on(pool.get_connection())?;
@@ -678,12 +734,12 @@ impl DataSourceConnector for OracleConnector {
         }).await.map_err(|e| Box::new(e) as Box<dyn Error>)?
             .map_err(|e| e as Box<dyn Error>)
     }
-    
+
     async fn get_related_tables(&self, table: &str) -> Result<Value, Box<dyn Error>> {
         let schema = self.schema.clone();
         let table = table.to_string();
         let pool = Arc::clone(&self.pool);
-        
+
         tokio::task::spawn_blocking(move || -> Result<Value, Box<dyn Error + Send + Sync>> {
             let runtime = tokio::runtime::Handle::current();
             let pooled_conn = runtime.block_on(pool.get_connection())?;
@@ -730,11 +786,11 @@ impl DataSourceConnector for OracleConnector {
         }).await.map_err(|e| Box::new(e) as Box<dyn Error>)?
             .map_err(|e| e as Box<dyn Error>)
     }
-    
+
     async fn get_database_stats(&self) -> Result<Value, Box<dyn Error>> {
         let schema = self.schema.clone();
         let pool = Arc::clone(&self.pool);
-        
+
         tokio::task::spawn_blocking(move || -> Result<Value, Box<dyn Error + Send + Sync>> {
             let runtime = tokio::runtime::Handle::current();
             let pooled_conn = runtime.block_on(pool.get_connection())?;

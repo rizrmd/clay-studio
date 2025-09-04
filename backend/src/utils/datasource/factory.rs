@@ -1,10 +1,10 @@
 use super::base::DataSourceConnector;
-use super::postgres::PostgreSQLConnector;
-use super::mysql::MySQLConnector;
-use super::sqlite::SQLiteConnector;
 use super::clickhouse::ClickHouseConnector;
-use super::sqlserver::SqlServerConnector;
+use super::mysql::MySQLConnector;
 use super::oracle::OracleConnector;
+use super::postgres::PostgreSQLConnector;
+use super::sqlite::SQLiteConnector;
+use super::sqlserver::SqlServerConnector;
 use serde_json::Value;
 use std::error::Error;
 
@@ -34,26 +34,17 @@ impl From<&str> for DataSourceType {
     }
 }
 
-pub async fn create_connector(source_type: &str, config: &Value) -> Result<Box<dyn DataSourceConnector>, Box<dyn Error>> {
+pub async fn create_connector(
+    source_type: &str,
+    config: &Value,
+) -> Result<Box<dyn DataSourceConnector>, Box<dyn Error>> {
     match DataSourceType::from(source_type) {
-        DataSourceType::PostgreSQL => {
-            Ok(Box::new(PostgreSQLConnector::new(config)?))
-        },
-        DataSourceType::MySQL => {
-            Ok(Box::new(MySQLConnector::new(config)?))
-        },
-        DataSourceType::SQLite => {
-            Ok(Box::new(SQLiteConnector::new(config)?))
-        },
-        DataSourceType::ClickHouse => {
-            Ok(Box::new(ClickHouseConnector::new(config)?))
-        },
-        DataSourceType::SqlServer => {
-            Ok(Box::new(SqlServerConnector::new(config)?))
-        },
-        DataSourceType::Oracle => {
-            Ok(Box::new(OracleConnector::new(config)?))
-        },
+        DataSourceType::PostgreSQL => Ok(Box::new(PostgreSQLConnector::new(config)?)),
+        DataSourceType::MySQL => Ok(Box::new(MySQLConnector::new(config)?)),
+        DataSourceType::SQLite => Ok(Box::new(SQLiteConnector::new(config)?)),
+        DataSourceType::ClickHouse => Ok(Box::new(ClickHouseConnector::new(config)?)),
+        DataSourceType::SqlServer => Ok(Box::new(SqlServerConnector::new(config)?)),
+        DataSourceType::Oracle => Ok(Box::new(OracleConnector::new(config)?)),
         DataSourceType::Csv => {
             // CSV connector can be added later if needed
             Err("CSV connector not yet implemented in new structure".into())

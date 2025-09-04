@@ -1,5 +1,5 @@
-use sea_orm_migration::prelude::*;
 use sea_orm::{ConnectionTrait, Statement};
+use sea_orm_migration::prelude::*;
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;
@@ -16,12 +16,12 @@ impl MigrationTrait for Migration {
                         ColumnDef::new(Users::Role)
                             .string()
                             .not_null()
-                            .default("user")
+                            .default("user"),
                     )
                     .to_owned(),
             )
             .await?;
-            
+
         // Create index on role for better query performance
         manager
             .create_index(
@@ -32,10 +32,10 @@ impl MigrationTrait for Migration {
                     .to_owned(),
             )
             .await?;
-            
+
         // Set the first user of each client as admin
         let conn = manager.get_connection();
-        
+
         // For each client, find the first user and make them admin
         conn.execute(Statement::from_string(
             manager.get_database_backend(),
@@ -47,10 +47,11 @@ impl MigrationTrait for Migration {
                 FROM users 
                 ORDER BY client_id, id
             )
-            "#.to_string(),
+            "#
+            .to_string(),
         ))
         .await?;
-            
+
         Ok(())
     }
 
@@ -64,7 +65,7 @@ impl MigrationTrait for Migration {
                     .to_owned(),
             )
             .await?;
-            
+
         // Drop the column
         manager
             .alter_table(
@@ -74,7 +75,7 @@ impl MigrationTrait for Migration {
                     .to_owned(),
             )
             .await?;
-            
+
         Ok(())
     }
 }

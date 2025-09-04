@@ -21,9 +21,17 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(FileUploads::ProjectId).string().not_null())
                     .col(ColumnDef::new(FileUploads::ConversationId).string())
                     .col(ColumnDef::new(FileUploads::FileName).string().not_null())
-                    .col(ColumnDef::new(FileUploads::OriginalName).string().not_null())
+                    .col(
+                        ColumnDef::new(FileUploads::OriginalName)
+                            .string()
+                            .not_null(),
+                    )
                     .col(ColumnDef::new(FileUploads::FilePath).string().not_null())
-                    .col(ColumnDef::new(FileUploads::FileSize).big_integer().not_null())
+                    .col(
+                        ColumnDef::new(FileUploads::FileSize)
+                            .big_integer()
+                            .not_null(),
+                    )
                     .col(ColumnDef::new(FileUploads::MimeType).string())
                     .col(ColumnDef::new(FileUploads::Description).text())
                     .col(ColumnDef::new(FileUploads::AutoDescription).text())

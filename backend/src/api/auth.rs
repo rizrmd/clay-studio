@@ -1,14 +1,14 @@
+use bcrypt::{hash, verify, DEFAULT_COST};
 use salvo::prelude::*;
 use salvo::session::SessionDepotExt;
 use serde::{Deserialize, Serialize};
-use bcrypt::{hash, verify, DEFAULT_COST};
 use uuid::Uuid;
 // use chrono::Utc;
 use sqlx::Row;
 
-use crate::utils::AppState;
-use crate::utils::AppError;
 use crate::utils::domain;
+use crate::utils::AppError;
+use crate::utils::AppState;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct User {
@@ -73,11 +73,18 @@ pub struct AuthResponse {
 }
 
 #[handler]
-pub async fn register(req: &mut Request, depot: &mut Depot, res: &mut Response) -> Result<(), AppError> {
-    let register_req: RegisterRequest = req.parse_json().await
+pub async fn register(
+    req: &mut Request,
+    depot: &mut Depot,
+    res: &mut Response,
+) -> Result<(), AppError> {
+    let register_req: RegisterRequest = req
+        .parse_json()
+        .await
         .map_err(|_| AppError::BadRequest("Invalid JSON".to_string()))?;
 
-    let state = depot.obtain::<AppState>()
+    let state = depot
+        .obtain::<AppState>()
         .map_err(|_| AppError::InternalServerError("Failed to get app state".to_string()))?;
 
     // Parse client_id as UUID
@@ -91,7 +98,8 @@ pub async fn register(req: &mut Request, depot: &mut Depot, res: &mut Response) 
         .await
         .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
 
-    let client_row = client_row.ok_or_else(|| AppError::BadRequest("Client not found".to_string()))?;
+    let client_row =
+        client_row.ok_or_else(|| AppError::BadRequest("Client not found".to_string()))?;
 
     // Check if this is the first user for the client
     let user_count_row = sqlx::query("SELECT COUNT(*) as count FROM users WHERE client_id = $1")
@@ -99,7 +107,7 @@ pub async fn register(req: &mut Request, depot: &mut Depot, res: &mut Response) 
         .fetch_one(&state.db_pool)
         .await
         .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
-    
+
     let user_count: i64 = user_count_row.get("count");
     let is_first_user = user_count == 0;
 
@@ -111,31 +119,36 @@ pub async fn register(req: &mut Request, depot: &mut Depot, res: &mut Response) 
 
     // Parse client config
     let config: serde_json::Value = client_row.get("config");
-    let registration_enabled = config.get("registration_enabled")
+    let registration_enabled = config
+        .get("registration_enabled")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
     // Allow creating the first user even if registration is disabled
     if !is_first_user && !registration_enabled {
-        return Err(AppError::BadRequest("Registration is disabled for this client".to_string()));
+        return Err(AppError::BadRequest(
+            "Registration is disabled for this client".to_string(),
+        ));
     }
 
     // Check invite code if required (skip for first user)
     if !is_first_user {
-        let require_invite_code = config.get("require_invite_code")
+        let require_invite_code = config
+            .get("require_invite_code")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
         if require_invite_code {
-            let expected_code = config.get("invite_code")
-                .and_then(|v| v.as_str());
-            
+            let expected_code = config.get("invite_code").and_then(|v| v.as_str());
+
             match (expected_code, register_req.invite_code.as_deref()) {
                 (Some(expected), Some(provided)) if expected == provided => {
                     // Invite code matches, continue
                 }
                 _ => {
-                    return Err(AppError::BadRequest("Invalid or missing invite code".to_string()));
+                    return Err(AppError::BadRequest(
+                        "Invalid or missing invite code".to_string(),
+                    ));
                 }
             }
         }
@@ -150,7 +163,9 @@ pub async fn register(req: &mut Request, depot: &mut Depot, res: &mut Response) 
         .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
 
     if existing_user.is_some() {
-        return Err(AppError::BadRequest("Username already exists for this client".to_string()));
+        return Err(AppError::BadRequest(
+            "Username already exists for this client".to_string(),
+        ));
     }
 
     // Hash password
@@ -159,7 +174,7 @@ pub async fn register(req: &mut Request, depot: &mut Depot, res: &mut Response) 
 
     // Create user
     let user_id = Uuid::new_v4();
-    
+
     // First user becomes admin, others are regular users
     let role = if is_first_user { "admin" } else { "user" };
 
@@ -179,11 +194,12 @@ pub async fn register(req: &mut Request, depot: &mut Depot, res: &mut Response) 
     .map_err(|e| AppError::InternalServerError(format!("Failed to create user: {}", e)))?;
 
     // Fetch the created user
-    let row = sqlx::query("SELECT id, client_id, username, password, role FROM users WHERE id = $1")
-        .bind(user_id)
-        .fetch_one(&state.db_pool)
-        .await
-        .map_err(|e| AppError::InternalServerError(format!("Failed to fetch user: {}", e)))?;
+    let row =
+        sqlx::query("SELECT id, client_id, username, password, role FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_one(&state.db_pool)
+            .await
+            .map_err(|e| AppError::InternalServerError(format!("Failed to fetch user: {}", e)))?;
 
     let user = User {
         id: user_id.to_string(),
@@ -195,16 +211,22 @@ pub async fn register(req: &mut Request, depot: &mut Depot, res: &mut Response) 
 
     // Create session
     if let Some(session) = depot.session_mut() {
-        session.insert("user_id", &user.id)
-            .map_err(|e| AppError::InternalServerError(format!("Failed to create session: {}", e)))?;
-        session.insert("username", &user.username)
-            .map_err(|e| AppError::InternalServerError(format!("Failed to create session: {}", e)))?;
-        session.insert("role", &user.role)
-            .map_err(|e| AppError::InternalServerError(format!("Failed to create session: {}", e)))?;
-        session.insert("client_id", &user.client_id)
-            .map_err(|e| AppError::InternalServerError(format!("Failed to create session: {}", e)))?;
+        session.insert("user_id", &user.id).map_err(|e| {
+            AppError::InternalServerError(format!("Failed to create session: {}", e))
+        })?;
+        session.insert("username", &user.username).map_err(|e| {
+            AppError::InternalServerError(format!("Failed to create session: {}", e))
+        })?;
+        session.insert("role", &user.role).map_err(|e| {
+            AppError::InternalServerError(format!("Failed to create session: {}", e))
+        })?;
+        session.insert("client_id", &user.client_id).map_err(|e| {
+            AppError::InternalServerError(format!("Failed to create session: {}", e))
+        })?;
     } else {
-        return Err(AppError::InternalServerError("No session available".to_string()));
+        return Err(AppError::InternalServerError(
+            "No session available".to_string(),
+        ));
     }
 
     let auth_response = AuthResponse {
@@ -217,11 +239,18 @@ pub async fn register(req: &mut Request, depot: &mut Depot, res: &mut Response) 
 }
 
 #[handler]
-pub async fn login(req: &mut Request, depot: &mut Depot, res: &mut Response) -> Result<(), AppError> {
-    let login_req: LoginRequest = req.parse_json().await
+pub async fn login(
+    req: &mut Request,
+    depot: &mut Depot,
+    res: &mut Response,
+) -> Result<(), AppError> {
+    let login_req: LoginRequest = req
+        .parse_json()
+        .await
         .map_err(|_| AppError::BadRequest("Invalid JSON".to_string()))?;
 
-    let state = depot.obtain::<AppState>()
+    let state = depot
+        .obtain::<AppState>()
         .map_err(|_| AppError::InternalServerError("Failed to get app state".to_string()))?;
 
     // Parse client_id as UUID
@@ -230,7 +259,11 @@ pub async fn login(req: &mut Request, depot: &mut Depot, res: &mut Response) -> 
 
     // Find user first to check if they are root before validating domain
     // First try to find user with the provided client_id
-    tracing::debug!("Looking for user: client_id={}, username={}", client_id, login_req.username);
+    tracing::debug!(
+        "Looking for user: client_id={}, username={}",
+        client_id,
+        login_req.username
+    );
     let mut row = sqlx::query(
         r#"
         SELECT id, client_id, username, password, role 
@@ -298,16 +331,24 @@ pub async fn login(req: &mut Request, depot: &mut Depot, res: &mut Response) -> 
     };
 
     if let Some(session) = depot.session_mut() {
-        session.insert("user_id", &user.id)
-            .map_err(|e| AppError::InternalServerError(format!("Failed to create session: {}", e)))?;
-        session.insert("username", &user.username)
-            .map_err(|e| AppError::InternalServerError(format!("Failed to create session: {}", e)))?;
-        session.insert("role", &user.role)
-            .map_err(|e| AppError::InternalServerError(format!("Failed to create session: {}", e)))?;
-        session.insert("client_id", &session_client_id)
-            .map_err(|e| AppError::InternalServerError(format!("Failed to create session: {}", e)))?;
+        session.insert("user_id", &user.id).map_err(|e| {
+            AppError::InternalServerError(format!("Failed to create session: {}", e))
+        })?;
+        session.insert("username", &user.username).map_err(|e| {
+            AppError::InternalServerError(format!("Failed to create session: {}", e))
+        })?;
+        session.insert("role", &user.role).map_err(|e| {
+            AppError::InternalServerError(format!("Failed to create session: {}", e))
+        })?;
+        session
+            .insert("client_id", &session_client_id)
+            .map_err(|e| {
+                AppError::InternalServerError(format!("Failed to create session: {}", e))
+            })?;
     } else {
-        return Err(AppError::InternalServerError("No session available".to_string()));
+        return Err(AppError::InternalServerError(
+            "No session available".to_string(),
+        ));
     }
 
     let auth_response = AuthResponse {
@@ -335,7 +376,11 @@ pub async fn logout(depot: &mut Depot, res: &mut Response) -> Result<(), AppErro
 }
 
 #[handler]
-pub async fn get_session_token(req: &mut Request, depot: &mut Depot, res: &mut Response) -> Result<(), AppError> {
+pub async fn get_session_token(
+    req: &mut Request,
+    depot: &mut Depot,
+    res: &mut Response,
+) -> Result<(), AppError> {
     // Verify user is authenticated (auth_required middleware should have already checked this)
     let user_id = if let Some(session) = depot.session() {
         let uid: Option<String> = session.get("user_id");
@@ -343,18 +388,26 @@ pub async fn get_session_token(req: &mut Request, depot: &mut Depot, res: &mut R
     } else {
         return Err(AppError::Unauthorized("No session found".to_string()));
     };
-    
-    tracing::info!("get_session_token: User {} requesting session token", user_id);
-    
+
+    tracing::info!(
+        "get_session_token: User {} requesting session token",
+        user_id
+    );
+
     // Get the session cookie value for WebSocket authentication
     let session_token = if let Some(cookie) = req.cookie("clay_session") {
         cookie.value().to_string()
     } else {
-        return Err(AppError::Unauthorized("No session cookie found".to_string()));
+        return Err(AppError::Unauthorized(
+            "No session cookie found".to_string(),
+        ));
     };
-    
-    tracing::info!("get_session_token: Providing session token of length {}", session_token.len());
-    
+
+    tracing::info!(
+        "get_session_token: Providing session token of length {}",
+        session_token.len()
+    );
+
     // Return the session token that can be used for WebSocket connection
     res.render(Json(serde_json::json!({
         "session_token": session_token
@@ -373,20 +426,21 @@ pub async fn me(depot: &mut Depot, res: &mut Response) -> Result<(), AppError> {
         return Err(AppError::Unauthorized("No session found".to_string()));
     };
 
-    let state = depot.obtain::<AppState>()
+    let state = depot
+        .obtain::<AppState>()
         .map_err(|_| AppError::InternalServerError("Failed to get app state".to_string()))?;
 
-    let user_uuid = Uuid::parse_str(&user_id)
-        .map_err(|e| {
-            tracing::error!("Failed to parse user_id '{}': {}", user_id, e);
-            AppError::InternalServerError("Invalid user ID in session".to_string())
-        })?;
+    let user_uuid = Uuid::parse_str(&user_id).map_err(|e| {
+        tracing::error!("Failed to parse user_id '{}': {}", user_id, e);
+        AppError::InternalServerError("Invalid user ID in session".to_string())
+    })?;
 
-    let row = sqlx::query("SELECT id, client_id, username, password, role FROM users WHERE id = $1")
-        .bind(user_uuid)
-        .fetch_optional(&state.db_pool)
-        .await
-        .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
+    let row =
+        sqlx::query("SELECT id, client_id, username, password, role FROM users WHERE id = $1")
+            .bind(user_uuid)
+            .fetch_optional(&state.db_pool)
+            .await
+            .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
 
     let row = match row {
         Some(r) => r,
@@ -398,7 +452,9 @@ pub async fn me(depot: &mut Depot, res: &mut Response) -> Result<(), AppError> {
                 session.remove("username");
                 session.remove("role");
             }
-            return Err(AppError::Unauthorized("Session expired - please log in again".to_string()));
+            return Err(AppError::Unauthorized(
+                "Session expired - please log in again".to_string(),
+            ));
         }
     };
 
@@ -415,31 +471,28 @@ pub async fn me(depot: &mut Depot, res: &mut Response) -> Result<(), AppError> {
         password: row.get("password"),
         role: row.get("role"),
     };
-    
+
     tracing::info!("User found: {}, checking setup status", user.username);
 
     // Check if setup is complete for this user:
     // 1. Client must exist and be active
     // 2. User must have at least one project
-    let client_uuid = Uuid::parse_str(&user.client_id)
-        .map_err(|e| {
-            tracing::error!("Failed to parse client_id '{}': {}", user.client_id, e);
-            AppError::InternalServerError("Invalid client ID".to_string())
-        })?;
-    
-    tracing::info!("Checking client status for client_id: {}", client_uuid);
-    
-    let client_check = sqlx::query(
-        "SELECT status FROM clients WHERE id = $1"
-    )
-    .bind(client_uuid)
-    .fetch_optional(&state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Failed to query client status: {}", e);
-        AppError::InternalServerError(format!("Database error: {}", e))
+    let client_uuid = Uuid::parse_str(&user.client_id).map_err(|e| {
+        tracing::error!("Failed to parse client_id '{}': {}", user.client_id, e);
+        AppError::InternalServerError("Invalid client ID".to_string())
     })?;
-    
+
+    tracing::info!("Checking client status for client_id: {}", client_uuid);
+
+    let client_check = sqlx::query("SELECT status FROM clients WHERE id = $1")
+        .bind(client_uuid)
+        .fetch_optional(&state.db_pool)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to query client status: {}", e);
+            AppError::InternalServerError(format!("Database error: {}", e))
+        })?;
+
     let client_is_active = client_check
         .map(|row| {
             let status: String = row.get("status");
@@ -450,20 +503,18 @@ pub async fn me(depot: &mut Depot, res: &mut Response) -> Result<(), AppError> {
             tracing::warn!("Client not found for id: {}", client_uuid);
             false
         });
-    
+
     // Check if user has at least one project
     tracing::info!("Checking project count for client_id: {}", client_uuid);
-    let project_count = sqlx::query(
-        "SELECT COUNT(*) as count FROM projects WHERE client_id = $1"
-    )
-    .bind(client_uuid)
-    .fetch_one(&state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Failed to query project count: {}", e);
-        AppError::InternalServerError(format!("Database error: {}", e))
-    })?;
-    
+    let project_count = sqlx::query("SELECT COUNT(*) as count FROM projects WHERE client_id = $1")
+        .bind(client_uuid)
+        .fetch_one(&state.db_pool)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to query project count: {}", e);
+            AppError::InternalServerError(format!("Database error: {}", e))
+        })?;
+
     let has_projects: i64 = project_count.get("count");
     tracing::info!("User has {} projects", has_projects);
     let is_setup_complete = client_is_active && has_projects > 0;
@@ -483,11 +534,17 @@ pub struct RegistrationStatusResponse {
 }
 
 #[handler]
-pub async fn check_registration_status(req: &mut Request, depot: &mut Depot, res: &mut Response) -> Result<(), AppError> {
-    let client_id = req.query::<String>("client_id")
+pub async fn check_registration_status(
+    req: &mut Request,
+    depot: &mut Depot,
+    res: &mut Response,
+) -> Result<(), AppError> {
+    let client_id = req
+        .query::<String>("client_id")
         .ok_or_else(|| AppError::BadRequest("client_id query parameter required".to_string()))?;
 
-    let state = depot.obtain::<AppState>()
+    let state = depot
+        .obtain::<AppState>()
         .map_err(|_| AppError::InternalServerError("Failed to get app state".to_string()))?;
 
     // Parse client_id as UUID
@@ -501,16 +558,19 @@ pub async fn check_registration_status(req: &mut Request, depot: &mut Depot, res
         .await
         .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
 
-    let client_row = client_row.ok_or_else(|| AppError::BadRequest("Client not found".to_string()))?;
+    let client_row =
+        client_row.ok_or_else(|| AppError::BadRequest("Client not found".to_string()))?;
 
     let client_name: String = client_row.get("name");
     let config: serde_json::Value = client_row.get("config");
 
-    let registration_enabled = config.get("registration_enabled")
+    let registration_enabled = config
+        .get("registration_enabled")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    let require_invite_code = config.get("require_invite_code")
+    let require_invite_code = config
+        .get("require_invite_code")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
@@ -530,30 +590,42 @@ pub struct PublicClient {
 
 #[handler]
 pub async fn list_public_clients(depot: &mut Depot, res: &mut Response) -> Result<(), AppError> {
-    let state = depot.obtain::<AppState>()
+    let state = depot
+        .obtain::<AppState>()
         .map_err(|_| AppError::InternalServerError("Failed to get app state".to_string()))?;
 
     // Get all active clients with valid tokens
-    let rows = sqlx::query("SELECT id, name FROM clients WHERE status = 'active' AND claude_token IS NOT NULL")
-        .fetch_all(&state.db_pool)
-        .await
-        .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
+    let rows = sqlx::query(
+        "SELECT id, name FROM clients WHERE status = 'active' AND claude_token IS NOT NULL",
+    )
+    .fetch_all(&state.db_pool)
+    .await
+    .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
 
-    let clients: Vec<PublicClient> = rows.iter().map(|row| {
-        let id: Uuid = row.get("id");
-        PublicClient {
-            id: id.to_string(),
-            name: row.get("name"),
-        }
-    }).collect();
+    let clients: Vec<PublicClient> = rows
+        .iter()
+        .map(|row| {
+            let id: Uuid = row.get("id");
+            PublicClient {
+                id: id.to_string(),
+                name: row.get("name"),
+            }
+        })
+        .collect();
 
     res.render(Json(clients));
     Ok(())
 }
 
 #[handler]
-pub async fn change_password(req: &mut Request, depot: &mut Depot, res: &mut Response) -> Result<(), AppError> {
-    let change_req: ChangePasswordRequest = req.parse_json().await
+pub async fn change_password(
+    req: &mut Request,
+    depot: &mut Depot,
+    res: &mut Response,
+) -> Result<(), AppError> {
+    let change_req: ChangePasswordRequest = req
+        .parse_json()
+        .await
         .map_err(|_| AppError::BadRequest("Invalid JSON".to_string()))?;
 
     let user_id = if let Some(session) = depot.session_mut() {
@@ -563,7 +635,8 @@ pub async fn change_password(req: &mut Request, depot: &mut Depot, res: &mut Res
         return Err(AppError::Unauthorized("No session found".to_string()));
     };
 
-    let state = depot.obtain::<AppState>()
+    let state = depot
+        .obtain::<AppState>()
         .map_err(|_| AppError::InternalServerError("Failed to get app state".to_string()))?;
 
     let user_uuid = Uuid::parse_str(&user_id)
@@ -584,12 +657,16 @@ pub async fn change_password(req: &mut Request, depot: &mut Depot, res: &mut Res
         .map_err(|e| AppError::InternalServerError(format!("Failed to verify password: {}", e)))?;
 
     if !is_valid {
-        return Err(AppError::BadRequest("Current password is incorrect".to_string()));
+        return Err(AppError::BadRequest(
+            "Current password is incorrect".to_string(),
+        ));
     }
 
     // Validate new password
     if change_req.new_password.len() < 8 {
-        return Err(AppError::BadRequest("New password must be at least 8 characters long".to_string()));
+        return Err(AppError::BadRequest(
+            "New password must be at least 8 characters long".to_string(),
+        ));
     }
 
     // Hash new password
@@ -625,32 +702,37 @@ pub fn auth_routes() -> Router {
 }
 
 pub fn auth_protected_routes() -> Router {
-    Router::new()
-        .push(Router::with_path("/session-token").get(get_session_token))
+    Router::new().push(Router::with_path("/session-token").get(get_session_token))
 }
 
 #[handler]
-pub async fn check_users_exist(req: &mut Request, depot: &mut Depot, res: &mut Response) -> Result<(), AppError> {
-    let state = depot.obtain::<AppState>()
+pub async fn check_users_exist(
+    req: &mut Request,
+    depot: &mut Depot,
+    res: &mut Response,
+) -> Result<(), AppError> {
+    let state = depot
+        .obtain::<AppState>()
         .map_err(|_| AppError::InternalServerError("Failed to get app state".to_string()))?;
-    
+
     // Get client_id from query params
-    let client_id = req.query::<String>("client_id")
+    let client_id = req
+        .query::<String>("client_id")
         .ok_or_else(|| AppError::BadRequest("client_id parameter required".to_string()))?;
-    
+
     let client_uuid = Uuid::parse_str(&client_id)
         .map_err(|_| AppError::BadRequest("Invalid client ID format".to_string()))?;
-    
+
     // Check if any users exist for this client
     let row = sqlx::query("SELECT COUNT(*) as count FROM users WHERE client_id = $1")
         .bind(client_uuid)
         .fetch_one(&state.db_pool)
         .await
         .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
-    
+
     let user_count: i64 = row.get("count");
     let users_exist = user_count > 0;
-    
+
     res.render(Json(serde_json::json!({
         "users_exist": users_exist,
         "user_count": user_count
@@ -659,34 +741,40 @@ pub async fn check_users_exist(req: &mut Request, depot: &mut Depot, res: &mut R
 }
 
 #[handler]
-pub async fn detect_client_by_domain(req: &mut Request, depot: &mut Depot, res: &mut Response) -> Result<(), AppError> {
-    let state = depot.obtain::<AppState>()
+pub async fn detect_client_by_domain(
+    req: &mut Request,
+    depot: &mut Depot,
+    res: &mut Response,
+) -> Result<(), AppError> {
+    let state = depot
+        .obtain::<AppState>()
         .map_err(|_| AppError::InternalServerError("Failed to get app state".to_string()))?;
-    
+
     // Get the domain from query params (the frontend will send the current hostname)
-    let domain = req.query::<String>("domain")
+    let domain = req
+        .query::<String>("domain")
         .ok_or_else(|| AppError::BadRequest("domain parameter required".to_string()))?;
-    
+
     tracing::info!("Detecting client for domain: {}", domain);
-    
+
     // Query to find a client that has this domain in its domains array
     let row = sqlx::query(
         "SELECT id, name, status FROM clients 
          WHERE $1 = ANY(domains) 
          AND deleted_at IS NULL 
          AND status = 'active'
-         LIMIT 1"
+         LIMIT 1",
     )
     .bind(&domain)
     .fetch_optional(&state.db_pool)
     .await
     .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
-    
+
     if let Some(row) = row {
         let client_id: Uuid = row.get("id");
         let client_name: String = row.get("name");
         let status: String = row.get("status");
-        
+
         res.render(Json(serde_json::json!({
             "found": true,
             "client": {
@@ -701,31 +789,36 @@ pub async fn detect_client_by_domain(req: &mut Request, depot: &mut Depot, res: 
             "message": "No client found for this domain"
         })));
     }
-    
+
     Ok(())
 }
 
 #[handler]
 pub async fn list_all_clients(depot: &mut Depot, res: &mut Response) -> Result<(), AppError> {
-    let state = depot.obtain::<AppState>()
+    let state = depot
+        .obtain::<AppState>()
         .map_err(|_| AppError::InternalServerError("Failed to get app state".to_string()))?;
 
     // Get all clients (including incomplete ones) for setup flow
-    let rows = sqlx::query("SELECT id, name, status, claude_token FROM clients ORDER BY created_at ASC")
-        .fetch_all(&state.db_pool)
-        .await
-        .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
+    let rows =
+        sqlx::query("SELECT id, name, status, claude_token FROM clients ORDER BY created_at ASC")
+            .fetch_all(&state.db_pool)
+            .await
+            .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
 
-    let clients: Vec<serde_json::Value> = rows.iter().map(|row| {
-        let id: Uuid = row.get("id");
-        let claude_token: Option<String> = row.get("claude_token");
-        serde_json::json!({
-            "id": id.to_string(),
-            "name": row.get::<String, _>("name"),
-            "status": row.get::<String, _>("status"),
-            "has_token": claude_token.is_some()
+    let clients: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|row| {
+            let id: Uuid = row.get("id");
+            let claude_token: Option<String> = row.get("claude_token");
+            serde_json::json!({
+                "id": id.to_string(),
+                "name": row.get::<String, _>("name"),
+                "status": row.get::<String, _>("status"),
+                "has_token": claude_token.is_some()
+            })
         })
-    }).collect();
+        .collect();
 
     res.render(Json(clients));
     Ok(())

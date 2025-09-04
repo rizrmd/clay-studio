@@ -1,6 +1,6 @@
-use serde::{Deserialize, Serialize};
+use crate::models::{DataSourceContext, Message, ProjectSettings, ToolContext};
 use chrono::{DateTime, Utc};
-use crate::models::{Message, DataSourceContext, ToolContext, ProjectSettings};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConversationContext {

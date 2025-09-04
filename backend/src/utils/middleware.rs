@@ -1,5 +1,5 @@
-use salvo::prelude::*;
 use crate::utils::AppState;
+use salvo::prelude::*;
 
 // Auth utilities are in utils/auth.rs, re-export them
 pub use crate::utils::auth::{self, client_scoped, get_current_client_id, is_current_user_root};
@@ -16,7 +16,13 @@ impl StateInjector {
 
 #[async_trait]
 impl Handler for StateInjector {
-    async fn handle(&self, _req: &mut Request, depot: &mut Depot, _res: &mut Response, _ctrl: &mut FlowCtrl) {
+    async fn handle(
+        &self,
+        _req: &mut Request,
+        depot: &mut Depot,
+        _res: &mut Response,
+        _ctrl: &mut FlowCtrl,
+    ) {
         depot.inject(self.state.clone());
     }
 }

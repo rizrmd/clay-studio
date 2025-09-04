@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::models::tool_usage::ToolUsage;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CreateConversationRequest {

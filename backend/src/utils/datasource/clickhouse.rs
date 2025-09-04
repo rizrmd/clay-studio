@@ -1,8 +1,8 @@
-use super::base::{DataSourceConnector};
-use serde_json::{json, Value};
-use clickhouse::Client;
-use std::error::Error;
+use super::base::DataSourceConnector;
 use async_trait::async_trait;
+use clickhouse::Client;
+use serde_json::{json, Value};
+use std::error::Error;
 use std::time::Duration;
 
 pub struct ClickHouseConnector {
@@ -15,23 +15,41 @@ impl ClickHouseConnector {
             url.to_string()
         } else {
             // Construct URL from individual components
-            let host = config.get("host").and_then(|v| v.as_str()).unwrap_or("localhost");
+            let host = config
+                .get("host")
+                .and_then(|v| v.as_str())
+                .unwrap_or("localhost");
             let port = config.get("port").and_then(|v| v.as_u64()).unwrap_or(8123);
-            let database = config.get("database").and_then(|v| v.as_str()).unwrap_or("default");
-            let username = config.get("username").and_then(|v| v.as_str()).unwrap_or("default");
-            let password = config.get("password").and_then(|v| v.as_str()).unwrap_or("");
+            let database = config
+                .get("database")
+                .and_then(|v| v.as_str())
+                .unwrap_or("default");
+            let username = config
+                .get("username")
+                .and_then(|v| v.as_str())
+                .unwrap_or("default");
+            let password = config
+                .get("password")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
 
             if password.is_empty() {
                 format!("http://{}@{}:{}/{}", username, host, port, database)
             } else {
-                format!("http://{}:{}@{}:{}/{}", username, password, host, port, database)
+                format!(
+                    "http://{}:{}@{}:{}/{}",
+                    username, password, host, port, database
+                )
             }
         };
 
-        eprintln!("[DEBUG] ClickHouse connection URL (masked): {}", Self::mask_url(&url));
+        eprintln!(
+            "[DEBUG] ClickHouse connection URL (masked): {}",
+            Self::mask_url(&url)
+        );
 
         let client = Client::default().with_url(url);
-        
+
         Ok(Self { client })
     }
 
@@ -59,18 +77,19 @@ impl ClickHouseConnector {
     }
 }
 
-
 #[async_trait]
 impl DataSourceConnector for ClickHouseConnector {
     async fn test_connection(&mut self) -> Result<bool, Box<dyn Error>> {
         // Wrap the connection test with a 3-second timeout
         match tokio::time::timeout(
             Duration::from_secs(3),
-            self.client.query("SELECT 1").fetch_one::<u8>()
-        ).await {
+            self.client.query("SELECT 1").fetch_one::<u8>(),
+        )
+        .await
+        {
             Ok(Ok(_)) => Ok(true),
             Ok(Err(e)) => Err(Box::new(e) as Box<dyn Error>),
-            Err(_) => Err(Box::<dyn Error>::from("Connection timeout after 3 seconds"))
+            Err(_) => Err(Box::<dyn Error>::from("Connection timeout after 3 seconds")),
         }
     }
 
@@ -83,14 +102,15 @@ impl DataSourceConnector for ClickHouseConnector {
         };
 
         let start = std::time::Instant::now();
-        
+
         // Use ClickHouse's native HTTP interface with JSON format for better control
         // We'll make a direct HTTP request to get proper column metadata
         let query_with_format = format!("{} FORMAT JSON", query_with_limit);
-        
+
         // For now, use a simpler approach that works with the current clickhouse crate
         // The crate doesn't easily expose column metadata, so we'll use FORMAT JSON
-        let raw_result = self.client
+        let raw_result = self
+            .client
             .query(&query_with_format)
             .fetch_one::<String>()
             .await;
@@ -104,14 +124,15 @@ impl DataSourceConnector for ClickHouseConnector {
                     // Extract metadata and data from the JSON response
                     let meta = json_response.get("meta").and_then(|m| m.as_array());
                     let data = json_response.get("data").and_then(|d| d.as_array());
-                    
+
                     if let (Some(meta_array), Some(data_array)) = (meta, data) {
                         // Extract column names from metadata
-                        let columns: Vec<String> = meta_array.iter()
+                        let columns: Vec<String> = meta_array
+                            .iter()
                             .filter_map(|col| col.get("name").and_then(|n| n.as_str()))
                             .map(|s| s.to_string())
                             .collect();
-                        
+
                         // Convert data rows to the expected format
                         let mut formatted_rows = Vec::new();
                         for row in data_array {
@@ -124,14 +145,16 @@ impl DataSourceConnector for ClickHouseConnector {
                                         Value::Number(n) => n.to_string(),
                                         Value::Bool(b) => b.to_string(),
                                         Value::Null => "NULL".to_string(),
-                                        Value::Array(a) => serde_json::to_string(a).unwrap_or_else(|_| "[]".to_string()),
-                                        Value::Object(o) => serde_json::to_string(o).unwrap_or_else(|_| "{}".to_string()),
+                                        Value::Array(a) => serde_json::to_string(a)
+                                            .unwrap_or_else(|_| "[]".to_string()),
+                                        Value::Object(o) => serde_json::to_string(o)
+                                            .unwrap_or_else(|_| "{}".to_string()),
                                     });
                                 }
                                 formatted_rows.push(row_data);
                             }
                         }
-                        
+
                         return Ok(json!({
                             "columns": columns,
                             "rows": formatted_rows,
@@ -140,7 +163,7 @@ impl DataSourceConnector for ClickHouseConnector {
                         }));
                     }
                 }
-                
+
                 // If JSON parsing failed, treat as a single string result
                 Ok(json!({
                     "columns": ["result"],
@@ -151,11 +174,12 @@ impl DataSourceConnector for ClickHouseConnector {
             }
             Err(_) => {
                 // Try without FORMAT JSON as a fallback
-                let simple_result = self.client
+                let simple_result = self
+                    .client
                     .query(&query_with_limit)
                     .fetch_all::<String>()
                     .await;
-                    
+
                 match simple_result {
                     Ok(rows) => {
                         if rows.is_empty() {
@@ -167,10 +191,9 @@ impl DataSourceConnector for ClickHouseConnector {
                             }))
                         } else {
                             // Convert string results to rows
-                            let formatted_rows: Vec<Vec<String>> = rows.into_iter()
-                                .map(|s| vec![s])
-                                .collect();
-                            
+                            let formatted_rows: Vec<Vec<String>> =
+                                rows.into_iter().map(|s| vec![s]).collect();
+
                             Ok(json!({
                                 "columns": ["result"],
                                 "rows": formatted_rows,
@@ -179,7 +202,7 @@ impl DataSourceConnector for ClickHouseConnector {
                             }))
                         }
                     }
-                    Err(e) => Err(Box::new(e))
+                    Err(e) => Err(Box::new(e)),
                 }
             }
         }
@@ -192,10 +215,10 @@ impl DataSourceConnector for ClickHouseConnector {
             .await?;
 
         let mut tables: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
-        
+
         for (database, table, name, col_type) in columns {
             let full_table_name = format!("{}.{}", database, table);
-            
+
             let table_entry = tables.entry(full_table_name.clone()).or_insert_with(|| {
                 json!({
                     "name": full_table_name,
@@ -205,7 +228,10 @@ impl DataSourceConnector for ClickHouseConnector {
                 })
             });
 
-            if let Some(columns_array) = table_entry.get_mut("columns").and_then(|v| v.as_array_mut()) {
+            if let Some(columns_array) = table_entry
+                .get_mut("columns")
+                .and_then(|v| v.as_array_mut())
+            {
                 columns_array.push(json!({
                     "name": name,
                     "type": col_type,
@@ -261,26 +287,25 @@ impl DataSourceConnector for ClickHouseConnector {
     }
 
     async fn get_tables_schema(&self, tables: Vec<&str>) -> Result<Value, Box<dyn Error>> {
-        let table_list = tables.iter()
+        let table_list = tables
+            .iter()
             .map(|t| format!("'{}'", t.replace("'", "''")))
             .collect::<Vec<_>>()
             .join(", ");
-        
+
         let query = format!(
             "SELECT database, table, name, type FROM system.columns WHERE CONCAT(database, '.', table) IN ({}) ORDER BY database, table, name",
             table_list
         );
 
-        let columns: Vec<(String, String, String, String)> = self.client
-            .query(&query)
-            .fetch_all()
-            .await?;
+        let columns: Vec<(String, String, String, String)> =
+            self.client.query(&query).fetch_all().await?;
 
         let mut result: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
 
         for (database, table, name, col_type) in columns {
             let full_table_name = format!("{}.{}", database, table);
-            
+
             let table_entry = result.entry(full_table_name.clone()).or_insert_with(|| {
                 json!({
                     "name": full_table_name,
@@ -290,7 +315,10 @@ impl DataSourceConnector for ClickHouseConnector {
                 })
             });
 
-            if let Some(columns_array) = table_entry.get_mut("columns").and_then(|v| v.as_array_mut()) {
+            if let Some(columns_array) = table_entry
+                .get_mut("columns")
+                .and_then(|v| v.as_array_mut())
+            {
                 columns_array.push(json!({
                     "name": name,
                     "type": col_type,
@@ -310,18 +338,17 @@ impl DataSourceConnector for ClickHouseConnector {
             pattern.replace('%', "%").replace('*', "%")
         );
 
-        let tables_info: Vec<(String, String)> = self.client
-            .query(&query)
-            .fetch_all()
-            .await?;
+        let tables_info: Vec<(String, String)> = self.client.query(&query).fetch_all().await?;
 
         let tables: Vec<Value> = tables_info
             .into_iter()
-            .map(|(database, name)| json!({
-                "database": database,
-                "name": format!("{}.{}", database, name),
-                "table": name
-            }))
+            .map(|(database, name)| {
+                json!({
+                    "database": database,
+                    "name": format!("{}.{}", database, name),
+                    "table": name
+                })
+            })
             .collect();
 
         Ok(json!({
@@ -344,18 +371,18 @@ impl DataSourceConnector for ClickHouseConnector {
             database, table_name
         );
 
-        let columns: Vec<(String, String)> = self.client
-            .query(&main_table_query)
-            .fetch_all()
-            .await?;
+        let columns: Vec<(String, String)> =
+            self.client.query(&main_table_query).fetch_all().await?;
 
         let columns_json: Vec<Value> = columns
             .into_iter()
-            .map(|(name, col_type)| json!({
-                "name": name,
-                "type": col_type,
-                "nullable": col_type.contains("Nullable")
-            }))
+            .map(|(name, col_type)| {
+                json!({
+                    "name": name,
+                    "type": col_type,
+                    "nullable": col_type.contains("Nullable")
+                })
+            })
             .collect();
 
         // Find potentially related tables based on naming patterns
@@ -364,10 +391,7 @@ impl DataSourceConnector for ClickHouseConnector {
             database, table_name, table_name, table_name
         );
 
-        let related_tables: Vec<String> = self.client
-            .query(&related_query)
-            .fetch_all()
-            .await?;
+        let related_tables: Vec<String> = self.client.query(&related_query).fetch_all().await?;
 
         let related_full_names: Vec<String> = related_tables
             .into_iter()

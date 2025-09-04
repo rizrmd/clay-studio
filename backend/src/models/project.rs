@@ -1,6 +1,6 @@
+use crate::models::{DataSourceContext, ToolContext};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use crate::models::{DataSourceContext, ToolContext};
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]

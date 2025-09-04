@@ -38,11 +38,15 @@ pub enum ClaudeMessage {
     #[serde(rename = "progress")]
     Progress { content: serde_json::Value },
     #[serde(rename = "tool_use")]
-    ToolUse { tool: String, args: Value, tool_use_id: Option<String> },
+    ToolUse {
+        tool: String,
+        args: Value,
+        tool_use_id: Option<String>,
+    },
     #[serde(rename = "tool_result")]
     ToolResult { tool: String, result: Value },
     #[serde(rename = "ask_user")]
-    AskUser { 
+    AskUser {
         prompt_type: String, // "checkbox" | "buttons" | "input"
         title: String,
         options: Option<Vec<AskUserOption>>,

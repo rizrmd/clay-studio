@@ -1,18 +1,17 @@
-use std::sync::Arc;
-use std::collections::HashMap;
-use sea_orm::DatabaseConnection;
-use sqlx::{PgPool, postgres::PgPoolOptions, Row};
-use tokio::sync::RwLock;
-use uuid::Uuid;
-use chrono::{DateTime, Utc};
-use std::time::Duration;
-use tracing::{info, warn, error};
-use crate::utils::Config;
-use crate::utils::db;
-use crate::models::{client::Client, Message, tool_usage::ToolUsage};
 use crate::core::sessions::PostgresSessionStore;
+use crate::models::{client::Client, tool_usage::ToolUsage, Message};
+use crate::utils::db;
+use crate::utils::Config;
+use chrono::{DateTime, Utc};
+use sea_orm::DatabaseConnection;
+use sqlx::{postgres::PgPoolOptions, PgPool, Row};
+use std::collections::HashMap;
 use std::collections::HashSet;
-
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::RwLock;
+use tracing::{error, info, warn};
+use uuid::Uuid;
 
 #[derive(Clone, Debug, serde::Serialize)]
 #[allow(dead_code)]
@@ -36,14 +35,14 @@ pub struct ToolExecution {
 pub struct StreamingState {
     /// The ID of the message being streamed
     pub message_id: String,
-    
+
     /// Accumulated text content from all progress events (for display)
     pub partial_content: String,
-    
+
     /// Currently executing or completed tools with their status
     pub active_tools: Vec<ToolExecution>,
-    
-    /// Complete history of all events (progress, tool_use, tool_complete) 
+
+    /// Complete history of all events (progress, tool_use, tool_complete)
     /// stored in order to replay them exactly when WebSocket reconnects
     pub progress_events: Vec<serde_json::Value>,
 }
@@ -52,10 +51,10 @@ pub struct StreamingState {
 pub struct ConversationCache {
     /// All messages in the conversation (excluding forgotten ones)
     pub messages: Vec<Message>,
-    
+
     /// Set of WebSocket client IDs currently subscribed to this conversation
     pub subscribers: HashSet<String>,
-    
+
     /// Last time this cache was accessed
     pub last_accessed: DateTime<Utc>,
 }
@@ -78,14 +77,14 @@ impl AppState {
     pub async fn new(config: &Config) -> Result<Self, Box<dyn std::error::Error>> {
         // Connect to database with SeaORM (handles its own connection pool)
         let db = db::connect(&config.database_url).await?;
-        
+
         // Create SQLx connection pool with comprehensive logging
         info!("🔌 Creating SQLx PostgreSQL connection pool...");
         let db_pool = Self::create_sqlx_pool(&config.database_url).await?;
-        
+
         let db_arc = Arc::new(db);
         let session_store = PostgresSessionStore::new(db_arc.clone());
-        
+
         Ok(AppState {
             db: db_arc,
             db_pool,
@@ -96,7 +95,7 @@ impl AppState {
             session_store,
         })
     }
-    
+
     async fn create_sqlx_pool(database_url: &str) -> Result<PgPool, Box<dyn std::error::Error>> {
         info!("📊 SQLx Pool configuration:");
         info!("  - Max connections: 15");
@@ -104,7 +103,7 @@ impl AppState {
         info!("  - Connect timeout: 30s");
         info!("  - Idle timeout: 600s");
         info!("  - Max lifetime: 1800s");
-        
+
         let pool_options = PgPoolOptions::new()
             .max_connections(15)
             .min_connections(2)
@@ -112,15 +111,18 @@ impl AppState {
             .idle_timeout(Some(Duration::from_secs(600)))
             .max_lifetime(Some(Duration::from_secs(1800)))
             .test_before_acquire(true);
-        
+
         // Attempt connection with retry logic
         let mut attempts = 0;
         const MAX_ATTEMPTS: u8 = 3;
-        
+
         let pool = loop {
             attempts += 1;
-            info!("🔄 SQLx pool connection attempt {}/{}", attempts, MAX_ATTEMPTS);
-            
+            info!(
+                "🔄 SQLx pool connection attempt {}/{}",
+                attempts, MAX_ATTEMPTS
+            );
+
             match pool_options.clone().connect(database_url).await {
                 Ok(pool) => {
                     info!("✅ SQLx PostgreSQL pool created successfully");
@@ -128,28 +130,29 @@ impl AppState {
                 }
                 Err(e) => {
                     error!("❌ SQLx pool creation attempt {} failed: {}", attempts, e);
-                    
+
                     // Log specific error diagnostics
                     let error_msg = e.to_string();
                     if error_msg.contains("Connection refused") {
                         error!("🚨 PostgreSQL server unreachable");
-                    } else if error_msg.contains("authentication") || error_msg.contains("password") {
+                    } else if error_msg.contains("authentication") || error_msg.contains("password")
+                    {
                         error!("🚨 PostgreSQL authentication failed");
                     } else if error_msg.contains("timeout") {
                         error!("🚨 PostgreSQL connection timeout");
                     }
-                    
+
                     if attempts >= MAX_ATTEMPTS {
                         error!("💥 All SQLx pool creation attempts exhausted");
                         return Err(e.into());
                     }
-                    
+
                     warn!("⏳ Retrying SQLx pool creation in 2 seconds...");
                     tokio::time::sleep(Duration::from_secs(2)).await;
                 }
             }
         };
-        
+
         // Test the pool
         info!("🧪 Testing SQLx pool connection...");
         match sqlx::query("SELECT 1 as test").fetch_one(&pool).await {
@@ -162,44 +165,58 @@ impl AppState {
                 return Err(e.into());
             }
         }
-        
+
         Ok(pool)
     }
-    
+
     /// Log connection pool statistics
     pub async fn log_pool_stats(&self, context: &str) {
         Self::log_pool_stats_static(&self.db_pool, context).await;
     }
-    
+
     async fn log_pool_stats_static(pool: &PgPool, context: &str) {
         let stats = pool.size();
         let idle = pool.num_idle() as u32;
-        info!("📈 [{}] Pool Stats - Total: {}, Idle: {}, Active: {}", 
-              context, stats, idle, stats.saturating_sub(idle));
-              
+        info!(
+            "📈 [{}] Pool Stats - Total: {}, Idle: {}, Active: {}",
+            context,
+            stats,
+            idle,
+            stats.saturating_sub(idle)
+        );
+
         // Warn if pool usage is high
         if stats > 10 {
-            warn!("⚠️  High database connection usage: {}/15 connections active", stats);
+            warn!(
+                "⚠️  High database connection usage: {}/15 connections active",
+                stats
+            );
         }
-        
+
         if idle == 0 && stats > 5 {
             warn!("⚠️  No idle database connections available - potential bottleneck");
         }
     }
-    
+
     /// Health check for database connections
     pub async fn health_check(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // Test SeaORM connection  
-        match sqlx::query("SELECT 1 as test").fetch_one(&self.db_pool).await {
+        // Test SeaORM connection
+        match sqlx::query("SELECT 1 as test")
+            .fetch_one(&self.db_pool)
+            .await
+        {
             Ok(_) => info!("✅ SeaORM connection healthy"),
             Err(e) => {
                 error!("❌ SeaORM connection unhealthy: {}", e);
                 return Err(e.into());
             }
         }
-        
+
         // Test SQLx connection
-        match sqlx::query("SELECT 1 as test").fetch_one(&self.db_pool).await {
+        match sqlx::query("SELECT 1 as test")
+            .fetch_one(&self.db_pool)
+            .await
+        {
             Ok(_) => {
                 info!("✅ SQLx pool healthy");
                 self.log_pool_stats("Health Check").await;
@@ -209,10 +226,10 @@ impl AppState {
                 return Err(e.into());
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Load conversation messages from database and cache them
     pub async fn load_conversation_cache(
         &self,
@@ -224,14 +241,14 @@ impl AppState {
              FROM messages 
              WHERE conversation_id = $1 
              AND (is_forgotten = false OR is_forgotten IS NULL)
-             ORDER BY created_at ASC, id ASC"
+             ORDER BY created_at ASC, id ASC",
         )
         .bind(conversation_id)
         .fetch_all(&self.db_pool)
         .await?;
-        
+
         let mut cached_messages = Vec::new();
-        
+
         for row in messages {
             let msg_id: String = row.get("id");
             let role_str: String = row.get("role");
@@ -241,7 +258,7 @@ impl AppState {
                 "system" => crate::models::MessageRole::System,
                 _ => continue,
             };
-            
+
             // Fetch tool usages if it's an assistant message
             let tool_usages = if role == crate::models::MessageRole::Assistant {
                 let tool_rows = sqlx::query(
@@ -253,7 +270,7 @@ impl AppState {
                 .bind(&msg_id)
                 .fetch_all(&self.db_pool)
                 .await?;
-                
+
                 if !tool_rows.is_empty() {
                     let mut usages = Vec::new();
                     for tool_row in tool_rows {
@@ -262,10 +279,11 @@ impl AppState {
                             message_id: tool_row.get("message_id"),
                             tool_name: tool_row.get("tool_name"),
                             tool_use_id: tool_row.get("tool_use_id"),
-                            parameters: tool_row.get::<Option<serde_json::Value>, _>("parameters"),
-                            output: tool_row.get::<Option<serde_json::Value>, _>("output"),
+                            parameters: None, // Exclude parameters from conversation messages
+                            output: None, // Exclude output from conversation messages
                             execution_time_ms: tool_row.get("execution_time_ms"),
-                            created_at: tool_row.get::<Option<DateTime<Utc>>, _>("created_at")
+                            created_at: tool_row
+                                .get::<Option<DateTime<Utc>>, _>("created_at")
                                 .map(|dt| dt.to_rfc3339()),
                         });
                     }
@@ -276,33 +294,43 @@ impl AppState {
             } else {
                 None
             };
-            
+
             let message = Message {
                 id: msg_id,
                 content: row.get("content"),
                 role,
                 processing_time_ms: row.get("processing_time_ms"),
-                created_at: row.get::<DateTime<Utc>, _>("created_at").to_rfc3339().into(),
+                created_at: row
+                    .get::<DateTime<Utc>, _>("created_at")
+                    .to_rfc3339()
+                    .into(),
                 file_attachments: None,
                 tool_usages,
             };
-            
+
             cached_messages.push(message);
         }
-        
+
         // Update cache
         let mut cache = self.conversation_cache.write().await;
-        cache.insert(conversation_id.to_string(), ConversationCache {
-            messages: cached_messages.clone(),
-            subscribers: HashSet::new(),
-            last_accessed: Utc::now(),
-        });
-        
-        info!("📝 Cached {} messages for conversation {}", cached_messages.len(), conversation_id);
-        
+        cache.insert(
+            conversation_id.to_string(),
+            ConversationCache {
+                messages: cached_messages.clone(),
+                subscribers: HashSet::new(),
+                last_accessed: Utc::now(),
+            },
+        );
+
+        info!(
+            "📝 Cached {} messages for conversation {}",
+            cached_messages.len(),
+            conversation_id
+        );
+
         Ok(cached_messages)
     }
-    
+
     /// Get cached messages or load from database
     pub async fn get_conversation_messages(
         &self,
@@ -325,68 +353,72 @@ impl AppState {
                 // Messages are empty, need to load from database
             }
         }
-        
+
         // Not in cache or cache is empty, load from database
         self.load_conversation_cache(conversation_id).await
     }
-    
+
     /// Add a subscriber to a conversation
-    pub async fn add_conversation_subscriber(
-        &self,
-        conversation_id: &str,
-        client_id: &str,
-    ) {
+    pub async fn add_conversation_subscriber(&self, conversation_id: &str, client_id: &str) {
         let mut cache = self.conversation_cache.write().await;
-        
+
         if let Some(cached) = cache.get_mut(conversation_id) {
             cached.subscribers.insert(client_id.to_string());
             cached.last_accessed = Utc::now();
-            info!("➕ Added subscriber {} to conversation {} (total: {})", 
-                  client_id, conversation_id, cached.subscribers.len());
+            info!(
+                "➕ Added subscriber {} to conversation {} (total: {})",
+                client_id,
+                conversation_id,
+                cached.subscribers.len()
+            );
         } else {
             // Create new cache entry with this subscriber
             let mut subscribers = HashSet::new();
             subscribers.insert(client_id.to_string());
-            
-            cache.insert(conversation_id.to_string(), ConversationCache {
-                messages: Vec::new(), // Will be loaded on first access
-                subscribers,
-                last_accessed: Utc::now(),
-            });
-            info!("➕ Created cache for conversation {} with subscriber {}", 
-                  conversation_id, client_id);
+
+            cache.insert(
+                conversation_id.to_string(),
+                ConversationCache {
+                    messages: Vec::new(), // Will be loaded on first access
+                    subscribers,
+                    last_accessed: Utc::now(),
+                },
+            );
+            info!(
+                "➕ Created cache for conversation {} with subscriber {}",
+                conversation_id, client_id
+            );
         }
     }
-    
+
     /// Remove a subscriber from a conversation
-    pub async fn remove_conversation_subscriber(
-        &self,
-        conversation_id: &str,
-        client_id: &str,
-    ) {
+    pub async fn remove_conversation_subscriber(&self, conversation_id: &str, client_id: &str) {
         let mut cache = self.conversation_cache.write().await;
-        
+
         if let Some(cached) = cache.get_mut(conversation_id) {
             cached.subscribers.remove(client_id);
-            info!("➖ Removed subscriber {} from conversation {} (remaining: {})", 
-                  client_id, conversation_id, cached.subscribers.len());
-            
+            info!(
+                "➖ Removed subscriber {} from conversation {} (remaining: {})",
+                client_id,
+                conversation_id,
+                cached.subscribers.len()
+            );
+
             // Remove cache entry if no subscribers remain
             if cached.subscribers.is_empty() {
                 cache.remove(conversation_id);
-                info!("🗑️ Removed cache for conversation {} (no subscribers)", conversation_id);
+                info!(
+                    "🗑️ Removed cache for conversation {} (no subscribers)",
+                    conversation_id
+                );
             }
         }
     }
-    
+
     /// Add or update a message in the cache
-    pub async fn update_conversation_cache(
-        &self,
-        conversation_id: &str,
-        message: Message,
-    ) {
+    pub async fn update_conversation_cache(&self, conversation_id: &str, message: Message) {
         let mut cache = self.conversation_cache.write().await;
-        
+
         if let Some(cached) = cache.get_mut(conversation_id) {
             // Check if message already exists (update) or is new (add)
             if let Some(existing) = cached.messages.iter_mut().find(|m| m.id == message.id) {
@@ -397,7 +429,7 @@ impl AppState {
             cached.last_accessed = Utc::now();
         }
     }
-    
+
     /// Invalidate and reload conversation cache (used when forget/restore operations change message visibility)
     pub async fn invalidate_conversation_cache(
         &self,
@@ -408,7 +440,7 @@ impl AppState {
             let mut cache = self.conversation_cache.write().await;
             cache.remove(conversation_id);
         }
-        
+
         // Reload from database (this will create a fresh cache entry)
         self.load_conversation_cache(conversation_id).await
     }

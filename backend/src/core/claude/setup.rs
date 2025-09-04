@@ -1,13 +1,13 @@
+use expectrl::{spawn, Regex as ExpectRegex, Session};
+use serde_json::json;
+use sqlx::Row;
 use std::path::PathBuf;
 use std::process::Command;
-use uuid::Uuid;
-use expectrl::{Regex as ExpectRegex, spawn, Session};
-use serde_json::json;
-use tokio::sync::{mpsc, Mutex};
-use std::sync::Arc;
-use tracing::info;
 use std::sync::atomic::{AtomicBool, Ordering};
-use sqlx::Row;
+use std::sync::Arc;
+use tokio::sync::{mpsc, Mutex};
+use tracing::info;
+use uuid::Uuid;
 
 #[derive(Debug, Clone)]
 pub struct ClaudeSetup {
@@ -25,13 +25,13 @@ impl ClaudeSetup {
     pub fn new(client_id: Uuid) -> Self {
         // Use CLIENTS_DIR env var, or default to ../.clients (project root)
         // This avoids triggering backend file watcher when clients are created
-        let clients_base = std::env::var("CLIENTS_DIR")
-            .unwrap_or_else(|_| "../.clients".to_string());
-        
+        let clients_base =
+            std::env::var("CLIENTS_DIR").unwrap_or_else(|_| "../.clients".to_string());
+
         let clients_base_path = PathBuf::from(&clients_base);
         let client_dir = clients_base_path.join(format!("{}", client_id));
         let bun_path = clients_base_path.join("bun");
-        
+
         Self {
             client_id,
             client_dir,
@@ -44,30 +44,37 @@ impl ClaudeSetup {
         }
     }
 
-    pub async fn setup_environment(&self, progress_tx: Option<mpsc::Sender<String>>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn setup_environment(
+        &self,
+        progress_tx: Option<mpsc::Sender<String>>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.create_directories().await?;
-        
+
         if let Some(ref tx) = progress_tx {
-            let _ = tx.send("Creating client directory structure...".to_string()).await;
+            let _ = tx
+                .send("Creating client directory structure...".to_string())
+                .await;
         }
-        
+
         self.download_bun(progress_tx.clone()).await?;
         self.install_claude_code(progress_tx.clone()).await?;
-        
+
         if let Some(ref tx) = progress_tx {
-            let _ = tx.send("Claude Code environment ready for authentication".to_string()).await;
+            let _ = tx
+                .send("Claude Code environment ready for authentication".to_string())
+                .await;
         }
-        
+
         Ok(())
     }
 
     async fn create_directories(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         std::fs::create_dir_all(&self.client_dir)?;
         std::fs::create_dir_all(".clients")?;
-        
+
         let config_dir = self.client_dir.join(".config/claude");
         std::fs::create_dir_all(&config_dir)?;
-        
+
         let config_file = config_dir.join("config.json");
         if !config_file.exists() {
             let config = json!({
@@ -77,7 +84,7 @@ impl ClaudeSetup {
             });
             std::fs::write(&config_file, serde_json::to_string_pretty(&config)?)?;
         }
-        
+
         let package_json = self.client_dir.join("package.json");
         if !package_json.exists() {
             let package_config = json!({
@@ -87,28 +94,38 @@ impl ClaudeSetup {
                 "description": format!("Claude Code environment for client {}", self.client_id),
                 "dependencies": {}
             });
-            std::fs::write(&package_json, serde_json::to_string_pretty(&package_config)?)?;
+            std::fs::write(
+                &package_json,
+                serde_json::to_string_pretty(&package_config)?,
+            )?;
         }
-        
+
         Ok(())
     }
 
-    async fn download_bun(&self, progress_tx: Option<mpsc::Sender<String>>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn download_bun(
+        &self,
+        progress_tx: Option<mpsc::Sender<String>>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let bun_executable = self.bun_path.join("bin/bun");
-        
+
         if bun_executable.exists() {
             if let Some(ref tx) = progress_tx {
-                let _ = tx.send("Bun already installed, skipping download...".to_string()).await;
+                let _ = tx
+                    .send("Bun already installed, skipping download...".to_string())
+                    .await;
             }
             return Ok(());
         }
-        
+
         if let Some(ref tx) = progress_tx {
-            let _ = tx.send("Downloading and installing Bun...".to_string()).await;
+            let _ = tx
+                .send("Downloading and installing Bun...".to_string())
+                .await;
         }
-        
+
         std::fs::create_dir_all(&self.bun_path)?;
-        
+
         let output = Command::new("bash")
             .arg("-c")
             .arg("curl -fsSL https://bun.sh/install | bash")
@@ -117,94 +134,125 @@ impl ClaudeSetup {
             .env("HOME", ".clients")
             .env("BUN_INSTALL", self.bun_path.to_str().unwrap())
             .output()?;
-        
+
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(format!("Failed to install Bun: {}", stderr).into());
         }
-        
+
         if let Some(ref tx) = progress_tx {
             let _ = tx.send("Bun installed successfully!".to_string()).await;
         }
-        
+
         Ok(())
     }
 
-    pub async fn install_claude_code(&self, progress_tx: Option<mpsc::Sender<String>>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn install_claude_code(
+        &self,
+        progress_tx: Option<mpsc::Sender<String>>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if let Some(ref tx) = progress_tx {
-            let _ = tx.send("Installing @anthropic-ai/claude-code package...".to_string()).await;
+            let _ = tx
+                .send("Installing @anthropic-ai/claude-code package...".to_string())
+                .await;
         }
-        
+
         // Ensure client directory exists before trying to canonicalize
         std::fs::create_dir_all(&self.client_dir)?;
-        
+
         // Initialize package.json if it doesn't exist
         let package_json = self.client_dir.join("package.json");
         if !package_json.exists() {
-            let package_json_content = r#"{"name":"claude-client","version":"1.0.0","type":"module"}"#;
+            let package_json_content =
+                r#"{"name":"claude-client","version":"1.0.0","type":"module"}"#;
             std::fs::write(&package_json, package_json_content)?;
         }
-        
+
         let bun_executable = self.bun_path.join("bin/bun");
         let bun_path = bun_executable.canonicalize()?;
         let client_dir = self.client_dir.canonicalize()?;
-        
+
         let output = Command::new(&bun_path)
             .args(["add", "@anthropic-ai/claude-code"])
             .current_dir(&client_dir)
-            .env("PATH", format!("{}/bin:/usr/bin:/bin:/usr/local/bin", self.bun_path.to_str().unwrap()))
-            .env("HOME", std::env::var("HOME").unwrap_or_else(|_| client_dir.to_string_lossy().to_string()))
-            .env("BUN_INSTALL", self.bun_path.canonicalize()?.to_str().unwrap())
+            .env(
+                "PATH",
+                format!(
+                    "{}/bin:/usr/bin:/bin:/usr/local/bin",
+                    self.bun_path.to_str().unwrap()
+                ),
+            )
+            .env(
+                "HOME",
+                std::env::var("HOME").unwrap_or_else(|_| client_dir.to_string_lossy().to_string()),
+            )
+            .env(
+                "BUN_INSTALL",
+                self.bun_path.canonicalize()?.to_str().unwrap(),
+            )
             .output()?;
-        
+
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stdout = String::from_utf8_lossy(&output.stdout);
-            return Err(format!("Failed to install Claude Code. stdout: {}, stderr: {}", stdout, stderr).into());
+            return Err(format!(
+                "Failed to install Claude Code. stdout: {}, stderr: {}",
+                stdout, stderr
+            )
+            .into());
         }
-        
+
         if let Some(ref tx) = progress_tx {
-            let _ = tx.send("Claude Code package installed successfully!".to_string()).await;
+            let _ = tx
+                .send("Claude Code package installed successfully!".to_string())
+                .await;
         }
-        
+
         Ok(())
     }
 
-    pub async fn start_setup_token_stream(&self, progress_tx: mpsc::Sender<String>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn start_setup_token_stream(
+        &self,
+        progress_tx: mpsc::Sender<String>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Use the actual CLI script directly instead of the symlink
-        let claude_bin = self.client_dir.join("node_modules/@anthropic-ai/claude-code/cli.js");
+        let claude_bin = self
+            .client_dir
+            .join("node_modules/@anthropic-ai/claude-code/cli.js");
         let claude_path = claude_bin.canonicalize()?;
-        
-        info!("Starting claude setup-token streaming for client {}", self.client_id);
-        
+
+        info!(
+            "Starting claude setup-token streaming for client {}",
+            self.client_id
+        );
+
         // Kill any existing Claude CLI processes first
         let _ = Command::new("sh")
             .arg("-c")
             .arg("pkill -f 'claude.*setup-token' 2>/dev/null || true")
             .output();
-        
+
         // Check if port 54545 is already in use and clean up if needed
-        let port_check = Command::new("sh")
-            .arg("-c")
-            .arg("lsof -ti:54545")
-            .output();
-            
+        let port_check = Command::new("sh").arg("-c").arg("lsof -ti:54545").output();
+
         if let Ok(output) = port_check {
             if !output.stdout.is_empty() {
                 let _ = Command::new("sh")
                     .arg("-c")
                     .arg("lsof -ti:54545 | xargs kill -9 2>/dev/null || true")
                     .output();
-                
+
                 tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
             }
         }
-        
+
         // Set environment to prevent browser opening
         std::env::set_var("BROWSER", "echo");
-        
-        let _ = progress_tx.send("Starting Claude CLI authentication process...".to_string()).await;
-        
+
+        let _ = progress_tx
+            .send("Starting Claude CLI authentication process...".to_string())
+            .await;
+
         // Run in a blocking task since expectrl is not async
         let claude_path_str = claude_path.to_str().unwrap().to_string();
         let client_id = self.client_id;
@@ -214,18 +262,18 @@ impl ClaudeSetup {
         let oauth_token_arc = self.oauth_token.clone();
         let pending_token_arc = self.pending_token.clone();
         let oauth_notifier_arc = self.oauth_token_notifier.clone();
-        
+
         // Define prompt patterns to detect when ready for input
         let prompt_patterns = vec![
             "Paste code here if prompted",
             "Paste code here",
-            "Enter setup token", 
+            "Enter setup token",
             "Setup token:",
             "Token:",
             "Paste the setup token",
-            ">"
+            ">",
         ];
-        
+
         tokio::task::spawn_blocking(move || {
             let session = spawn(format!("{} setup-token", claude_path_str).as_str())?;
             
@@ -488,51 +536,60 @@ impl ClaudeSetup {
             
             Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
         }).await??;
-        
+
         Ok(())
     }
 
-    pub async fn submit_setup_token(&self, setup_token: &str) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn submit_setup_token(
+        &self,
+        setup_token: &str,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         let client_dir_path = self.client_dir.canonicalize()?;
-        
+
         info!("Submitting setup token for client {}", self.client_id);
-        
+
         // Wait for input_ready to be true before proceeding
         let start_time = std::time::Instant::now();
         let timeout = std::time::Duration::from_secs(30); // 30 second timeout
-        
+
         while !self.input_ready.load(Ordering::SeqCst) {
             if start_time.elapsed() > timeout {
                 return Err("Timeout waiting for input ready signal".into());
             }
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         }
-        
+
         info!("Input ready detected, submitting token...");
-        
+
         // Check if we already have a token (might have been captured from the same line)
         if let Some(existing_token) = self.get_oauth_token().await {
-            info!("Token already captured from streaming output: {}", existing_token);
+            info!(
+                "Token already captured from streaming output: {}",
+                existing_token
+            );
             self.save_env_file(&existing_token).await?;
             return Ok(existing_token);
         }
-        
+
         // Queue the real token to be sent by the streaming task
         {
             let mut pending_guard = self.pending_token.lock().await;
             *pending_guard = Some(setup_token.to_string());
-            info!("Queued token for sending by streaming task for client {}", self.client_id);
+            info!(
+                "Queued token for sending by streaming task for client {}",
+                self.client_id
+            );
         }
-        
+
         // Wait for OAuth token to be detected by streaming task
         let mut final_oauth_token = String::new();
-        
+
         info!("Waiting for OAuth token notification...");
-        
+
         // Wait for notification with timeout
         let timeout = tokio::time::Duration::from_secs(20);
         let notifier = self.oauth_token_notifier.clone();
-        
+
         match tokio::time::timeout(timeout, notifier.notified()).await {
             Ok(_) => {
                 // Notification received, get the token
@@ -552,12 +609,12 @@ impl ClaudeSetup {
                 }
             }
         }
-        
+
         // Check credential files for the actual OAuth token in multiple locations
         let home_dir = std::env::var("HOME").unwrap_or_default();
         let auth_files = vec![
             client_dir_path.join(".config/claude/auth.json"),
-            client_dir_path.join(".config/claude/credentials.json"), 
+            client_dir_path.join(".config/claude/credentials.json"),
             client_dir_path.join(".claude/auth.json"),
             client_dir_path.join(".claude/credentials.json"),
             // Also check home directory where Claude CLI might store global credentials
@@ -566,7 +623,7 @@ impl ClaudeSetup {
             PathBuf::from(&home_dir).join(".claude/auth.json"),
             PathBuf::from(&home_dir).join(".claude/credentials.json"),
         ];
-        
+
         // If we still don't have a token, check credential files
         if final_oauth_token.is_empty() {
             info!("No token from streaming output, checking credential files...");
@@ -586,7 +643,9 @@ impl ClaudeSetup {
                                 info!("Found token: {}", final_oauth_token);
                                 break;
                             }
-                            if let Some(access_token) = json.get("access_token").and_then(|v| v.as_str()) {
+                            if let Some(access_token) =
+                                json.get("access_token").and_then(|v| v.as_str())
+                            {
                                 final_oauth_token = access_token.to_string();
                                 info!("Found access_token: {}", final_oauth_token);
                                 break;
@@ -596,16 +655,16 @@ impl ClaudeSetup {
                 }
             }
         }
-        
+
         if final_oauth_token.is_empty() {
             final_oauth_token = format!("authenticated_client_{}", self.client_id);
             info!("Could not extract OAUTH_TOKEN from streaming or files, using placeholder token: {}", final_oauth_token);
         } else {
             info!("Final OAuth token to be saved: {}", final_oauth_token);
         }
-        
+
         self.save_env_file(&final_oauth_token).await?;
-        
+
         Ok(final_oauth_token)
     }
 
@@ -613,13 +672,12 @@ impl ClaudeSetup {
     pub fn is_input_ready(&self) -> bool {
         self.input_ready.load(Ordering::SeqCst)
     }
-    
-    
+
     pub async fn get_oauth_token(&self) -> Option<String> {
         let guard = self.oauth_token.lock().await;
         guard.clone()
     }
-    
+
     pub async fn get_oauth_token_with_db(&self, db_pool: &sqlx::PgPool) -> Option<String> {
         // First check in-memory token
         let guard = self.oauth_token.lock().await;
@@ -627,12 +685,12 @@ impl ClaudeSetup {
             return Some(token);
         }
         drop(guard);
-        
+
         // If no in-memory token, check database
         if let Ok(row) = sqlx::query("SELECT claude_token FROM clients WHERE id = $1")
             .bind(self.client_id)
             .fetch_optional(db_pool)
-            .await 
+            .await
         {
             if let Some(row) = row {
                 let db_token: Option<String> = row.get("claude_token");
@@ -644,20 +702,26 @@ impl ClaudeSetup {
                 }
             }
         }
-        
+
         None
     }
-    
-    async fn save_env_file(&self, oauth_token: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+
+    async fn save_env_file(
+        &self,
+        oauth_token: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let env_file = self.client_dir.join(".env");
         let env_content = format!(
             "# Claude Code Environment Configuration\nCLAUDE_CODE_OAUTH_TOKEN={}\n",
             oauth_token
         );
-        
+
         std::fs::write(&env_file, env_content)?;
-        info!("Created .env file for client {} with CLAUDE_CODE_OAUTH_TOKEN", self.client_id);
-        
+        info!(
+            "Created .env file for client {} with CLAUDE_CODE_OAUTH_TOKEN",
+            self.client_id
+        );
+
         Ok(())
     }
 }

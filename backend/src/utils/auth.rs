@@ -1,10 +1,15 @@
+use crate::utils::{domain, AppError, AppState};
 use salvo::prelude::*;
 use salvo::session::SessionDepotExt;
-use crate::utils::{AppError, AppState, domain};
 use uuid::Uuid;
 
 #[handler]
-pub async fn auth_required(req: &mut Request, depot: &mut Depot, res: &mut Response, ctrl: &mut FlowCtrl) {
+pub async fn auth_required(
+    req: &mut Request,
+    depot: &mut Depot,
+    res: &mut Response,
+    ctrl: &mut FlowCtrl,
+) {
     if let Some(session) = depot.session_mut() {
         let user_id: Option<String> = session.get("user_id");
         let client_id_str: Option<String> = session.get("client_id");
@@ -22,7 +27,7 @@ pub async fn auth_required(req: &mut Request, depot: &mut Depot, res: &mut Respo
 
         // Check user role first
         let role: Option<String> = session.get("role");
-        
+
         // Validate domain if client_id is in session (skip for root users)
         if let Some(client_id_str) = client_id_str {
             if let Ok(client_id) = Uuid::parse_str(&client_id_str) {
@@ -31,7 +36,9 @@ pub async fn auth_required(req: &mut Request, depot: &mut Depot, res: &mut Respo
                     // Get the app state to access the database pool
                     if let Ok(state) = depot.obtain::<AppState>() {
                         // Validate that the client can be accessed from this domain (skip for root)
-                        if let Err(e) = domain::validate_client_domain(&state.db_pool, client_id, req).await {
+                        if let Err(e) =
+                            domain::validate_client_domain(&state.db_pool, client_id, req).await
+                        {
                             res.render(Json(serde_json::json!({
                                 "error": e.to_string(),
                                 "code": 403
@@ -42,7 +49,7 @@ pub async fn auth_required(req: &mut Request, depot: &mut Depot, res: &mut Respo
                         }
                     }
                 }
-                
+
                 // Store client_id in depot for handlers to use
                 depot.insert("current_client_id", client_id_str);
             }
@@ -52,7 +59,7 @@ pub async fn auth_required(req: &mut Request, depot: &mut Depot, res: &mut Respo
         if let Some(user_id) = user_id {
             depot.insert("current_user_id", user_id);
         }
-        
+
         // Store role in depot for handlers to use
         if let Some(role) = role {
             depot.insert("current_user_role", role);
@@ -105,7 +112,7 @@ pub async fn admin_required(depot: &mut Depot, res: &mut Response, ctrl: &mut Fl
                 if let Some(user_id) = user_id {
                     depot.insert("current_user_id", user_id);
                     depot.insert("current_user_role", r.clone());
-                    
+
                     // Also store client_id for admin users (needed for user management)
                     if let Some(client_id) = client_id {
                         depot.insert("current_user_client_id", client_id);
@@ -132,7 +139,6 @@ pub async fn admin_required(depot: &mut Depot, res: &mut Response, ctrl: &mut Fl
         ctrl.skip_rest();
     }
 }
-
 
 #[handler]
 pub async fn root_required(depot: &mut Depot, res: &mut Response, ctrl: &mut FlowCtrl) {
@@ -226,9 +232,10 @@ pub async fn client_scoped(depot: &mut Depot, res: &mut Response, ctrl: &mut Flo
 /// Helper function to get the current user's client_id from depot
 /// This should be used in handlers that need to filter by client_id
 pub fn get_current_client_id(depot: &Depot) -> Result<Uuid, AppError> {
-    let client_id_str = depot.get::<String>("current_client_id")
+    let client_id_str = depot
+        .get::<String>("current_client_id")
         .map_err(|_| AppError::Unauthorized("Client context not found".to_string()))?;
-    
+
     Uuid::parse_str(&client_id_str)
         .map_err(|_| AppError::InternalServerError("Invalid client ID format".to_string()))
 }

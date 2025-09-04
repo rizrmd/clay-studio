@@ -61,6 +61,28 @@ export interface ToolContext {
   conversationId: string;
 }
 
+export interface McpServer {
+  name: string;
+  status: "connected" | "disconnected" | "error";
+}
+
+export interface ProgressMessageContent {
+  type: "progress";
+  content: {
+    apiKeySource: string;
+    mcp_servers: McpServer[];
+    model: string;
+    output_style: string;
+    permissionMode: string;
+    session_id: string;
+    slash_commands: string[];
+    subtype: string;
+    tools: string[];
+    uuid: string;
+  };
+  conversation_id: string;
+}
+
 // Utility function to extract tool names from a message
 export function getToolNamesFromMessage(message: Message): string[] {
   if (!message.tool_usages || message.tool_usages.length === 0) {

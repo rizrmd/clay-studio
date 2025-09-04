@@ -1,13 +1,16 @@
 use super::base::McpHandlers;
 use crate::core::mcp::types::*;
 use crate::utils::datasource::create_connector;
+use chrono::Utc;
 use serde_json::{json, Value};
 use sqlx::Row;
-use chrono::Utc;
 use uuid;
 
 impl McpHandlers {
-    pub async fn add_datasource(&self, args: &serde_json::Map<String, Value>) -> Result<String, JsonRpcError> {
+    pub async fn add_datasource(
+        &self,
+        args: &serde_json::Map<String, Value>,
+    ) -> Result<String, JsonRpcError> {
         self.execute_db_operation("add_datasource", async {
             // Extract required parameters
             let name = args.get("name")
@@ -59,19 +62,23 @@ impl McpHandlers {
                 }
             });
 
-            Ok(format!(
-                "✅ **Datasource Added Successfully**\n\n\
-                 🔗 **ID**: `{}`\n\
-                 📝 **Name**: {}\n\
-                 🔧 **Type**: {}\n\n\
-                 The datasource has been added to your project and is now available for querying. \
-                 Your CLAUDE.md file has been updated with the new datasource information.",
-                datasource_id, name, source_type
-            ))
+            let response_data = json!({
+                "status": "success",
+                "datasource": {
+                    "id": datasource_id,
+                    "name": name,
+                    "type": source_type
+                },
+                "message": "Datasource added successfully"
+            });
+            Ok(serde_json::to_string(&response_data)?)
         }).await
     }
 
-    pub async fn list_datasources(&self, _args: &serde_json::Map<String, Value>) -> Result<String, JsonRpcError> {
+    pub async fn list_datasources(
+        &self,
+        _args: &serde_json::Map<String, Value>,
+    ) -> Result<String, JsonRpcError> {
         self.execute_db_operation("list_datasources", async {
             let data_sources = sqlx::query(
                 "SELECT id, name, source_type, created_at FROM data_sources 
@@ -82,31 +89,32 @@ impl McpHandlers {
             .fetch_all(&self.db_pool)
             .await?;
 
-            if data_sources.is_empty() {
-                return Ok("📋 **No Datasources Found**\n\nYou haven't added any datasources to this project yet. Use the `datasource_add` tool to add your first datasource.".to_string());
-            }
-
-            let mut result = String::from("📋 **Available Datasources**\n\n");
-            for ds in data_sources {
+            let datasources: Vec<Value> = data_sources.iter().map(|ds| {
                 let id: String = ds.get("id");
                 let name: String = ds.get("name");
                 let source_type: String = ds.get("source_type");
                 let created_at: chrono::DateTime<Utc> = ds.get("created_at");
                 
-                result.push_str(&format!(
-                    "• **{}** ({})\n  📋 ID: `{}`\n  📅 Created: {}\n\n",
-                    name,
-                    source_type,
-                    id,
-                    created_at.format("%Y-%m-%d %H:%M UTC")
-                ));
-            }
+                json!({
+                    "id": id,
+                    "name": name,
+                    "source_type": source_type,
+                    "created_at": created_at.to_rfc3339()
+                })
+            }).collect();
 
-            Ok(result)
+            let response_data = json!({
+                "datasources": datasources,
+                "count": datasources.len()
+            });
+            Ok(serde_json::to_string(&response_data)?)
         }).await
     }
 
-    pub async fn remove_datasource(&self, args: &serde_json::Map<String, Value>) -> Result<String, JsonRpcError> {
+    pub async fn remove_datasource(
+        &self,
+        args: &serde_json::Map<String, Value>,
+    ) -> Result<String, JsonRpcError> {
         self.execute_db_operation("remove_datasource", async {
             let datasource_id = args.get("datasource_id")
                 .and_then(|v| v.as_str())
@@ -154,17 +162,25 @@ impl McpHandlers {
                 }
             });
 
-            Ok(format!(
-                "✅ **Datasource Removed Successfully**\n\n\
-                 🗑️ **Removed**: {} ({})\n\n\
-                 The datasource has been removed from your project. \
-                 Your CLAUDE.md file has been updated to reflect this change.",
-                name, datasource_id
-            ))
+            let response_data = json!({
+                "status": "success",
+                "datasource": {
+                    "id": datasource_id,
+                    "name": name
+                },
+                "message": "Datasource removed successfully",
+                "metadata": {
+                    "claude_md_updated": true
+                }
+            });
+            Ok(serde_json::to_string(&response_data)?)
         }).await
     }
 
-    pub async fn datasource_update(&self, args: &serde_json::Map<String, Value>) -> Result<String, JsonRpcError> {
+    pub async fn datasource_update(
+        &self,
+        args: &serde_json::Map<String, Value>,
+    ) -> Result<String, JsonRpcError> {
         self.execute_db_operation("datasource_update", async {
             let datasource_id = args.get("datasource_id")
                 .and_then(|v| v.as_str())
@@ -205,6 +221,10 @@ impl McpHandlers {
             if name_update.is_none() && config_update.is_none() {
                 return Err("No valid update fields provided".into());
             }
+
+            // Capture the information before moving the values
+            let has_name_update = name_update.is_some();
+            let has_config_update = config_update.is_some();
 
             // Perform the update
             match (name_update, config_update) {
@@ -248,20 +268,33 @@ impl McpHandlers {
                 }
             });
 
-            Ok(format!(
-                "✅ **Datasource Updated Successfully**\n\n\
-                 🔄 **Updated**: {} ({})\n\n\
-                 The datasource has been updated. Your CLAUDE.md file has been refreshed.",
-                datasource_id, 
-                args.get("name").and_then(|v| v.as_str()).unwrap_or("name unchanged")
-            ))
+            let response_data = json!({
+                "status": "success",
+                "datasource": {
+                    "id": datasource_id,
+                    "name": args.get("name").and_then(|v| v.as_str()).unwrap_or("name unchanged")
+                },
+                "message": "Datasource updated successfully",
+                "metadata": {
+                    "claude_md_updated": true,
+                    "updated_fields": {
+                        "name": has_name_update,
+                        "config": has_config_update
+                    }
+                }
+            });
+            Ok(serde_json::to_string(&response_data)?)
         }).await
     }
 
-    pub async fn test_connection(&self, args: &serde_json::Map<String, Value>) -> Result<String, JsonRpcError> {
+    pub async fn test_connection(
+        &self,
+        args: &serde_json::Map<String, Value>,
+    ) -> Result<String, JsonRpcError> {
         self.execute_db_operation("test_connection", async {
             // Get datasource_id parameter
-            let datasource_id = args.get("datasource_id")
+            let datasource_id = args
+                .get("datasource_id")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| format!("Missing required parameter: datasource_id"))?;
 
@@ -274,28 +307,38 @@ impl McpHandlers {
             // Test connection
             match connector.test_connection().await {
                 Ok(_) => {
-                    Ok(format!(
-                        "✅ **Connection Test Successful**\n\n\
-                         🔗 **Datasource**: {} ({})\n\
-                         🟢 **Status**: Connected\n\n\
-                         The connection to your datasource is working correctly!",
-                        source.name, datasource_id
-                    ))
-                }
+                    let response_data = json!({
+                        "status": "success",
+                        "connected": true,
+                        "datasource": {
+                            "id": datasource_id,
+                            "name": source.name
+                        },
+                        "message": "Connection test successful"
+                    });
+                    Ok(serde_json::to_string(&response_data)?)
+                },
                 Err(e) => {
-                    Ok(format!(
-                        "❌ **Connection Test Failed**\n\n\
-                         🔗 **Datasource**: {} ({})\n\
-                         🔴 **Error**: {}\n\n\
-                         Please check your connection configuration and try again.",
-                        source.name, datasource_id, e
-                    ))
-                }
+                    let response_data = json!({
+                        "status": "error",
+                        "connected": false,
+                        "datasource": {
+                            "id": datasource_id,
+                            "name": source.name
+                        },
+                        "error": e.to_string()
+                    });
+                    Ok(serde_json::to_string(&response_data)?)
+                },
             }
-        }).await
+        })
+        .await
     }
 
-    pub async fn get_datasource_detail(&self, args: &serde_json::Map<String, Value>) -> Result<String, JsonRpcError> {
+    pub async fn get_datasource_detail(
+        &self,
+        args: &serde_json::Map<String, Value>,
+    ) -> Result<String, JsonRpcError> {
         self.execute_db_operation("get_datasource_detail", async {
             let datasource_id = args.get("datasource_id")
                 .and_then(|v| v.as_str())
@@ -338,44 +381,60 @@ impl McpHandlers {
                 Err(_) => "Invalid JSON configuration".to_string(),
             };
 
-            let updated_str = updated_at
-                .map(|dt| dt.format("%Y-%m-%d %H:%M UTC").to_string())
-                .unwrap_or_else(|| "Never".to_string());
+            // Parse the config_display back to JSON for structured response
+            let config_json = match serde_json::from_str::<Value>(&config_display) {
+                Ok(config) => config,
+                Err(_) => json!("Invalid JSON configuration")
+            };
 
-            let schema_str = schema_info.unwrap_or_else(|| "Not analyzed yet".to_string());
+            // Parse schema_info if it's JSON, otherwise keep as string
+            let schema_json = match schema_info.as_ref() {
+                Some(schema_str) => {
+                    match serde_json::from_str::<Value>(schema_str) {
+                        Ok(schema) => schema,
+                        Err(_) => json!(schema_str)
+                    }
+                },
+                None => json!(null)
+            };
 
-            Ok(format!(
-                "🔗 **Datasource Details**\n\n\
-                 📋 **ID**: `{}`\n\
-                 📝 **Name**: {}\n\
-                 🔧 **Type**: {}\n\
-                 📅 **Created**: {}\n\
-                 🔄 **Updated**: {}\n\n\
-                 **Configuration** (sensitive data hidden):\n\
-                 ```json\n{}\n```\n\n\
-                 **Schema Info**:\n\
-                 ```\n{}\n```",
-                id, name, source_type,
-                created_at.format("%Y-%m-%d %H:%M UTC"),
-                updated_str,
-                config_display,
-                schema_str
-            ))
+            let response_data = json!({
+                "datasource": {
+                    "id": id,
+                    "name": name,
+                    "source_type": source_type,
+                    "created_at": created_at.to_rfc3339(),
+                    "updated_at": updated_at.map(|dt| dt.to_rfc3339()),
+                    "configuration": config_json,
+                    "schema_info": schema_json
+                },
+                "metadata": {
+                    "sensitive_data_hidden": true,
+                    "schema_analyzed": schema_info.is_some()
+                }
+            });
+            Ok(serde_json::to_string(&response_data)?)
         }).await
     }
 
-    pub async fn query_datasource(&self, args: &serde_json::Map<String, Value>) -> Result<String, JsonRpcError> {
+    pub async fn query_datasource(
+        &self,
+        args: &serde_json::Map<String, Value>,
+    ) -> Result<String, JsonRpcError> {
         self.execute_db_operation("query_datasource", async {
-            let datasource_id = args.get("datasource_id")
+            let datasource_id = args
+                .get("datasource_id")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| format!("Missing required parameter: datasource_id"))?;
-            
-            let query = args.get("query")
+
+            let query = args
+                .get("query")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| format!("Missing required parameter: query"))?;
 
             // Get limit parameter (default to 100, max 1000)
-            let limit = args.get("limit")
+            let limit = args
+                .get("limit")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(100)
                 .min(1000) as usize;
@@ -387,43 +446,71 @@ impl McpHandlers {
                 .map_err(|e| format!("Failed to create connector: {}", e))?;
 
             // Execute query
-            let result = connector.execute_query(query, limit as i32)
+            let result = connector
+                .execute_query(query, limit as i32)
                 .await
                 .map_err(|e| format!("Query execution failed: {}", e))?;
 
-            // Format result for display
-            let result_json = serde_json::to_string_pretty(&result)?;
-            Ok(format!(
-                "📊 **Query Results**\n\n\
-                 🔗 **Datasource**: {} ({})\n\
-                 📝 **Query**: ```sql\n{}\n```\n\n\
-                 **Results**:\n\
-                 ```json\n{}\n```",
-                source.name, datasource_id, query, result_json
-            ))
-        }).await
+            // Return JSON result with metadata
+            let response_data = json!({
+                "datasource": {
+                    "id": datasource_id,
+                    "name": source.name
+                },
+                "query": query,
+                "execution_time_ms": result.get("execution_time_ms"),
+                "columns": result.get("columns"),
+                "rows": result.get("rows"),
+                "row_count": result.get("row_count")
+            });
+            Ok(serde_json::to_string(&response_data)?)
+        })
+        .await
     }
 
-    pub async fn inspect_datasource(&self, args: &serde_json::Map<String, Value>) -> Result<String, JsonRpcError> {
+    pub async fn inspect_datasource(
+        &self,
+        args: &serde_json::Map<String, Value>,
+    ) -> Result<String, JsonRpcError> {
         self.execute_db_operation("inspect_datasource", async {
-            let datasource_id = args.get("datasource_id")
+            let datasource_id = args
+                .get("datasource_id")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| format!("Missing required parameter: datasource_id"))?;
 
             self.inspect_datasource_internal(datasource_id).await
-        }).await
+        })
+        .await
     }
 
-    pub async fn inspect_datasource_internal(&self, datasource_id: &str) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn inspect_datasource_internal(
+        &self,
+        datasource_id: &str,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         // Get connector
-        let source = self.get_datasource_connector(datasource_id).await
-            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.message)) })?;
-        let connector = create_connector(&source.source_type, &source.connection_config).await
-            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(std::io::Error::new(std::io::ErrorKind::Other, format!("{}", e))) })?;
+        let source = self.get_datasource_connector(datasource_id).await.map_err(
+            |e| -> Box<dyn std::error::Error + Send + Sync> {
+                Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.message))
+            },
+        )?;
+        let connector = create_connector(&source.source_type, &source.connection_config)
+            .await
+            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("{}", e),
+                ))
+            })?;
 
         // Run inspection
-        let analysis = connector.analyze_database().await
-            .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(std::io::Error::new(std::io::ErrorKind::Other, format!("{}", e))) })?;
+        let analysis = connector.analyze_database().await.map_err(
+            |e| -> Box<dyn std::error::Error + Send + Sync> {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("{}", e),
+                ))
+            },
+        )?;
 
         // Store schema info in database for future reference
         let schema_info = serde_json::to_string(&analysis)?;
@@ -433,6 +520,18 @@ impl McpHandlers {
             .execute(&self.db_pool)
             .await?;
 
-        Ok(self.format_inspection_result(&source.name, &analysis))
+        // Return JSON response instead of formatted text
+        let response_data = json!({
+            "datasource": {
+                "id": datasource_id,
+                "name": source.name
+            },
+            "analysis": analysis,
+            "message": "Database inspection completed successfully",
+            "metadata": {
+                "schema_cached": true
+            }
+        });
+        Ok(serde_json::to_string(&response_data)?)
     }
 }

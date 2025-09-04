@@ -14,12 +14,12 @@ impl MigrationTrait for Migration {
                     .add_column_if_not_exists(
                         ColumnDef::new(Conversations::ForgottenAfterMessageId)
                             .string()
-                            .null()
+                            .null(),
                     )
                     .to_owned(),
             )
             .await?;
-            
+
         // Add foreign key constraint
         manager
             .create_foreign_key(
@@ -31,7 +31,7 @@ impl MigrationTrait for Migration {
                     .to_owned(),
             )
             .await?;
-            
+
         Ok(())
     }
 
@@ -45,7 +45,7 @@ impl MigrationTrait for Migration {
                     .to_owned(),
             )
             .await?;
-            
+
         // Drop the column
         manager
             .alter_table(
@@ -55,7 +55,7 @@ impl MigrationTrait for Migration {
                     .to_owned(),
             )
             .await?;
-            
+
         Ok(())
     }
 }

@@ -1,13 +1,14 @@
-pub mod config;
-pub mod error;
-pub mod state;
-pub mod db;
-pub mod datasource;
 pub mod auth;
-pub mod middleware;
 pub mod claude_md_template;
+pub mod config;
+pub mod datasource;
+pub mod db;
 pub mod domain;
+pub mod error;
+pub mod log_organizer;
 pub mod mcp_tools;
+pub mod middleware;
+pub mod state;
 
 pub use config::*;
 pub use error::*;

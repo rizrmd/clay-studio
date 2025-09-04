@@ -1,9 +1,9 @@
+use crate::core::claude::{ClaudeMessage, ClaudeSDK, QueryOptions, QueryRequest};
+use crate::utils::AppError;
+use crate::utils::AppState;
 use salvo::prelude::*;
 use salvo::sse::{self, SseEvent};
 use serde::{Deserialize, Serialize};
-use crate::utils::AppState;
-use crate::utils::AppError;
-use crate::core::claude::{ClaudeSDK, QueryRequest, QueryOptions, ClaudeMessage};
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -24,11 +24,14 @@ pub enum PromptStreamMessage {
     #[serde(rename = "tool_use")]
     ToolUse { tool: String },
     #[serde(rename = "tool_result")]
-    ToolResult { tool: String, result: serde_json::Value },
+    ToolResult {
+        tool: String,
+        result: serde_json::Value,
+    },
     #[serde(rename = "content")]
     Content { content: String },
     #[serde(rename = "complete")]
-    Complete { 
+    Complete {
         id: String,
         processing_time_ms: i64,
         tools_used: Vec<String>,
@@ -44,7 +47,9 @@ pub async fn handle_prompt_stream(
     res: &mut Response,
 ) -> Result<(), AppError> {
     let state = depot.obtain::<AppState>().unwrap();
-    let prompt_request: PromptRequest = req.parse_json().await
+    let prompt_request: PromptRequest = req
+        .parse_json()
+        .await
         .map_err(|_| AppError::BadRequest("Invalid request body".to_string()))?;
 
     // Validate that prompt is provided
@@ -63,42 +68,45 @@ pub async fn handle_prompt_stream(
     let (client_id, claude_token) = if let Some(row) = client_row {
         let id: Uuid = row.get("id");
         let token: Option<String> = row.get("claude_token");
-        (id, token.ok_or_else(|| AppError::ServiceUnavailable("No Claude token available".to_string()))?)
+        (
+            id,
+            token.ok_or_else(|| {
+                AppError::ServiceUnavailable("No Claude token available".to_string())
+            })?,
+        )
     } else {
         return Err(AppError::ServiceUnavailable(
-            "No active Claude client available. Please set up a client first.".to_string()
+            "No active Claude client available. Please set up a client first.".to_string(),
         ));
     };
 
-    tracing::info!(
-        "Using client {} for one-shot prompt request", 
-        client_id
-    );
+    tracing::info!("Using client {} for one-shot prompt request", client_id);
 
     // Create a channel for SSE events
     let (tx, mut rx) = tokio::sync::mpsc::channel::<Result<SseEvent, std::io::Error>>(100);
-    
+
     // Clone necessary data for the spawned task
     let _db_pool = state.db_pool.clone();
-    
+
     // Spawn task to process Claude messages
     tokio::spawn(async move {
         let start_time = std::time::Instant::now();
         let prompt_id = Uuid::new_v4().to_string();
         let mut tools_used = Vec::new();
-        
+
         // Send start event
         if let Ok(event) = SseEvent::default()
             .name("message")
-            .json(PromptStreamMessage::Start { 
+            .json(PromptStreamMessage::Start {
                 id: prompt_id.clone(),
-            }) {
+            })
+        {
             let _ = tx.send(Ok(event)).await;
         }
-        
+
         // Create Claude SDK instance
         let claude_sdk = ClaudeSDK::new(client_id, Some(claude_token));
-        
+
         // Prepare query options
         let options = QueryOptions {
             max_turns: prompt_request.max_turns,
@@ -123,48 +131,54 @@ pub async fn handle_prompt_stream(
             resume_session_id: None,
             output_format: Some("stream-json".to_string()),
         };
-        
+
         // Create query request
         let query_request = QueryRequest {
             prompt: prompt_request.prompt,
             options: Some(options),
         };
-        
+
         // Execute the Claude query
         let mut assistant_content = String::new();
-        
+
         match claude_sdk.query(query_request).await {
             Ok(mut receiver) => {
                 // Process streaming messages
                 let mut accumulated_text = String::new();
-                
+
                 while let Some(message) = receiver.recv().await {
                     match message {
                         ClaudeMessage::Progress { content } => {
                             // Send progress to frontend without any parsing
                             if let Ok(event) = SseEvent::default()
                                 .name("message")
-                                .json(PromptStreamMessage::Progress { content }) {
+                                .json(PromptStreamMessage::Progress { content })
+                            {
                                 let _ = tx.send(Ok(event)).await;
                             }
                         }
-                        ClaudeMessage::ToolUse { tool, args: _, tool_use_id: _ } => {
+                        ClaudeMessage::ToolUse {
+                            tool,
+                            args: _,
+                            tool_use_id: _,
+                        } => {
                             tools_used.push(tool.clone());
-                            
+
                             if let Ok(event) = SseEvent::default()
                                 .name("message")
-                                .json(PromptStreamMessage::ToolUse { tool }) {
+                                .json(PromptStreamMessage::ToolUse { tool })
+                            {
                                 let _ = tx.send(Ok(event)).await;
                             }
                         }
                         ClaudeMessage::ToolResult { tool, result } => {
                             // Send tool result to frontend via SSE immediately
-                            if let Ok(event) = SseEvent::default()
-                                .name("message")
-                                .json(PromptStreamMessage::ToolResult { 
+                            if let Ok(event) = SseEvent::default().name("message").json(
+                                PromptStreamMessage::ToolResult {
                                     tool: tool.clone(),
                                     result: result.clone(),
-                                }) {
+                                },
+                            ) {
                                 let _ = tx.send(Ok(event)).await;
                             }
                         }
@@ -173,18 +187,20 @@ pub async fn handle_prompt_stream(
                             tracing::debug!("Received Result message with content: {}", result);
                             assistant_content = result.clone();
                             accumulated_text.clear();
-                            
+
                             // Result messages are also passed as-is to frontend
                             if let Ok(event) = SseEvent::default()
                                 .name("message")
-                                .json(PromptStreamMessage::Content { content: result }) {
+                                .json(PromptStreamMessage::Content { content: result })
+                            {
                                 let _ = tx.send(Ok(event)).await;
                             }
                         }
                         ClaudeMessage::Error { error } => {
                             if let Ok(event) = SseEvent::default()
                                 .name("message")
-                                .json(PromptStreamMessage::Error { error }) {
+                                .json(PromptStreamMessage::Error { error })
+                            {
                                 let _ = tx.send(Ok(event)).await;
                             }
                             break;
@@ -192,36 +208,40 @@ pub async fn handle_prompt_stream(
                         _ => continue,
                     }
                 }
-                
+
                 // Use accumulated text if no explicit result was received
                 if assistant_content.is_empty() && !accumulated_text.is_empty() {
                     assistant_content = accumulated_text;
                 }
-                
+
                 // Calculate processing time
                 let processing_time_ms = start_time.elapsed().as_millis() as i64;
-                
+
                 tracing::info!("One-shot prompt completed. Content length: {}, Processing time: {}ms, Tools used: {:?}", 
                     assistant_content.len(), processing_time_ms, tools_used);
-                
+
                 // Send completion event
-                if let Ok(event) = SseEvent::default()
-                    .name("message")
-                    .json(PromptStreamMessage::Complete { 
-                        id: prompt_id,
-                        processing_time_ms,
-                        tools_used,
-                    }) {
+                if let Ok(event) =
+                    SseEvent::default()
+                        .name("message")
+                        .json(PromptStreamMessage::Complete {
+                            id: prompt_id,
+                            processing_time_ms,
+                            tools_used,
+                        })
+                {
                     let _ = tx.send(Ok(event)).await;
                 }
             }
             Err(e) => {
                 tracing::error!("Failed to query Claude: {}", e);
-                if let Ok(event) = SseEvent::default()
-                    .name("message")
-                    .json(PromptStreamMessage::Error { 
-                        error: format!("Failed to query Claude: {}", e) 
-                    }) {
+                if let Ok(event) =
+                    SseEvent::default()
+                        .name("message")
+                        .json(PromptStreamMessage::Error {
+                            error: format!("Failed to query Claude: {}", e),
+                        })
+                {
                     let _ = tx.send(Ok(event)).await;
                 }
             }
@@ -234,7 +254,7 @@ pub async fn handle_prompt_stream(
             yield event;
         }
     };
-    
+
     // Use the sse::stream function to properly convert the stream for SSE response
     sse::stream(res, sse_stream);
     Ok(())

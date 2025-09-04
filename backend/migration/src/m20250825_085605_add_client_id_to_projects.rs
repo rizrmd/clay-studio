@@ -1,5 +1,5 @@
-use sea_orm_migration::prelude::*;
 use sea_orm::{ConnectionTrait, Statement};
+use sea_orm_migration::prelude::*;
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;
@@ -13,14 +13,12 @@ impl MigrationTrait for Migration {
                 Table::alter()
                     .table(Projects::Table)
                     .add_column(
-                        ColumnDef::new(Projects::ClientId)
-                            .uuid()
-                            .null()  // Initially nullable
+                        ColumnDef::new(Projects::ClientId).uuid().null(), // Initially nullable
                     )
                     .to_owned(),
             )
             .await?;
-            
+
         // Get the first active client to use as default
         let conn = manager.get_connection();
         let result = conn
@@ -29,7 +27,7 @@ impl MigrationTrait for Migration {
                 "SELECT id::text FROM clients WHERE status = 'active' LIMIT 1".to_string(),
             ))
             .await?;
-            
+
         if let Some(row) = result {
             // Update existing projects to use this client_id
             let client_id: String = row.try_get("", "id")?;
@@ -39,21 +37,17 @@ impl MigrationTrait for Migration {
             ))
             .await?;
         }
-        
+
         // Now make the column NOT NULL
         manager
             .alter_table(
                 Table::alter()
                     .table(Projects::Table)
-                    .modify_column(
-                        ColumnDef::new(Projects::ClientId)
-                            .uuid()
-                            .not_null()
-                    )
+                    .modify_column(ColumnDef::new(Projects::ClientId).uuid().not_null())
                     .to_owned(),
             )
             .await?;
-            
+
         // Add foreign key constraint
         manager
             .alter_table(
@@ -67,12 +61,12 @@ impl MigrationTrait for Migration {
                             .to_tbl(Clients::Table)
                             .to_col(Clients::Id)
                             .on_delete(ForeignKeyAction::Cascade)
-                            .on_update(ForeignKeyAction::Cascade)
+                            .on_update(ForeignKeyAction::Cascade),
                     )
                     .to_owned(),
             )
             .await?;
-            
+
         // Create index on client_id for better query performance
         manager
             .create_index(
@@ -83,7 +77,7 @@ impl MigrationTrait for Migration {
                     .to_owned(),
             )
             .await?;
-            
+
         Ok(())
     }
 
@@ -97,7 +91,7 @@ impl MigrationTrait for Migration {
                     .to_owned(),
             )
             .await?;
-            
+
         // Drop the foreign key constraint
         manager
             .drop_foreign_key(
@@ -107,7 +101,7 @@ impl MigrationTrait for Migration {
                     .to_owned(),
             )
             .await?;
-            
+
         // Drop the column
         manager
             .alter_table(
@@ -117,7 +111,7 @@ impl MigrationTrait for Migration {
                     .to_owned(),
             )
             .await?;
-            
+
         Ok(())
     }
 }

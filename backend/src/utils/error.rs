@@ -5,34 +5,34 @@ use thiserror::Error;
 pub enum AppError {
     #[error("Database error: {0}")]
     Database(#[from] sea_orm::DbErr),
-    
+
     #[error("Not found: {0}")]
     NotFound(String),
-    
+
     #[error("Bad request: {0}")]
     BadRequest(String),
-    
+
     #[error("Internal server error: {0}")]
     InternalServerError(String),
-    
+
     #[error("Unauthorized: {0}")]
     Unauthorized(String),
-    
+
     #[error("Forbidden: {0}")]
     Forbidden(String),
-    
+
     #[error("Service unavailable: {0}")]
     ServiceUnavailable(String),
-    
+
     #[error("Parse error: {0}")]
     ParseError(#[from] salvo::http::ParseError),
-    
+
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
-    
+
     #[error("JSON error: {0}")]
     JsonError(#[from] serde_json::Error),
-    
+
     #[error("SQL error: {0}")]
     SqlxError(#[from] sqlx::Error),
 }

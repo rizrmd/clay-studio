@@ -4,9 +4,13 @@ use crate::utils::datasource::create_connector;
 use serde_json::{json, Value};
 
 impl McpHandlers {
-    pub async fn get_schema(&self, args: &serde_json::Map<String, Value>) -> Result<String, JsonRpcError> {
+    pub async fn get_schema(
+        &self,
+        args: &serde_json::Map<String, Value>,
+    ) -> Result<String, JsonRpcError> {
         self.execute_db_operation("get_schema", async {
-            let datasource_id = args.get("datasource_id")
+            let datasource_id = args
+                .get("datasource_id")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| format!("Missing required parameter: datasource_id"))?;
 
@@ -17,28 +21,35 @@ impl McpHandlers {
                 .map_err(|e| format!("Failed to create connector: {}", e))?;
 
             // Get schema
-            let schema = connector.fetch_schema()
+            let schema = connector
+                .fetch_schema()
                 .await
                 .map_err(|e| format!("Failed to get schema: {}", e))?;
 
-            let schema_json = serde_json::to_string_pretty(&schema)?;
-            Ok(format!(
-                "📋 **Schema Information**\n\n\
-                 🔗 **Datasource**: {} ({})\n\n\
-                 **Schema**:\n\
-                 ```json\n{}\n```",
-                source.name, datasource_id, schema_json
-            ))
-        }).await
+            let response_data = json!({
+                "datasource": {
+                    "id": datasource_id,
+                    "name": source.name
+                },
+                "schema": schema
+            });
+            Ok(serde_json::to_string(&response_data)?)
+        })
+        .await
     }
 
-    pub async fn search_schema(&self, args: &serde_json::Map<String, Value>) -> Result<String, JsonRpcError> {
+    pub async fn search_schema(
+        &self,
+        args: &serde_json::Map<String, Value>,
+    ) -> Result<String, JsonRpcError> {
         self.execute_db_operation("search_schema", async {
-            let datasource_id = args.get("datasource_id")
+            let datasource_id = args
+                .get("datasource_id")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| format!("Missing required parameter: datasource_id"))?;
-            
-            let search_term = args.get("search_term")
+
+            let search_term = args
+                .get("search_term")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| format!("Missing required parameter: search_term"))?;
 
@@ -49,29 +60,36 @@ impl McpHandlers {
                 .map_err(|e| format!("Failed to create connector: {}", e))?;
 
             // Search schema
-            let results = connector.search_tables(search_term)
+            let results = connector
+                .search_tables(search_term)
                 .await
                 .map_err(|e| format!("Schema search failed: {}", e))?;
 
-            let results_json = serde_json::to_string_pretty(&results)?;
-            Ok(format!(
-                "🔍 **Schema Search Results**\n\n\
-                 🔗 **Datasource**: {} ({})\n\
-                 🔍 **Search Term**: \"{}\"\n\n\
-                 **Results**:\n\
-                 ```json\n{}\n```",
-                source.name, datasource_id, search_term, results_json
-            ))
-        }).await
+            let response_data = json!({
+                "datasource": {
+                    "id": datasource_id,
+                    "name": source.name
+                },
+                "search_term": search_term,
+                "matches": results
+            });
+            Ok(serde_json::to_string(&response_data)?)
+        })
+        .await
     }
 
-    pub async fn get_related_schema(&self, args: &serde_json::Map<String, Value>) -> Result<String, JsonRpcError> {
+    pub async fn get_related_schema(
+        &self,
+        args: &serde_json::Map<String, Value>,
+    ) -> Result<String, JsonRpcError> {
         self.execute_db_operation("get_related_schema", async {
-            let datasource_id = args.get("datasource_id")
+            let datasource_id = args
+                .get("datasource_id")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| format!("Missing required parameter: datasource_id"))?;
-            
-            let table_name = args.get("table_name")
+
+            let table_name = args
+                .get("table_name")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| format!("Missing required parameter: table_name"))?;
 
@@ -82,25 +100,31 @@ impl McpHandlers {
                 .map_err(|e| format!("Failed to create connector: {}", e))?;
 
             // Get related schema
-            let related = connector.get_related_tables(table_name)
+            let related = connector
+                .get_related_tables(table_name)
                 .await
                 .map_err(|e| format!("Failed to get related schema: {}", e))?;
 
-            let related_json = serde_json::to_string_pretty(&related)?;
-            Ok(format!(
-                "🔗 **Related Schema Information**\n\n\
-                 🔗 **Datasource**: {} ({})\n\
-                 📋 **Table**: {}\n\n\
-                 **Related Schema**:\n\
-                 ```json\n{}\n```",
-                source.name, datasource_id, table_name, related_json
-            ))
-        }).await
+            let response_data = json!({
+                "datasource": {
+                    "id": datasource_id,
+                    "name": source.name
+                },
+                "table_name": table_name,
+                "related_schema": related
+            });
+            Ok(serde_json::to_string(&response_data)?)
+        })
+        .await
     }
 
-    pub async fn get_schema_stats(&self, args: &serde_json::Map<String, Value>) -> Result<String, JsonRpcError> {
+    pub async fn get_schema_stats(
+        &self,
+        args: &serde_json::Map<String, Value>,
+    ) -> Result<String, JsonRpcError> {
         self.execute_db_operation("get_schema_stats", async {
-            let datasource_id = args.get("datasource_id")
+            let datasource_id = args
+                .get("datasource_id")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| format!("Missing required parameter: datasource_id"))?;
 
@@ -111,28 +135,27 @@ impl McpHandlers {
                 .map_err(|e| format!("Failed to create connector: {}", e))?;
 
             // Get schema statistics
-            let stats = connector.get_database_stats()
+            let stats = connector
+                .get_database_stats()
                 .await
                 .map_err(|e| format!("Failed to get schema stats: {}", e))?;
 
-            let stats_json = serde_json::to_string_pretty(&stats)?;
-            Ok(format!(
-                "📊 **Schema Statistics**\n\n\
-                 🔗 **Datasource**: {} ({})\n\n\
-                 **Statistics**:\n\
-                 ```json\n{}\n```",
-                source.name, datasource_id, stats_json
-            ))
-        }).await
+            let response_data = json!({
+                "datasource": {
+                    "id": datasource_id,
+                    "name": source.name
+                },
+                "statistics": stats
+            });
+            Ok(serde_json::to_string(&response_data)?)
+        })
+        .await
     }
 
+    #[allow(dead_code)]
     pub fn format_inspection_result(&self, name: &str, analysis: &Value) -> String {
-        let table_count = analysis["statistics"]["table_count"]
-            .as_u64()
-            .unwrap_or(0);
-        let view_count = analysis["statistics"]["view_count"]
-            .as_u64()
-            .unwrap_or(0);
+        let table_count = analysis["statistics"]["table_count"].as_u64().unwrap_or(0);
+        let view_count = analysis["statistics"]["view_count"].as_u64().unwrap_or(0);
         let total_records = analysis["statistics"]["total_records"]
             .as_u64()
             .unwrap_or(0);
@@ -152,15 +175,15 @@ impl McpHandlers {
         )
     }
 
+    #[allow(dead_code)]
     pub fn format_top_tables(&self, analysis: &Value) -> String {
         if let Some(tables) = analysis["top_tables"].as_array() {
             if !tables.is_empty() {
                 let mut result = String::from("**Top Tables by Size**:\n");
                 for table in tables.iter().take(5) {
-                    if let (Some(name), Some(count)) = (
-                        table["name"].as_str(),
-                        table["estimated_count"].as_u64()
-                    ) {
+                    if let (Some(name), Some(count)) =
+                        (table["name"].as_str(), table["estimated_count"].as_u64())
+                    {
                         result.push_str(&format!("• {}: {} records\n", name, count));
                     }
                 }
@@ -173,7 +196,11 @@ impl McpHandlers {
         }
     }
 
-    pub fn parse_connection_config(&self, config: &Value, source_type: &str) -> Result<Value, JsonRpcError> {
+    pub fn parse_connection_config(
+        &self,
+        config: &Value,
+        source_type: &str,
+    ) -> Result<Value, JsonRpcError> {
         match config {
             Value::String(connection_url) => {
                 // Parse connection URL into config object
@@ -186,13 +213,18 @@ impl McpHandlers {
             }
             _ => Err(JsonRpcError {
                 code: INVALID_PARAMS,
-                message: "Config must be either a connection URL string or a configuration object".to_string(),
+                message: "Config must be either a connection URL string or a configuration object"
+                    .to_string(),
                 data: None,
-            })
+            }),
         }
     }
 
-    pub fn parse_connection_url(&self, url: &str, source_type: &str) -> Result<serde_json::Map<String, Value>, JsonRpcError> {
+    pub fn parse_connection_url(
+        &self,
+        url: &str,
+        source_type: &str,
+    ) -> Result<serde_json::Map<String, Value>, JsonRpcError> {
         let config = match source_type {
             "postgresql" | "postgres" => self.parse_postgres_url(url),
             "mysql" => self.parse_mysql_url(url),
@@ -208,13 +240,16 @@ impl McpHandlers {
     }
 
     pub fn parse_postgres_url(&self, url: &str) -> Option<serde_json::Map<String, Value>> {
-        let re = regex::Regex::new(r"postgresql://(?:([^:]+)(?::([^@]+))?@)?([^:/]+)(?::(\d+))?/([^?]+)(?:\?(.+))?").ok()?;
+        let re = regex::Regex::new(
+            r"postgresql://(?:([^:]+)(?::([^@]+))?@)?([^:/]+)(?::(\d+))?/([^?]+)(?:\?(.+))?",
+        )
+        .ok()?;
         let caps = re.captures(url)?;
 
         let mut config = serde_json::Map::new();
         config.insert("host".to_string(), json!(caps.get(3)?.as_str()));
         config.insert("database".to_string(), json!(caps.get(5)?.as_str()));
-        
+
         if let Some(user) = caps.get(1) {
             config.insert("user".to_string(), json!(user.as_str()));
         }
@@ -233,13 +268,16 @@ impl McpHandlers {
     }
 
     pub fn parse_mysql_url(&self, url: &str) -> Option<serde_json::Map<String, Value>> {
-        let re = regex::Regex::new(r"mysql://(?:([^:]+)(?::([^@]+))?@)?([^:/]+)(?::(\d+))?/([^?]+)(?:\?(.+))?").ok()?;
+        let re = regex::Regex::new(
+            r"mysql://(?:([^:]+)(?::([^@]+))?@)?([^:/]+)(?::(\d+))?/([^?]+)(?:\?(.+))?",
+        )
+        .ok()?;
         let caps = re.captures(url)?;
 
         let mut config = serde_json::Map::new();
         config.insert("host".to_string(), json!(caps.get(3)?.as_str()));
         config.insert("database".to_string(), json!(caps.get(5)?.as_str()));
-        
+
         if let Some(user) = caps.get(1) {
             config.insert("user".to_string(), json!(user.as_str()));
         }
@@ -258,13 +296,16 @@ impl McpHandlers {
     }
 
     pub fn parse_clickhouse_url(&self, url: &str) -> Option<serde_json::Map<String, Value>> {
-        let re = regex::Regex::new(r"clickhouse://(?:([^:]+)(?::([^@]+))?@)?([^:/]+)(?::(\d+))?/([^?]+)(?:\?(.+))?").ok()?;
+        let re = regex::Regex::new(
+            r"clickhouse://(?:([^:]+)(?::([^@]+))?@)?([^:/]+)(?::(\d+))?/([^?]+)(?:\?(.+))?",
+        )
+        .ok()?;
         let caps = re.captures(url)?;
 
         let mut config = serde_json::Map::new();
         config.insert("host".to_string(), json!(caps.get(3)?.as_str()));
         config.insert("database".to_string(), json!(caps.get(5)?.as_str()));
-        
+
         if let Some(user) = caps.get(1) {
             config.insert("user".to_string(), json!(user.as_str()));
         }
@@ -283,13 +324,16 @@ impl McpHandlers {
     }
 
     pub fn parse_generic_url(&self, url: &str) -> Option<serde_json::Map<String, Value>> {
-        let re = regex::Regex::new(r"(\w+)://(?:([^:]+)(?::([^@]+))?@)?([^:/]+)(?::(\d+))?/([^?]+)(?:\?(.+))?").ok()?;
+        let re = regex::Regex::new(
+            r"(\w+)://(?:([^:]+)(?::([^@]+))?@)?([^:/]+)(?::(\d+))?/([^?]+)(?:\?(.+))?",
+        )
+        .ok()?;
         let caps = re.captures(url)?;
 
         let mut config = serde_json::Map::new();
         config.insert("host".to_string(), json!(caps.get(4)?.as_str()));
         config.insert("database".to_string(), json!(caps.get(6)?.as_str()));
-        
+
         if let Some(user) = caps.get(2) {
             config.insert("user".to_string(), json!(user.as_str()));
         }
@@ -306,20 +350,29 @@ impl McpHandlers {
     }
 
     #[allow(dead_code)]
-    pub fn construct_connection_url(&self, config: &serde_json::Map<String, Value>, source_type: &str) -> Option<String> {
+    pub fn construct_connection_url(
+        &self,
+        config: &serde_json::Map<String, Value>,
+        source_type: &str,
+    ) -> Option<String> {
         let host = config.get("host")?.as_str()?;
         let database = config.get("database")?.as_str()?;
-        
+
         let user = config.get("user").and_then(|v| v.as_str()).unwrap_or("");
-        let password = config.get("password").and_then(|v| v.as_str()).unwrap_or("");
-        let port = config.get("port").and_then(|v| v.as_u64()).unwrap_or_else(|| {
-            match source_type {
-                "postgresql" | "postgres" => 5432,
-                "mysql" => 3306,
-                "clickhouse" => 8123,
-                _ => 5432,
-            }
-        });
+        let password = config
+            .get("password")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let port =
+            config
+                .get("port")
+                .and_then(|v| v.as_u64())
+                .unwrap_or_else(|| match source_type {
+                    "postgresql" | "postgres" => 5432,
+                    "mysql" => 3306,
+                    "clickhouse" => 8123,
+                    _ => 5432,
+                });
 
         let scheme = match source_type {
             "postgresql" | "postgres" => "postgresql",
@@ -331,9 +384,15 @@ impl McpHandlers {
         if user.is_empty() {
             Some(format!("{}://{}:{}/{}", scheme, host, port, database))
         } else if password.is_empty() {
-            Some(format!("{}://{}@{}:{}/{}", scheme, user, host, port, database))
+            Some(format!(
+                "{}://{}@{}:{}/{}",
+                scheme, user, host, port, database
+            ))
         } else {
-            Some(format!("{}://{}:{}@{}:{}/{}", scheme, user, password, host, port, database))
+            Some(format!(
+                "{}://{}:{}@{}:{}/{}",
+                scheme, user, password, host, port, database
+            ))
         }
     }
 }

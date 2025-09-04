@@ -1,18 +1,18 @@
-import { useState, useEffect } from "react";
-import { useSnapshot } from "valtio";
-import { useNavigate } from "react-router-dom";
-import { WelcomeScreen } from "../display";
-import type { Message } from "@/lib/types/chat";
-import { MultimodalInput } from "../input";
+import { Button } from "@/components/ui/button";
 import { useChat } from "@/lib/hooks/use-chat";
-import { uiStore } from "@/lib/store/chat/ui-store";
+import { wsService } from "@/lib/services/ws-service";
 import {
   inputActions,
   multimodalInputActions,
 } from "@/lib/store/chat/input-store";
 import { messageUIActions } from "@/lib/store/chat/message-ui-store";
-import { wsService } from "@/lib/services/ws-service";
-import { Button } from "@/components/ui/button";
+import { uiStore } from "@/lib/store/chat/ui-store";
+import type { Message } from "@/lib/types/chat";
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useSnapshot } from "valtio";
+import { WelcomeScreen } from "../display";
+import { MultimodalInput } from "../input";
 
 export function NewChat() {
   const uiSnapshot = useSnapshot(uiStore);
@@ -47,6 +47,7 @@ export function NewChat() {
     if (!waitingForSubscription) return;
 
     const handleSubscribed = (message: any) => {
+      console.log(message);
       if (message.conversation_id === conversationId && pendingMessage) {
         // Now we can safely send the message
         sendMessage(pendingMessage);
@@ -62,11 +63,7 @@ export function NewChat() {
       }
     };
 
-    wsService.on("subscribed", handleSubscribed);
-
-    return () => {
-      wsService.off("subscribed", handleSubscribed);
-    };
+    wsService.once("subscribed", handleSubscribed);
   }, [
     waitingForSubscription,
     conversationId,
@@ -81,7 +78,6 @@ export function NewChat() {
     message: string,
     uploadFiles?: File[]
   ) => {
-    console.log("asda");
     e.preventDefault();
     if (!message.trim() || !projectId) return;
 
@@ -120,24 +116,21 @@ export function NewChat() {
     // Create new conversation with title from first part of message
     const conversationTitle =
       message.slice(0, 50).trim() + (message.length > 50 ? "..." : "");
+
     createConversation(conversationTitle);
   };
 
   return (
     <>
       <div className="flex-1 overflow-hidden relative flex flex-col">
-        <div className="absolute top-0 left-0 text-xs">
-          {JSON.stringify({
-            messages: messages.length,
-          })}
-        </div>
-
         <div className="flex-1 overflow-y-auto">
           {messages.length === 0 ? (
             <WelcomeScreen />
           ) : (
             <div className="flex flex-1 justify-center items-center absolute inset-0">
-              <Button disabled className="rounded-full">Creating new chat...</Button>
+              <Button disabled className="rounded-full">
+                Creating new chat...
+              </Button>
             </div>
           )}
         </div>
@@ -156,7 +149,6 @@ export function NewChat() {
             onExternalFilesChange={setFiles}
             shouldFocus={true}
             isSubscribed={true}
-            className="lg:ml-[-10px] lg:mr-[40px]"
           />
         </div>
       </div>

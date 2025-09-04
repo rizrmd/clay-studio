@@ -1,11 +1,11 @@
-pub mod types;
+pub mod manager;
 pub mod sdk;
 pub mod setup;
-pub mod manager;
+pub mod types;
 
-pub use types::*;
+pub use manager::ClaudeManager;
 #[allow(unused_imports)]
 pub use sdk::ClaudeSDK;
 #[allow(unused_imports)]
 pub use setup::ClaudeSetup;
-pub use manager::ClaudeManager;
+pub use types::*;

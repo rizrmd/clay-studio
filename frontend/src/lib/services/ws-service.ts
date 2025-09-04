@@ -7,29 +7,37 @@ import type { ToolUsage } from "@/lib/types/chat";
 
 // Simple browser-compatible EventEmitter
 class EventEmitter {
-  private events: { [key: string]: Function[] } = {};
+  private events: { [key: string]: Function } = {};
 
-  on(event: string, listener: Function): void {
-    if (!this.events[event]) {
-      this.events[event] = [];
-    }
-    this.events[event].push(listener);
+  private once_events: { [key: string]: Function[] } = {};
+  once(event: string, listener: Function): void {
+    if (!this.once_events[event]) this.once_events[event] = [];
+    const once_wrapper = (...args: any[]) => {
+      this.once_events[event] = this.once_events[event].filter(
+        (e) => e !== once_wrapper
+      );
+      listener(...args);
+    };
+    this.once_events[event].push(once_wrapper);
   }
 
-  off(event: string, listener: Function): void {
-    const listeners = this.events[event];
-    if (listeners) {
-      const index = listeners.indexOf(listener);
-      if (index > -1) {
-        listeners.splice(index, 1);
-      }
-    }
+  on(event: string, listener: Function): void {
+    this.events[event] = listener;
+  }
+
+  off(event: string, _listener: Function): void {
+    delete this.events[event];
   }
 
   emit(event: string, ...args: any[]): void {
     const listeners = this.events[event];
     if (listeners) {
-      listeners.forEach((listener) => listener(...args));
+      listeners(...args);
+    }
+    if (this.once_events[event]) {
+      this.once_events[event].forEach((listener) => {
+        listener(...args);
+      });
     }
   }
 
@@ -106,14 +114,20 @@ class WebSocketService extends EventEmitter {
 
   isSubscribed(projectId: string, conversationId?: string): boolean {
     const targetConversationId = conversationId || "";
-    return this.currentProjectId === projectId && this.currentConversationId === targetConversationId;
+    return (
+      this.currentProjectId === projectId &&
+      this.currentConversationId === targetConversationId
+    );
   }
 
   subscribe(projectId: string, conversationId?: string): void {
     const newConversationId = conversationId || "";
-    
+
     // Don't send duplicate subscription
-    if (this.currentProjectId === projectId && this.currentConversationId === newConversationId) {
+    if (
+      this.currentProjectId === projectId &&
+      this.currentConversationId === newConversationId
+    ) {
       return;
     }
 
@@ -333,7 +347,9 @@ class WebSocketService extends EventEmitter {
       case "conversation_created": {
         // Backend auto-subscribes to new conversations, so update our local state
         // to prevent duplicate subscription attempts
-        const createdMessage = message as ServerMessage & { type: "conversation_created" };
+        const createdMessage = message as ServerMessage & {
+          type: "conversation_created";
+        };
         this.currentProjectId = createdMessage.conversation.project_id;
         this.currentConversationId = createdMessage.conversation.id;
         break;

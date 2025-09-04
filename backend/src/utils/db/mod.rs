@@ -1,13 +1,16 @@
-use sea_orm::{Database, DatabaseConnection, ConnectOptions};
+use sea_orm::{ConnectOptions, Database, DatabaseConnection};
 use sea_orm_migration::prelude::*;
-use tracing::{info, warn, error};
 use std::time::Duration;
+use tracing::{error, info, warn};
 
 pub async fn connect(database_url: &str) -> Result<DatabaseConnection, sea_orm::DbErr> {
-    info!("🔌 Initiating database connection to: {}", mask_database_url(database_url));
-    
+    info!(
+        "🔌 Initiating database connection to: {}",
+        mask_database_url(database_url)
+    );
+
     let mut opt = ConnectOptions::new(database_url.to_owned());
-    
+
     // Configure connection pool with logging
     opt.max_connections(10)
         .min_connections(2)
@@ -15,22 +18,25 @@ pub async fn connect(database_url: &str) -> Result<DatabaseConnection, sea_orm::
         .idle_timeout(Duration::from_secs(300))
         .max_lifetime(Duration::from_secs(3600))
         .sqlx_logging(true);
-    
+
     info!("📊 Database connection pool configuration:");
     info!("  - Max connections: 10");
     info!("  - Min connections: 2");
     info!("  - Connect timeout: 30s");
     info!("  - Idle timeout: 300s");
     info!("  - Max lifetime: 3600s");
-    
+
     // Attempt connection with retry logic
     let mut attempts = 0;
     const MAX_ATTEMPTS: u8 = 3;
-    
+
     let db = loop {
         attempts += 1;
-        info!("🔄 Database connection attempt {}/{}", attempts, MAX_ATTEMPTS);
-        
+        info!(
+            "🔄 Database connection attempt {}/{}",
+            attempts, MAX_ATTEMPTS
+        );
+
         match Database::connect(opt.clone()).await {
             Ok(db) => {
                 info!("✅ Database connection established successfully");
@@ -38,7 +44,7 @@ pub async fn connect(database_url: &str) -> Result<DatabaseConnection, sea_orm::
             }
             Err(e) => {
                 error!("❌ Database connection attempt {} failed: {}", attempts, e);
-                
+
                 // Log specific error diagnostics
                 let error_msg = e.to_string();
                 if error_msg.contains("Connection refused") {
@@ -57,21 +63,21 @@ pub async fn connect(database_url: &str) -> Result<DatabaseConnection, sea_orm::
                     error!("🚨 Database has too many active connections");
                     error!("💡 Close unused connections or increase max_connections");
                 }
-                
+
                 if attempts >= MAX_ATTEMPTS {
                     error!("💥 All database connection attempts exhausted");
                     return Err(e);
                 }
-                
+
                 warn!("⏳ Retrying database connection in 2 seconds...");
                 tokio::time::sleep(Duration::from_secs(2)).await;
             }
         }
     };
-    
+
     // Test the connection - SeaORM connections are tested during creation
     info!("✅ Database connection test successful");
-    
+
     // Run migrations with proper logging
     info!("🔄 Running database migrations...");
     match migration::Migrator::up(&db, None).await {
@@ -81,7 +87,7 @@ pub async fn connect(database_url: &str) -> Result<DatabaseConnection, sea_orm::
             return Err(e);
         }
     }
-    
+
     info!("🎉 Database initialization completed successfully");
     Ok(db)
 }

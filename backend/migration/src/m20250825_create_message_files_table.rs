@@ -18,16 +18,8 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(
-                        ColumnDef::new(MessageFiles::MessageId)
-                            .string()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(MessageFiles::FileId)
-                            .uuid()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(MessageFiles::MessageId).string().not_null())
+                    .col(ColumnDef::new(MessageFiles::FileId).uuid().not_null())
                     .col(
                         ColumnDef::new(MessageFiles::CreatedAt)
                             .timestamp_with_time_zone()

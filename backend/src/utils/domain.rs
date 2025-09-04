@@ -1,18 +1,20 @@
-use salvo::prelude::*;
-use uuid::Uuid;
-use sqlx::{PgPool, Row};
 use crate::utils::AppError;
+use salvo::prelude::*;
+use sqlx::{PgPool, Row};
+use uuid::Uuid;
 
 /// Extract domain from the request headers
 /// First tries X-Frontend-Host (for proxied requests), then falls back to Host header
 pub fn extract_domain_from_request(req: &Request) -> Option<String> {
     // First try to get the real frontend host from custom header
-    if let Some(frontend_host) = req.headers()
+    if let Some(frontend_host) = req
+        .headers()
         .get("x-frontend-host")
-        .and_then(|h| h.to_str().ok()) {
+        .and_then(|h| h.to_str().ok())
+    {
         return Some(frontend_host.to_string());
     }
-    
+
     // Fall back to regular Host header
     req.headers()
         .get("host")
@@ -35,12 +37,12 @@ pub async fn is_client_allowed_for_domain(
         .fetch_optional(pool)
         .await
         .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
-    
+
     let row = row.ok_or_else(|| AppError::NotFound("Client not found".to_string()))?;
-    
+
     // Get domains array from the row
     let domains: Option<Vec<String>> = row.get("domains");
-    
+
     // If domains is NULL or empty, client can serve all domains
     match domains {
         None => Ok(true),
@@ -61,15 +63,16 @@ pub async fn validate_client_domain(
     // Extract domain from request
     let request_domain = extract_domain_from_request(req)
         .ok_or_else(|| AppError::BadRequest("Missing Host header".to_string()))?;
-    
+
     // Check if client is allowed for this domain
     let is_allowed = is_client_allowed_for_domain(pool, client_id, &request_domain).await?;
-    
+
     if !is_allowed {
-        return Err(AppError::Forbidden(
-            format!("Client {} is not authorized for domain {}", client_id, request_domain)
-        ));
+        return Err(AppError::Forbidden(format!(
+            "Client {} is not authorized for domain {}",
+            client_id, request_domain
+        )));
     }
-    
+
     Ok(())
 }

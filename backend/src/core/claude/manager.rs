@@ -1,24 +1,24 @@
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex as StdMutex, LazyLock};
-use uuid::Uuid;
-use tokio::sync::mpsc;
 use sqlx::Row;
+use std::collections::HashMap;
+use std::sync::{Arc, LazyLock, Mutex as StdMutex};
+use tokio::sync::mpsc;
+use uuid::Uuid;
 
 use super::{
-    setup::ClaudeSetup,
     sdk::ClaudeSDK,
+    setup::ClaudeSetup,
     types::{ClaudeMessage, QueryOptions, QueryRequest},
 };
 
 #[derive(Debug)]
 pub struct ClaudeManager;
 
-static CLIENT_INSTANCES: LazyLock<StdMutex<HashMap<Uuid, Arc<ClaudeSetup>>>> = 
+static CLIENT_INSTANCES: LazyLock<StdMutex<HashMap<Uuid, Arc<ClaudeSetup>>>> =
     LazyLock::new(|| StdMutex::new(HashMap::new()));
 
 // SDK Instance Manager
 #[allow(dead_code)]
-static SDK_INSTANCES: LazyLock<StdMutex<HashMap<Uuid, Arc<ClaudeSDK>>>> = 
+static SDK_INSTANCES: LazyLock<StdMutex<HashMap<Uuid, Arc<ClaudeSDK>>>> =
     LazyLock::new(|| StdMutex::new(HashMap::new()));
 
 impl ClaudeManager {
@@ -32,12 +32,12 @@ impl ClaudeManager {
             setup
         }
     }
-    
+
     pub fn get_client_setup(client_id: Uuid) -> Option<Arc<ClaudeSetup>> {
         let clients = CLIENT_INSTANCES.lock().unwrap();
         clients.get(&client_id).cloned()
     }
-    
+
     #[allow(dead_code)]
     pub fn is_input_ready(client_id: Uuid) -> bool {
         let clients = CLIENT_INSTANCES.lock().unwrap();
@@ -47,34 +47,34 @@ impl ClaudeManager {
             false
         }
     }
-    
+
     pub async fn setup_client(
         client_id: Uuid,
-        progress_tx: Option<mpsc::Sender<String>>
+        progress_tx: Option<mpsc::Sender<String>>,
     ) -> Result<ClaudeSetup, Box<dyn std::error::Error + Send + Sync>> {
         let setup = Self::get_or_create_client(client_id);
         setup.setup_environment(progress_tx).await?;
         Ok((*setup).clone())
     }
-    
+
     pub async fn start_setup_token_stream(
         client_id: Uuid,
-        progress_tx: mpsc::Sender<String>
+        progress_tx: mpsc::Sender<String>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let setup = Self::get_or_create_client(client_id);
         setup.start_setup_token_stream(progress_tx).await
     }
-    
+
     pub async fn submit_token(
         client_id: Uuid,
-        setup_token: &str
+        setup_token: &str,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         let setup = Self::get_or_create_client(client_id);
         setup.submit_setup_token(setup_token).await
     }
-    
+
     // SDK Methods for programmatic Claude Code interaction
-    
+
     #[allow(dead_code)]
     pub fn get_or_create_sdk(client_id: Uuid, oauth_token: Option<String>) -> Arc<ClaudeSDK> {
         let mut sdks = SDK_INSTANCES.lock().unwrap();
@@ -86,7 +86,7 @@ impl ClaudeManager {
             sdk
         }
     }
-    
+
     #[allow(dead_code)]
     pub async fn query_claude(
         client_id: Uuid,
@@ -100,16 +100,15 @@ impl ClaudeManager {
         } else {
             None
         };
-        
+
         if oauth_token.is_none() {
             return Err("Client not authenticated. Please complete setup first.".into());
         }
-        
+
         let sdk = Self::get_or_create_sdk(client_id, oauth_token);
         let request = QueryRequest { prompt, options };
         sdk.query(request).await
     }
-    
 
     #[allow(dead_code)]
     pub async fn query_claude_with_project(
@@ -125,17 +124,17 @@ impl ClaudeManager {
         } else {
             None
         };
-        
+
         if oauth_token.is_none() {
             return Err("Client not authenticated. Please complete setup first.".into());
         }
-        
+
         // Create SDK with project directory
         let sdk = ClaudeSDK::new(client_id, oauth_token).with_project(project_id);
         let request = QueryRequest { prompt, options };
         sdk.query(request).await
     }
-    
+
     pub async fn query_claude_with_project_and_db(
         client_id: Uuid,
         project_id: &str,
@@ -143,8 +142,11 @@ impl ClaudeManager {
         options: Option<QueryOptions>,
         db_pool: &sqlx::PgPool,
     ) -> Result<mpsc::Receiver<ClaudeMessage>, Box<dyn std::error::Error + Send + Sync>> {
-        tracing::info!("ClaudeManager::query_claude_with_project_and_db - checking OAuth token for client: {}", client_id);
-        
+        tracing::info!(
+            "ClaudeManager::query_claude_with_project_and_db - checking OAuth token for client: {}",
+            client_id
+        );
+
         // First check if we have an OAuth token for this client
         let setup = Self::get_client_setup(client_id);
         let oauth_token = if let Some(setup) = setup {
@@ -156,7 +158,7 @@ impl ClaudeManager {
             if let Ok(row) = sqlx::query("SELECT claude_token FROM clients WHERE id = $1")
                 .bind(client_id)
                 .fetch_optional(db_pool)
-                .await 
+                .await
             {
                 if let Some(row) = row {
                     let token = row.get::<Option<String>, _>("claude_token");
@@ -171,12 +173,12 @@ impl ClaudeManager {
                 None
             }
         };
-        
+
         if oauth_token.is_none() {
             tracing::error!("No OAuth token available for client: {}", client_id);
             return Err("Client not authenticated. Please complete setup first.".into());
         }
-        
+
         tracing::info!("OAuth token found, creating SDK and querying Claude");
         // Create SDK with project directory
         let sdk = ClaudeSDK::new(client_id, oauth_token).with_project(project_id);
@@ -186,7 +188,7 @@ impl ClaudeManager {
         tracing::info!("SDK query completed with result: {}", result.is_ok());
         result
     }
-    
+
     pub async fn query_claude_with_project_and_token(
         client_id: Uuid,
         project_id: &str,
@@ -197,13 +199,12 @@ impl ClaudeManager {
         if oauth_token.is_none() {
             return Err("Client not authenticated. Please complete setup first.".into());
         }
-        
+
         // Create SDK with project directory
         let sdk = ClaudeSDK::new(client_id, oauth_token).with_project(project_id);
         let request = QueryRequest { prompt, options };
         sdk.query(request).await
     }
-    
 
     #[allow(dead_code)]
     pub async fn query_claude_simple(
@@ -212,7 +213,7 @@ impl ClaudeManager {
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         let mut receiver = Self::query_claude(client_id, prompt, None).await?;
         let mut result = String::new();
-        
+
         while let Some(message) = receiver.recv().await {
             match message {
                 ClaudeMessage::Result { result: r } => {
@@ -225,10 +226,9 @@ impl ClaudeManager {
                 _ => continue,
             }
         }
-        
+
         Ok(result)
     }
-    
 
     #[allow(dead_code)]
     pub async fn update_sdk_token(client_id: Uuid, oauth_token: String) {

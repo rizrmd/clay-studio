@@ -18,7 +18,45 @@ export type ServerMessage =
     }
   | { type: "pong" }
   | { type: "start"; id: string; conversation_id: string }
-  | { type: "progress"; content: any; conversation_id: string }
+  | { 
+      type: "progress"; 
+      content: {
+        // Initial progress message with system info
+        apiKeySource?: string;
+        mcp_servers?: Array<{name: string; status: string}>;
+        model?: string;
+        output_style?: string;
+        permissionMode?: string;
+        session_id?: string;
+        slash_commands?: string[];
+        subtype?: "init" | "success" | string;
+        tools?: string[];
+        content_type?: string;
+        uuid?: string;
+        // Message progress
+        message?: {
+          content?: Array<{text: string; type: string}>;
+          id?: string;
+          model?: string;
+          role?: string;
+          stop_reason?: string | null;
+          stop_sequence?: string | null;
+          type?: string;
+          usage?: any;
+        };
+        parent_tool_use_id?: string | null;
+        // Result progress
+        duration_api_ms?: number;
+        duration_ms?: number;
+        is_error?: boolean;
+        num_turns?: number;
+        permission_denials?: any[];
+        result?: string;
+        total_cost_usd?: number;
+        usage?: any;
+      }; 
+      conversation_id: string 
+    }
   | {
       type: "tool_use";
       tool: string;

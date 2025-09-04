@@ -1,13 +1,14 @@
 use super::base::McpHandlers;
 use crate::core::mcp::types::*;
-use serde_json::{json, Value};
 use chrono::Utc;
+use serde_json::{json, Value};
+use uuid;
 
 impl McpHandlers {
     pub async fn handle_initialize(&self, _params: Option<Value>) -> Result<Value, JsonRpcError> {
         eprintln!(
-            "[{}] [INFO] Handling initialize request for project: {}", 
-            Utc::now().format("%Y-%m-%d %H:%M:%S UTC"), 
+            "[{}] [INFO] Handling initialize request for project: {}",
+            Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
             self.project_id
         );
         let result = InitializeResult {
@@ -21,39 +22,44 @@ impl McpHandlers {
                 tools: Some(ToolsCapability {}),
             },
         };
-        
+
         Ok(serde_json::to_value(result).unwrap())
     }
 
-    pub async fn handle_resources_list(&self, _params: Option<Value>) -> Result<Value, JsonRpcError> {
+    pub async fn handle_resources_list(
+        &self,
+        _params: Option<Value>,
+    ) -> Result<Value, JsonRpcError> {
         eprintln!(
-            "[{}] [INFO] Handling resources/list request for project: {}", 
-            Utc::now().format("%Y-%m-%d %H:%M:%S UTC"), 
+            "[{}] [INFO] Handling resources/list request for project: {}",
+            Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
             self.project_id
         );
 
-        let resources = vec![
-            Resource {
-                uri: format!("claude://project/{}/claude.md", self.project_id),
-                name: "CLAUDE.md".to_string(),
-                mime_type: "text/markdown".to_string(),
-                description: Some("Project documentation and datasource information".to_string()),
-            }
-        ];
+        let resources = vec![Resource {
+            uri: format!("claude://project/{}/claude.md", self.project_id),
+            name: "CLAUDE.md".to_string(),
+            mime_type: "text/markdown".to_string(),
+            description: Some("Project documentation and datasource information".to_string()),
+        }];
 
         Ok(json!({
             "resources": resources
         }))
     }
 
-    pub async fn handle_resources_read(&self, params: Option<Value>) -> Result<Value, JsonRpcError> {
+    pub async fn handle_resources_read(
+        &self,
+        params: Option<Value>,
+    ) -> Result<Value, JsonRpcError> {
         let params = params.ok_or_else(|| JsonRpcError {
             code: INVALID_PARAMS,
             message: "Missing parameters".to_string(),
             data: None,
         })?;
 
-        let uri = params.get("uri")
+        let uri = params
+            .get("uri")
             .and_then(|v| v.as_str())
             .ok_or_else(|| JsonRpcError {
                 code: INVALID_PARAMS,
@@ -62,8 +68,8 @@ impl McpHandlers {
             })?;
 
         eprintln!(
-            "[{}] [INFO] Handling resources/read request for URI: {}", 
-            Utc::now().format("%Y-%m-%d %H:%M:%S UTC"), 
+            "[{}] [INFO] Handling resources/read request for URI: {}",
+            Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
             uri
         );
 
@@ -71,7 +77,7 @@ impl McpHandlers {
         if uri == format!("claude://project/{}/claude.md", self.project_id) {
             // Get CLAUDE.md content for this project
             let content = sqlx::query_scalar::<_, Option<String>>(
-                "SELECT claude_md FROM projects WHERE id = $1"
+                "SELECT claude_md FROM projects WHERE id = $1",
             )
             .bind(&self.project_id)
             .fetch_optional(&self.db_pool)
@@ -82,7 +88,10 @@ impl McpHandlers {
                 data: None,
             })?
             .flatten()
-            .unwrap_or_else(|| "# Clay Studio Project\n\nNo CLAUDE.md content available for this project.".to_string());
+            .unwrap_or_else(|| {
+                "# Clay Studio Project\n\nNo CLAUDE.md content available for this project."
+                    .to_string()
+            });
 
             Ok(json!({
                 "contents": [
@@ -104,15 +113,16 @@ impl McpHandlers {
 
     pub async fn handle_tools_list(&self, _params: Option<Value>) -> Result<Value, JsonRpcError> {
         eprintln!(
-            "[{}] [INFO] Handling tools/list request for project: {}", 
-            Utc::now().format("%Y-%m-%d %H:%M:%S UTC"), 
+            "[{}] [INFO] Handling tools/list request for project: {}",
+            Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
             self.project_id
         );
 
         let mut tools = vec![
             Tool {
                 name: "datasource_add".to_string(),
-                description: "Add a new datasource to the project with connection details".to_string(),
+                description: "Add a new datasource to the project with connection details"
+                    .to_string(),
                 input_schema: json!({
                     "type": "object",
                     "properties": {
@@ -258,7 +268,8 @@ impl McpHandlers {
             },
             Tool {
                 name: "datasource_inspect".to_string(),
-                description: "Analyze a datasource to understand its schema, tables, and structure".to_string(),
+                description: "Analyze a datasource to understand its schema, tables, and structure"
+                    .to_string(),
                 input_schema: json!({
                     "type": "object",
                     "properties": {
@@ -304,7 +315,8 @@ impl McpHandlers {
             },
             Tool {
                 name: "schema_related".to_string(),
-                description: "Get tables related to a specific table (foreign keys, references)".to_string(),
+                description: "Get tables related to a specific table (foreign keys, references)"
+                    .to_string(),
                 input_schema: json!({
                     "type": "object",
                     "properties": {
@@ -360,7 +372,9 @@ impl McpHandlers {
                 },
                 Tool {
                     name: "export_excel".to_string(),
-                    description: "Export data to an Excel file with multiple sheets and formatting options".to_string(),
+                    description:
+                        "Export data to an Excel file with multiple sheets and formatting options"
+                            .to_string(),
                     input_schema: json!({
                         "type": "object",
                         "properties": {
@@ -484,66 +498,45 @@ impl McpHandlers {
             data: None,
         })?;
 
-        let tool_name = params.get("name")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| JsonRpcError {
-                code: INVALID_PARAMS,
-                message: "Missing tool name".to_string(),
-                data: None,
-            })?;
+        let tool_name =
+            params
+                .get("name")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| JsonRpcError {
+                    code: INVALID_PARAMS,
+                    message: "Missing tool name".to_string(),
+                    data: None,
+                })?;
 
         let default_args = serde_json::Map::new();
-        let arguments = params.get("arguments")
+        let arguments = params
+            .get("arguments")
             .and_then(|v| v.as_object())
             .unwrap_or(&default_args);
 
         eprintln!(
-            "[{}] [INFO] Handling tools/call request for tool: {} in project: {}", 
-            Utc::now().format("%Y-%m-%d %H:%M:%S UTC"), 
+            "[{}] [INFO] Handling tools/call request for tool: {} in project: {}",
+            Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
             tool_name,
             self.project_id
         );
 
         let result = match tool_name {
             // Datasource Tools
-            "datasource_add" => {
-                self.add_datasource(arguments).await
-            }
-            "datasource_list" => {
-                self.list_datasources(arguments).await
-            }
-            "datasource_remove" => {
-                self.remove_datasource(arguments).await
-            }
-            "datasource_update" => {
-                self.datasource_update(arguments).await
-            }
-            "connection_test" => {
-                self.test_connection(arguments).await
-            }
-            "datasource_detail" => {
-                self.get_datasource_detail(arguments).await
-            }
-            "datasource_query" => {
-                self.query_datasource(arguments).await
-            }
-            "datasource_inspect" => {
-                self.inspect_datasource(arguments).await
-            }
-            
+            "datasource_add" => self.add_datasource(arguments).await,
+            "datasource_list" => self.list_datasources(arguments).await,
+            "datasource_remove" => self.remove_datasource(arguments).await,
+            "datasource_update" => self.datasource_update(arguments).await,
+            "connection_test" => self.test_connection(arguments).await,
+            "datasource_detail" => self.get_datasource_detail(arguments).await,
+            "datasource_query" => self.query_datasource(arguments).await,
+            "datasource_inspect" => self.inspect_datasource(arguments).await,
+
             // Schema Tools
-            "schema_get" => {
-                self.get_schema(arguments).await
-            }
-            "schema_search" => {
-                self.search_schema(arguments).await
-            }
-            "schema_related" => {
-                self.get_related_schema(arguments).await
-            }
-            "schema_stats" => {
-                self.get_schema_stats(arguments).await
-            }
+            "schema_get" => self.get_schema(arguments).await,
+            "schema_search" => self.search_schema(arguments).await,
+            "schema_related" => self.get_related_schema(arguments).await,
+            "schema_stats" => self.get_schema_stats(arguments).await,
 
             // Interaction Tools (only available on interaction server)
             "ask_user" => {
@@ -552,12 +545,13 @@ impl McpHandlers {
                 } else {
                     Err(JsonRpcError {
                         code: -32601,
-                        message: "ask_user tool is only available on interaction server".to_string(),
+                        message: "ask_user tool is only available on interaction server"
+                            .to_string(),
                         data: None,
                     })
                 }
             }
-            
+
             // Export Tools
             "export_excel" => {
                 if self.server_type == "interaction" {
@@ -565,7 +559,8 @@ impl McpHandlers {
                 } else {
                     Err(JsonRpcError {
                         code: -32601,
-                        message: "export_excel tool is only available on interaction server".to_string(),
+                        message: "export_excel tool is only available on interaction server"
+                            .to_string(),
                         data: None,
                     })
                 }
@@ -578,56 +573,195 @@ impl McpHandlers {
                 } else {
                     Err(JsonRpcError {
                         code: -32601,
-                        message: "show_table tool is only available on interaction server".to_string(),
+                        message: "show_table tool is only available on interaction server"
+                            .to_string(),
                         data: None,
                     })
                 }
             }
-             // Show Chart Tool
-             "show_chart" => {
-                 if self.server_type == "interaction" {
-                     self.handle_show_chart(arguments).await
-                 } else {
-                     Err(JsonRpcError {
-                         code: -32601,
-                         message: "show_chart tool is only available on interaction server".to_string(),
-                         data: None,
-                     })
-                 }
-             }
-
-            _ => {
-                Err(JsonRpcError {
-                    code: METHOD_NOT_FOUND,
-                    message: format!("Unknown tool: {}", tool_name),
-                    data: None,
-                })
+            // Show Chart Tool
+            "show_chart" => {
+                if self.server_type == "interaction" {
+                    self.handle_show_chart(arguments).await
+                } else {
+                    Err(JsonRpcError {
+                        code: -32601,
+                        message: "show_chart tool is only available on interaction server"
+                            .to_string(),
+                        data: None,
+                    })
+                }
             }
+
+            _ => Err(JsonRpcError {
+                code: METHOD_NOT_FOUND,
+                message: format!("Unknown tool: {}", tool_name),
+                data: None,
+            }),
         }?;
 
-        Ok(json!({
-            "content": [
-                {
-                    "type": "text",
-                    "text": result
-                }
-            ]
-        }))
+        // Check if result is JSON, if so use resource type with application/json
+        if let Ok(_) = serde_json::from_str::<Value>(&result) {
+            Ok(json!({
+                "content": [
+                    {
+                        "type": "resource",
+                        "resource": {
+                            "uri": format!("mcp://tool-result/{}", tool_name),
+                            "title": format!("{} Result", tool_name),
+                            "mimeType": "application/json",
+                            "text": result,
+                            "annotations": {
+                                "audience": ["user", "assistant"],
+                                "priority": 0.8
+                            }
+                        }
+                    }
+                ]
+            }))
+        } else {
+            // Fallback to text for non-JSON responses
+            Ok(json!({
+                "content": [
+                    {
+                        "type": "text",
+                        "text": result
+                    }
+                ]
+            }))
+        }
     }
 
-    pub async fn handle_show_table(&self, _arguments: &serde_json::Map<String, Value>) -> Result<String, JsonRpcError> {
-        Err(JsonRpcError {
-            code: METHOD_NOT_FOUND,
-            message: "show_table not implemented yet".to_string(),
+    pub async fn handle_show_table(
+        &self,
+        arguments: &serde_json::Map<String, Value>,
+    ) -> Result<String, JsonRpcError> {
+        let data = arguments
+            .get("data")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| JsonRpcError {
+                code: INVALID_PARAMS,
+                message: "Missing data parameter".to_string(),
+                data: None,
+            })?;
+
+        let headers = arguments
+            .get("headers")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>());
+
+        let title = arguments
+            .get("title")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Data Table");
+
+        // Validate data structure
+        if data.is_empty() {
+            return Err(JsonRpcError {
+                code: INVALID_PARAMS,
+                message: "Data array cannot be empty".to_string(),
+                data: None,
+            });
+        }
+
+        // Create interaction response
+        let interaction_id = uuid::Uuid::new_v4().to_string();
+        let interaction_spec = json!({
+            "interaction_id": interaction_id,
+            "interaction_type": "show_table",
+            "title": title,
+            "data": data,
+            "headers": headers,
+            "status": "completed",
+            "requires_response": false,
+            "created_at": chrono::Utc::now().to_rfc3339(),
+            "features": {
+                "sortable": true,
+                "filterable": true,
+                "exportable": true,
+                "searchable": true
+            }
+        });
+
+
+        Ok(serde_json::to_string(&interaction_spec).map_err(|e| JsonRpcError {
+            code: INTERNAL_ERROR,
+            message: format!("Failed to serialize response: {}", e),
             data: None,
-        })
+        })?)
     }
 
-    pub async fn handle_show_chart(&self, _arguments: &serde_json::Map<String, Value>) -> Result<String, JsonRpcError> {
-        Err(JsonRpcError {
-            code: METHOD_NOT_FOUND,
-            message: "show_chart not implemented yet".to_string(),
+    pub async fn handle_show_chart(
+        &self,
+        arguments: &serde_json::Map<String, Value>,
+    ) -> Result<String, JsonRpcError> {
+        let data = arguments
+            .get("data")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| JsonRpcError {
+                code: INVALID_PARAMS,
+                message: "Missing data parameter".to_string(),
+                data: None,
+            })?;
+
+        let chart_type = arguments
+            .get("chart_type")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| JsonRpcError {
+                code: INVALID_PARAMS,
+                message: "Missing chart_type parameter".to_string(),
+                data: None,
+            })?;
+
+        let title = arguments
+            .get("title")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Chart");
+
+        // Validate chart type
+        let valid_chart_types = ["line", "bar", "pie", "scatter", "area", "radar", "gauge", "map", "sankey", "treemap"];
+        if !valid_chart_types.contains(&chart_type) {
+            return Err(JsonRpcError {
+                code: INVALID_PARAMS,
+                message: format!("Invalid chart_type. Supported types: {}", valid_chart_types.join(", ")),
+                data: None,
+            });
+        }
+
+        // Validate data structure
+        if data.is_empty() {
+            return Err(JsonRpcError {
+                code: INVALID_PARAMS,
+                message: "Data array cannot be empty".to_string(),
+                data: None,
+            });
+        }
+
+        // Create interaction response
+        let interaction_id = uuid::Uuid::new_v4().to_string();
+        let interaction_spec = json!({
+            "interaction_id": interaction_id,
+            "interaction_type": "show_chart",
+            "title": title,
+            "chart_type": chart_type,
+            "data": data,
+            "status": "completed",
+            "requires_response": false,
+            "created_at": chrono::Utc::now().to_rfc3339(),
+            "options": arguments.get("options").unwrap_or(&json!({})),
+            "features": {
+                "interactive": true,
+                "zoomable": true,
+                "exportable": true,
+                "responsive": true
+            }
+        });
+
+
+        Ok(serde_json::to_string(&interaction_spec).map_err(|e| JsonRpcError {
+            code: INTERNAL_ERROR,
+            message: format!("Failed to serialize response: {}", e),
             data: None,
-        })
+        })?)
     }
 }

@@ -257,11 +257,38 @@ export function ToolUsagePopover({
     }
   };
 
+  const parseMcpToolResult = (text: string): any => {
+    try {
+      // Check if text contains MCP tool result format
+      if (text.includes("[Resource from interaction at mcp://tool-result/")) {
+        const match = text.match(/\[Resource from interaction at mcp:\/\/tool-result\/[^\]]+\]\s*(.+)/s);
+        if (match && match[1]) {
+          const jsonText = match[1].trim();
+          return JSON.parse(jsonText);
+        }
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
   const renderOutput = (output: any) => {
     if (!output)
       return <span className="text-muted-foreground">No output captured</span>;
 
     try {
+      // Check for array format with MCP tool result
+      if (Array.isArray(output) && output.length > 0) {
+        const firstItem = output[0];
+        if (firstItem && typeof firstItem === "object" && firstItem.text && firstItem.type === "text") {
+          const parsedMcp = parseMcpToolResult(firstItem.text);
+          if (parsedMcp) {
+            return renderJsonAsTable(parsedMcp);
+          }
+        }
+      }
+
       // Handle new status-wrapped format
       if (typeof output === "object" && output.status) {
         const status = output.status;

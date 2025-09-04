@@ -1,15 +1,19 @@
 use super::base::McpHandlers;
 use crate::core::mcp::types::*;
+use chrono::Utc;
+use rust_xlsxwriter::{Color, Format, Workbook};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use tokio::fs;
-use rust_xlsxwriter::{Workbook, Format, Color};
-use chrono::Utc;
 use uuid;
 
 impl McpHandlers {
-    pub async fn handle_export_excel(&self, arguments: &serde_json::Map<String, Value>) -> Result<String, JsonRpcError> {
-        let filename = arguments.get("filename")
+    pub async fn handle_export_excel(
+        &self,
+        arguments: &serde_json::Map<String, Value>,
+    ) -> Result<String, JsonRpcError> {
+        let filename = arguments
+            .get("filename")
             .and_then(|v| v.as_str())
             .ok_or_else(|| JsonRpcError {
                 code: INVALID_PARAMS,
@@ -17,7 +21,8 @@ impl McpHandlers {
                 data: None,
             })?;
 
-        let sheets = arguments.get("sheets")
+        let sheets = arguments
+            .get("sheets")
             .and_then(|v| v.as_array())
             .ok_or_else(|| JsonRpcError {
                 code: INVALID_PARAMS,
@@ -75,7 +80,8 @@ impl McpHandlers {
             .join(&self.project_id)
             .join("excel_exports");
 
-        fs::create_dir_all(&export_dir).await
+        fs::create_dir_all(&export_dir)
+            .await
             .map_err(|e| JsonRpcError {
                 code: INTERNAL_ERROR,
                 message: format!("Failed to create export directory: {}", e),
@@ -84,8 +90,10 @@ impl McpHandlers {
 
         // Generate Excel file
         let file_path = export_dir.join(format!("{}_{}.xlsx", export_id, filename));
-        let relative_path = format!(".clients/{}/{}/excel_exports/{}_{}.xlsx",
-            self.client_id, self.project_id, export_id, filename);
+        let relative_path = format!(
+            ".clients/{}/{}/excel_exports/{}_{}.xlsx",
+            self.client_id, self.project_id, export_id, filename
+        );
 
         // Create workbook
         let mut workbook = Workbook::new();
@@ -123,7 +131,13 @@ impl McpHandlers {
             if let Some(headers_array) = headers {
                 for (col_idx, header) in headers_array.iter().enumerate() {
                     if let Some(header_str) = header.as_str() {
-                        worksheet.write_string_with_format(row_idx, col_idx as u16, header_str, &header_format)
+                        worksheet
+                            .write_string_with_format(
+                                row_idx,
+                                col_idx as u16,
+                                header_str,
+                                &header_format,
+                            )
                             .map_err(|e| JsonRpcError {
                                 code: INTERNAL_ERROR,
                                 message: format!("Failed to write header: {}", e),
@@ -140,23 +154,26 @@ impl McpHandlers {
                     for (col_idx, cell_value) in row_array.iter().enumerate() {
                         match cell_value {
                             Value::String(s) => {
-                                worksheet.write_string(row_idx, col_idx as u16, s)
-                                    .map_err(|e| JsonRpcError {
+                                worksheet.write_string(row_idx, col_idx as u16, s).map_err(
+                                    |e| JsonRpcError {
                                         code: INTERNAL_ERROR,
                                         message: format!("Failed to write string cell: {}", e),
                                         data: None,
-                                    })?;
+                                    },
+                                )?;
                             }
                             Value::Number(n) => {
                                 if let Some(int_val) = n.as_i64() {
-                                    worksheet.write_number(row_idx, col_idx as u16, int_val as f64)
+                                    worksheet
+                                        .write_number(row_idx, col_idx as u16, int_val as f64)
                                         .map_err(|e| JsonRpcError {
                                             code: INTERNAL_ERROR,
                                             message: format!("Failed to write number cell: {}", e),
                                             data: None,
                                         })?;
                                 } else if let Some(float_val) = n.as_f64() {
-                                    worksheet.write_number(row_idx, col_idx as u16, float_val)
+                                    worksheet
+                                        .write_number(row_idx, col_idx as u16, float_val)
                                         .map_err(|e| JsonRpcError {
                                             code: INTERNAL_ERROR,
                                             message: format!("Failed to write number cell: {}", e),
@@ -165,7 +182,8 @@ impl McpHandlers {
                                 }
                             }
                             Value::Bool(b) => {
-                                worksheet.write_boolean(row_idx, col_idx as u16, *b)
+                                worksheet
+                                    .write_boolean(row_idx, col_idx as u16, *b)
                                     .map_err(|e| JsonRpcError {
                                         code: INTERNAL_ERROR,
                                         message: format!("Failed to write boolean cell: {}", e),
@@ -173,7 +191,8 @@ impl McpHandlers {
                                     })?;
                             }
                             Value::Null => {
-                                worksheet.write_string(row_idx, col_idx as u16, "")
+                                worksheet
+                                    .write_string(row_idx, col_idx as u16, "")
                                     .map_err(|e| JsonRpcError {
                                         code: INTERNAL_ERROR,
                                         message: format!("Failed to write empty cell: {}", e),
@@ -182,7 +201,8 @@ impl McpHandlers {
                             }
                             _ => {
                                 // Convert other types to string
-                                worksheet.write_string(row_idx, col_idx as u16, &cell_value.to_string())
+                                worksheet
+                                    .write_string(row_idx, col_idx as u16, &cell_value.to_string())
                                     .map_err(|e| JsonRpcError {
                                         code: INTERNAL_ERROR,
                                         message: format!("Failed to write cell: {}", e),
@@ -198,21 +218,30 @@ impl McpHandlers {
             // Apply formatting options
             if let Some(opts) = options {
                 // Auto filter
-                if opts.get("auto_filter").and_then(|v| v.as_bool()).unwrap_or(true) {
+                if opts
+                    .get("auto_filter")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true)
+                {
                     let last_col = if let Some(headers_array) = headers {
                         headers_array.len().saturating_sub(1) as u16
                     } else if !data.is_empty() {
-                        data[0].as_array().map(|r| r.len().saturating_sub(1) as u16).unwrap_or(0)
+                        data[0]
+                            .as_array()
+                            .map(|r| r.len().saturating_sub(1) as u16)
+                            .unwrap_or(0)
                     } else {
                         0
                     };
 
                     if last_col > 0 {
-                        worksheet.autofilter(0, 0, 0, last_col).map_err(|e| JsonRpcError {
-                            code: INTERNAL_ERROR,
-                            message: format!("Failed to set autofilter: {}", e),
-                            data: None,
-                        })?;
+                        worksheet
+                            .autofilter(0, 0, 0, last_col)
+                            .map_err(|e| JsonRpcError {
+                                code: INTERNAL_ERROR,
+                                message: format!("Failed to set autofilter: {}", e),
+                                data: None,
+                            })?;
                     }
                 }
 
@@ -220,11 +249,13 @@ impl McpHandlers {
                 if let Some(freeze) = opts.get("freeze_panes").and_then(|v| v.as_object()) {
                     let row = freeze.get("row").and_then(|v| v.as_u64()).unwrap_or(1) as u32;
                     let col = freeze.get("col").and_then(|v| v.as_u64()).unwrap_or(0) as u16;
-                    worksheet.set_freeze_panes(row, col).map_err(|e| JsonRpcError {
-                        code: INTERNAL_ERROR,
-                        message: format!("Failed to freeze panes: {}", e),
-                        data: None,
-                    })?;
+                    worksheet
+                        .set_freeze_panes(row, col)
+                        .map_err(|e| JsonRpcError {
+                            code: INTERNAL_ERROR,
+                            message: format!("Failed to freeze panes: {}", e),
+                            data: None,
+                        })?;
                 }
 
                 // Column widths
@@ -232,11 +263,13 @@ impl McpHandlers {
                     for (col_str, width_val) in widths {
                         if let Ok(col_idx) = col_str.parse::<u16>() {
                             if let Some(width) = width_val.as_f64() {
-                                worksheet.set_column_width(col_idx, width as f64).map_err(|e| JsonRpcError {
-                                    code: INTERNAL_ERROR,
-                                    message: format!("Failed to set column width: {}", e),
-                                    data: None,
-                                })?;
+                                worksheet
+                                    .set_column_width(col_idx, width as f64)
+                                    .map_err(|e| JsonRpcError {
+                                        code: INTERNAL_ERROR,
+                                        message: format!("Failed to set column width: {}", e),
+                                        data: None,
+                                    })?;
                             }
                         }
                     }
@@ -263,23 +296,14 @@ impl McpHandlers {
             }
         });
 
-        // Calculate total rows across all sheets for summary
-        let total_rows: usize = sheets.iter()
-            .filter_map(|sheet| sheet.as_object())
-            .filter_map(|sheet| sheet.get("data"))
-            .filter_map(|data| data.as_array())
-            .map(|rows| rows.len())
-            .sum();
-
-        let sheet_count = sheets.len();
-
         // Get file size
-        let file_size = fs::metadata(&file_path).await
-            .map(|m| m.len())
-            .unwrap_or(0);
+        let file_size = fs::metadata(&file_path).await.map(|m| m.len()).unwrap_or(0);
 
         // Build the interaction spec with download URL
-        let download_url = format!("/api/files/excel/{}/{}/{}", self.client_id, self.project_id, export_id);
+        let download_url = format!(
+            "/api/files/excel/{}/{}/{}",
+            self.client_id, self.project_id, export_id
+        );
         let interaction_spec = json!({
             "interaction_id": interaction_id,
             "interaction_type": "excel_export",
@@ -299,27 +323,16 @@ impl McpHandlers {
             "created_at": chrono::Utc::now().to_rfc3339(),
         });
 
-        // Format response for Excel export
-        let response_text = format!(
-            "📊 **Excel Export Completed**: {}\n\n\
-            📄 **Sheets**: {}\n\
-            📊 **Total Rows**: {}\n\
-            📁 **File Size**: {} bytes\n\
-            🔗 **Download**: {}\n\n\
-            ```json\n{}\n```\n\n\
-            ✨ The Excel file has been generated and is ready for download!",
-            filename,
-            sheet_count,
-            total_rows,
-            file_size,
-            download_url,
-            serde_json::to_string_pretty(&interaction_spec).unwrap_or_default()
-        );
-
-        Ok(response_text)
+        Ok(serde_json::to_string(&interaction_spec).map_err(|e| JsonRpcError {
+            code: INTERNAL_ERROR,
+            message: format!("Failed to serialize Excel export response: {}", e),
+            data: None,
+        })?)
     }
 
-    pub async fn cleanup_old_excel_files(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn cleanup_old_excel_files(
+        &self,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let export_dir = PathBuf::from(".clients")
             .join(&self.client_id)
             .join(&self.project_id)

@@ -1,9 +1,9 @@
-use salvo::prelude::*;
-use crate::utils::AppState;
-use crate::utils::AppError;
-use chrono::Utc;
-use sqlx::Row;
 use super::types::MessageResponse;
+use crate::utils::AppError;
+use crate::utils::AppState;
+use chrono::Utc;
+use salvo::prelude::*;
+use sqlx::Row;
 
 #[handler]
 pub async fn get_conversation_messages(
@@ -12,9 +12,10 @@ pub async fn get_conversation_messages(
     res: &mut Response,
 ) -> Result<(), AppError> {
     let state = depot.obtain::<AppState>().unwrap();
-    let conversation_id = req.param::<String>("conversation_id")
+    let conversation_id = req
+        .param::<String>("conversation_id")
         .ok_or(AppError::BadRequest("Missing conversation_id".to_string()))?;
-    
+
     // Fetch messages from database first, filtering out forgotten ones
     // Order by created_at and then by id to ensure stable ordering
     let messages = sqlx::query(
@@ -22,24 +23,30 @@ pub async fn get_conversation_messages(
          FROM messages 
          WHERE conversation_id = $1 
          AND (is_forgotten = false OR is_forgotten IS NULL)
-         ORDER BY created_at ASC, id ASC"
+         ORDER BY created_at ASC, id ASC",
     )
     .bind(&conversation_id)
     .fetch_all(&state.db_pool)
     .await
     .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
-    
-    tracing::debug!("Found {} messages for conversation {}", messages.len(), conversation_id);
-    
+
+    tracing::debug!(
+        "Found {} messages for conversation {}",
+        messages.len(),
+        conversation_id
+    );
+
     let mut message_responses = Vec::new();
     for row in messages {
-        let msg_id: String = row.try_get("id")
+        let msg_id: String = row
+            .try_get("id")
             .map_err(|e| AppError::InternalServerError(format!("Failed to get id: {}", e)))?;
-        
+
         // Fetch tool_usages for this message if it's an assistant message
-        let msg_role: String = row.try_get("role")
+        let msg_role: String = row
+            .try_get("role")
             .map_err(|e| AppError::InternalServerError(format!("Failed to get role: {}", e)))?;
-        
+
         let tool_usages = if msg_role == "assistant" {
             // Fetch tool usages for this message
             let tool_usage_rows = sqlx::query(
@@ -60,19 +67,22 @@ pub async fn get_conversation_messages(
             .bind(&msg_id)
             .fetch_all(&state.db_pool)
             .await
-            .map_err(|e| AppError::InternalServerError(format!("Failed to fetch tool usages: {}", e)))?;
-            
+            .map_err(|e| {
+                AppError::InternalServerError(format!("Failed to fetch tool usages: {}", e))
+            })?;
+
             if !tool_usage_rows.is_empty() {
                 let mut usages = Vec::new();
                 for usage_row in tool_usage_rows {
-                    let created_at: Option<chrono::DateTime<chrono::Utc>> = usage_row.try_get("created_at").ok();
+                    let created_at: Option<chrono::DateTime<chrono::Utc>> =
+                        usage_row.try_get("created_at").ok();
                     usages.push(crate::models::tool_usage::ToolUsage {
                         id: usage_row.try_get("id").unwrap_or_default(),
                         message_id: usage_row.try_get("message_id").unwrap_or_default(),
                         tool_name: usage_row.try_get("tool_name").unwrap_or_default(),
                         tool_use_id: usage_row.try_get("tool_use_id").ok(),
-                        parameters: usage_row.try_get("parameters").ok(),
-                        output: usage_row.try_get("output").ok(),
+                        parameters: None, // Exclude parameters from conversation messages
+                        output: None, // Exclude output from conversation messages
                         execution_time_ms: usage_row.try_get("execution_time_ms").ok(),
                         created_at: created_at.map(|dt| dt.to_rfc3339()),
                     });
@@ -84,23 +94,32 @@ pub async fn get_conversation_messages(
         } else {
             None
         };
-        
-        let msg_created_at = row.try_get::<chrono::DateTime<Utc>, _>("created_at")
-            .map_err(|e| AppError::InternalServerError(format!("Failed to get created_at: {}", e)))?;
-        
-        tracing::trace!("Message order: {} - {} at {}", &msg_id[..8], msg_role, msg_created_at);
-        
+
+        let msg_created_at = row
+            .try_get::<chrono::DateTime<Utc>, _>("created_at")
+            .map_err(|e| {
+                AppError::InternalServerError(format!("Failed to get created_at: {}", e))
+            })?;
+
+        tracing::trace!(
+            "Message order: {} - {} at {}",
+            &msg_id[..8],
+            msg_role,
+            msg_created_at
+        );
+
         message_responses.push(MessageResponse {
             id: msg_id,
-            content: row.try_get("content")
-                .map_err(|e| AppError::InternalServerError(format!("Failed to get content: {}", e)))?,
+            content: row.try_get("content").map_err(|e| {
+                AppError::InternalServerError(format!("Failed to get content: {}", e))
+            })?,
             role: msg_role,
             created_at: msg_created_at.to_rfc3339(),
             processing_time_ms: row.try_get("processing_time_ms").ok(),
             tool_usages,
         });
     }
-    
+
     // Check if there's really an active stream that needs resuming
     // Only mark as active if:
     // 1. Last message is from user OR last assistant message is empty AND
@@ -116,7 +135,7 @@ pub async fn get_conversation_messages(
         } else {
             false // No messages
         };
-        
+
         // Only check active_streams if we actually need streaming
         if needs_streaming {
             let streams = state.active_claude_streams.read().await;
@@ -125,13 +144,13 @@ pub async fn get_conversation_messages(
             false // Assistant already has content, no need to stream
         }
     };
-    
+
     // Include streaming state in response
     let response = serde_json::json!({
         "messages": message_responses,
         "has_active_stream": has_active_stream,
     });
-    
+
     res.render(Json(response));
     Ok(())
 }

@@ -1,13 +1,16 @@
 import { useCallback, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { useSnapshot } from "valtio";
 import { wsService } from "../services/ws-service";
-import { chatStore, chatActions } from "../store/chat/chat-store";
+import { chatStore } from "../store/chat/chat-store";
 import { sidebarActions } from "../store/chat/sidebar-store";
 import type { CONVERSATION_ID, Message, PROJECT_ID } from "../types/chat";
 import type { ServerMessage } from "../types/ws";
+import { stream } from "./chat-streaming";
 
 export const useChat = () => {
   const snap = useSnapshot(chatStore);
+  const navigate = useNavigate();
 
   // Auto-connect WebSocket and setup event listeners
   useEffect(() => {
@@ -27,7 +30,7 @@ export const useChat = () => {
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
           message_count: message.messages.length,
-          messages: message.messages,
+          messages: message.messages || [],
         };
         chatStore.map[message.conversation_id] = conversation;
         if (!chatStore.list.includes(message.conversation_id)) {
@@ -44,48 +47,8 @@ export const useChat = () => {
     const handleConversationRedirect = (
       message: ServerMessage & { type: "conversation_redirect" }
     ) => {
-      if (snap.active === message.old_conversation_id) {
-        chatStore.active = message.new_conversation_id;
-      }
-    };
-
-    // Handle streaming progress - update message content
-    const handleProgress = (message: ServerMessage & { type: "progress" }) => {
-      chatActions.updateStreamingContent(message.conversation_id, message.content);
-    };
-
-    // Handle stream start - add new assistant message
-    const handleStart = (message: ServerMessage & { type: "start" }) => {
-      const conversation = chatStore.map[message.conversation_id];
-      if (conversation) {
-        const assistantMessage: Message = {
-          id: message.id,
-          content: "",
-          role: "assistant",
-          createdAt: new Date().toISOString(),
-        };
-        conversation.messages.push(assistantMessage);
-        
-        // Start streaming state tracking
-        chatActions.startStreaming(message.conversation_id, message.id);
-      }
-    };
-
-    // Handle stream complete - finalize message
-    const handleComplete = (message: ServerMessage & { type: "complete" }) => {
-      const conversation = chatStore.map[message.conversation_id];
-      if (conversation) {
-        const lastMessage =
-          conversation.messages[conversation.messages.length - 1];
-        if (lastMessage && lastMessage.id === message.id) {
-          lastMessage.processing_time_ms = message.processing_time_ms;
-          lastMessage.tool_usages = message.tool_usages;
-        }
-        conversation.message_count = conversation.messages.length;
-        conversation.updated_at = new Date().toISOString();
-        
-        // Complete streaming state
-        chatActions.completeStreaming(message.conversation_id);
+      if (snap.conversation_id === message.old_conversation_id) {
+        chatStore.conversation_id = message.new_conversation_id;
       }
     };
 
@@ -95,21 +58,12 @@ export const useChat = () => {
       // Could add error state to store if needed
     };
 
-    // Handle tool start events
-    const handleToolStarted = ({ tool, toolUsageId, conversationId }: { tool: string; toolUsageId: string; conversationId: string }) => {
-      chatActions.addActiveToolToStream(conversationId, tool, toolUsageId);
-    };
-
-    // Handle tool completion events  
-    const handleToolCompleted = ({ toolUsageId, conversationId }: { toolUsageId: string; conversationId: string }) => {
-      chatActions.removeActiveToolFromStream(conversationId, toolUsageId);
-    };
-
     // Handle new conversation management responses
     const handleConversationList = (
       message: ServerMessage & { type: "conversation_list" }
     ) => {
-      // Update conversation list and map
+      // Clear existing conversations and update with new ones
+      chatStore.map = {};
       chatStore.list = message.conversations.map((c) => c.id);
       message.conversations.forEach((conversation) => {
         chatStore.map[conversation.id] = conversation;
@@ -125,7 +79,7 @@ export const useChat = () => {
         chatStore.list.push(message.conversation.id);
       }
       // Optionally switch to the new conversation
-      chatStore.active = message.conversation.id;
+      chatStore.conversation_id = message.conversation.id;
     };
 
     const handleConversationDetails = (
@@ -154,9 +108,17 @@ export const useChat = () => {
         (id) => id !== message.conversation_id
       );
 
-      // If we're viewing the deleted conversation, switch to another one
-      if (chatStore.active === message.conversation_id) {
-        chatStore.active = chatStore.list[0] || "";
+      // If we're viewing the deleted conversation, switch to another one or navigate to /new
+      if (chatStore.conversation_id === message.conversation_id) {
+        if (chatStore.list.length > 0) {
+          chatStore.conversation_id = chatStore.list[0];
+          // Navigate to the first available conversation
+          navigate(`/p/${chatStore.project_id}/c/${chatStore.list[0]}`);
+        } else {
+          chatStore.conversation_id = "";
+          // Navigate to new conversation when no conversations exist
+          navigate(`/p/${chatStore.project_id}/new`);
+        }
       }
     };
 
@@ -164,17 +126,28 @@ export const useChat = () => {
       message: ServerMessage & { type: "conversations_bulk_deleted" }
     ) => {
       // Remove successfully deleted conversations from store
-      message.conversation_ids.forEach(conversationId => {
+      message.conversation_ids.forEach((conversationId) => {
         delete chatStore.map[conversationId];
       });
-      
+
       chatStore.list = chatStore.list.filter(
         (id) => !message.conversation_ids.includes(id)
       );
 
-      // If we're viewing one of the deleted conversations, switch to another one
-      if (chatStore.active && message.conversation_ids.includes(chatStore.active)) {
-        chatStore.active = chatStore.list[0] || "";
+      // If we're viewing one of the deleted conversations, switch to another one or navigate to /new
+      if (
+        chatStore.conversation_id &&
+        message.conversation_ids.includes(chatStore.conversation_id)
+      ) {
+        if (chatStore.list.length > 0) {
+          chatStore.conversation_id = chatStore.list[0];
+          // Navigate to the first available conversation
+          navigate(`/p/${chatStore.project_id}/c/${chatStore.list[0]}`);
+        } else {
+          chatStore.conversation_id = "";
+          // Navigate to new conversation when no conversations exist
+          navigate(`/p/${chatStore.project_id}/new`);
+        }
       }
 
       // Log any failed deletions
@@ -189,14 +162,18 @@ export const useChat = () => {
     // Add event listeners
     wsService.on("conversation_messages", handleConversationMessages); // Used for both initial load and explicit requests
     wsService.on("conversation_redirect", handleConversationRedirect);
-    wsService.on("progress", handleProgress);
-    wsService.on("start", handleStart);
-    wsService.on("complete", handleComplete);
+    wsService.on("progress", stream.progress);
+    wsService.on("start", stream.start);
+    wsService.on("content", stream.content);
+    wsService.on("complete", stream.complete);
     wsService.on("error", handleError);
-    
+    wsService.on("subscribed", (msg: { conversation_id: string }) => {
+      chatStore.conversation_id = msg.conversation_id;
+    });
+
     // Tool event listeners
-    wsService.on("tool_started", handleToolStarted);
-    wsService.on("tool_completed", handleToolCompleted);
+    // wsService.on("tool_started", handleToolStarted);
+    // wsService.on("tool_completed", handleToolCompleted);
 
     // New conversation management listeners
     wsService.on("conversation_list", handleConversationList);
@@ -210,14 +187,15 @@ export const useChat = () => {
     return () => {
       wsService.off("conversation_messages", handleConversationMessages);
       wsService.off("conversation_redirect", handleConversationRedirect);
-      wsService.off("progress", handleProgress);
-      wsService.off("start", handleStart);
-      wsService.off("complete", handleComplete);
+      wsService.off("progress", stream.progress);
+      wsService.off("start", stream.start);
+      wsService.off("content", stream.content);
+      wsService.off("complete", stream.complete);
       wsService.off("error", handleError);
-      
+
       // Tool event cleanup
-      wsService.off("tool_started", handleToolStarted);
-      wsService.off("tool_completed", handleToolCompleted);
+      // wsService.off("tool_started", handleToolStarted);
+      // wsService.off("tool_completed", handleToolCompleted);
 
       // New conversation management cleanup
       wsService.off("conversation_list", handleConversationList);
@@ -225,9 +203,12 @@ export const useChat = () => {
       wsService.off("conversation_details", handleConversationDetails);
       wsService.off("conversation_updated", handleConversationUpdated);
       wsService.off("conversation_deleted", handleConversationDeleted);
-      wsService.off("conversations_bulk_deleted", handleConversationsBulkDeleted);
+      wsService.off(
+        "conversations_bulk_deleted",
+        handleConversationsBulkDeleted
+      );
     };
-  }, [snap.project_id]);
+  }, [snap.project_id, snap.conversation_id]);
 
   // // Auto-subscribe when project/conversation changes
   // useEffect(() => {
@@ -238,10 +219,10 @@ export const useChat = () => {
 
   const sendMessage = useCallback(
     (content: string, files?: string[]) => {
-      if (!snap.project_id || !snap.active) return;
+      if (!snap.project_id || !snap.conversation_id) return;
 
       // Add user message to store immediately
-      const conversation = chatStore.map[snap.active];
+      const conversation = chatStore.map[snap.conversation_id];
       if (conversation) {
         // Ensure messages array exists
         if (!conversation.messages) {
@@ -258,21 +239,25 @@ export const useChat = () => {
       }
 
       // Send via WebSocket
-      wsService.sendChatMessage(snap.project_id, snap.active, content, files);
+      wsService.sendChatMessage(
+        snap.project_id,
+        snap.conversation_id,
+        content,
+        files
+      );
     },
-    [snap.project_id, snap.active]
+    [snap.project_id, snap.conversation_id]
   );
 
   const stopStreaming = useCallback(() => {
-    if (snap.active) {
-      wsService.stopStreaming(snap.active);
+    if (snap.conversation_id) {
+      wsService.stopStreaming(snap.conversation_id);
     }
-  }, [snap.active]);
+  }, [snap.conversation_id]);
 
   // Conversation management methods
   const createConversation = useCallback(
     (title?: string) => {
-      console.log(title, snap.project_id);
       if (snap.project_id) {
         wsService.createConversation(snap.project_id, title);
       }
@@ -311,21 +296,21 @@ export const useChat = () => {
 
   // Helper to get current conversation messages
   const currentMessages =
-    snap.active && snap.map[snap.active]
-      ? snap.map[snap.active].messages || []
+    snap.conversation_id && snap.map[snap.conversation_id]
+      ? snap.map[snap.conversation_id].messages || []
       : [];
 
   return {
     // Current state
     projectId: snap.project_id,
-    conversationId: snap.active,
+    conversationId: snap.conversation_id,
     conversationMap: snap.map,
     conversationList: snap.list,
     currentMessages,
 
     // Status
     isConnected: wsService.isConnected(),
-    isStreaming: wsService.isStreaming(snap.active || ""),
+    isStreaming: wsService.isStreaming(snap.conversation_id || ""),
 
     // Actions
     sendMessage,
@@ -342,10 +327,14 @@ export const useChat = () => {
 
     setProjectId(id: PROJECT_ID) {
       chatStore.project_id = id;
+      // Clear conversations when switching projects to prevent stale data
+      chatStore.list = [];
+      chatStore.map = {};
+      chatStore.conversation_id = "";
     },
 
     setConversationId(id: CONVERSATION_ID) {
-      chatStore.active = id;
+      chatStore.conversation_id = id;
     },
   };
 };

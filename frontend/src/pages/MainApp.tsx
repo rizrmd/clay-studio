@@ -115,14 +115,6 @@ export function MainApp() {
   // Handle 'new' conversation ID - don't save it to localStorage
   const effectiveConversationId = isNewRoute ? undefined : conversationId;
 
-  // Save current conversation ID to localStorage when it changes
-  useEffect(() => {
-    if (projectId && conversationId && conversationId !== "new") {
-      const lastConversationKey = `last_conversation_${projectId}`;
-      localStorage.setItem(lastConversationKey, conversationId);
-    }
-  }, [projectId, conversationId]);
-
   // Handle responsive behavior
   useEffect(() => {
     const handleResize = () => {

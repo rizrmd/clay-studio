@@ -78,7 +78,7 @@ export function ChatInput({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputSnapshot = useSnapshot(inputStore, { sync: true });
 
-  const activeConversationId = chatStore.active || "new";
+  const activeConversationId = chatStore.conversation_id || "new";
   const { uploadFiles, cancelUpload, generatePreview } = useFileUpload(
     activeConversationId,
     projectId

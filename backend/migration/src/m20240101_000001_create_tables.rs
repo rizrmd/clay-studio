@@ -21,7 +21,12 @@ impl MigrationTrait for Migration {
                     )
                     .col(ColumnDef::new(Clients::Name).text().not_null())
                     .col(ColumnDef::new(Clients::Description).text())
-                    .col(ColumnDef::new(Clients::Status).text().not_null().default("pending"))
+                    .col(
+                        ColumnDef::new(Clients::Status)
+                            .text()
+                            .not_null()
+                            .default("pending"),
+                    )
                     .col(ColumnDef::new(Clients::InstallPath).text().not_null())
                     .col(
                         ColumnDef::new(Clients::CreatedAt)
@@ -113,7 +118,12 @@ impl MigrationTrait for Migration {
                     )
                     .col(ColumnDef::new(Conversations::ProjectId).string().not_null())
                     .col(ColumnDef::new(Conversations::Title).string())
-                    .col(ColumnDef::new(Conversations::MessageCount).integer().not_null().default(0))
+                    .col(
+                        ColumnDef::new(Conversations::MessageCount)
+                            .integer()
+                            .not_null()
+                            .default(0),
+                    )
                     .col(
                         ColumnDef::new(Conversations::CreatedAt)
                             .timestamp_with_time_zone()
@@ -186,12 +196,21 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(DataSources::ProjectId).string().not_null())
                     .col(ColumnDef::new(DataSources::Name).string().not_null())
                     .col(ColumnDef::new(DataSources::SourceType).string().not_null())
-                    .col(ColumnDef::new(DataSources::ConnectionConfig).json().not_null())
+                    .col(
+                        ColumnDef::new(DataSources::ConnectionConfig)
+                            .json()
+                            .not_null(),
+                    )
                     .col(ColumnDef::new(DataSources::SchemaInfo).json())
                     .col(ColumnDef::new(DataSources::PreviewData).json())
                     .col(ColumnDef::new(DataSources::TableList).json())
                     .col(ColumnDef::new(DataSources::LastTestedAt).timestamp_with_time_zone())
-                    .col(ColumnDef::new(DataSources::IsActive).boolean().not_null().default(true))
+                    .col(
+                        ColumnDef::new(DataSources::IsActive)
+                            .boolean()
+                            .not_null()
+                            .default(true),
+                    )
                     .col(
                         ColumnDef::new(DataSources::CreatedAt)
                             .timestamp_with_time_zone()
@@ -339,5 +358,3 @@ enum DataSources {
     IsActive,
     CreatedAt,
 }
-
-

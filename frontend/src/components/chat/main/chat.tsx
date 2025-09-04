@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useSnapshot } from "valtio";
-import { Messages, WelcomeScreen } from "../display";
+import { ChatSkeleton, MessageList } from "../display";
 import { MultimodalInput } from "../input";
 import { uiStore, uiActions } from "@/lib/store/chat/ui-store";
 import { useChat } from "@/lib/hooks/use-chat";
@@ -24,9 +24,9 @@ export function Chat() {
 
   // Chat state and actions
   const {
-    currentMessages: messages,
+    currentMessages,
     sendMessage,
-    stopStreaming,
+    stopStreaming: _stopStreaming,
     isConnected,
     isStreaming,
   } = useChat();
@@ -51,21 +51,6 @@ export function Chat() {
     // Convert File objects to file paths/names for the WebSocket API
     const fileNames = allFiles.map((f) => f.name);
     sendMessage(message, fileNames.length > 0 ? fileNames : undefined);
-  };
-
-  const handleResendMessage = (message: any) => {
-    if (message?.content) {
-      sendMessage(message.content);
-    }
-  };
-
-  const handleAskUserSubmit = (response: string | string[]) => {
-    const responseText = Array.isArray(response)
-      ? response.join(", ")
-      : response;
-    if (responseText) {
-      sendMessage(responseText);
-    }
   };
 
   // Drag and drop handlers
@@ -160,27 +145,13 @@ export function Chat() {
                   with Claude.
                 </p>
               </div>
-            ) : messages.length === 0 ? (
-              <WelcomeScreen />
+            ) : currentMessages.length === 0 ? (
+              <>
+                <ChatSkeleton />
+              </>
             ) : (
               <div className="flex flex-col relative flex-1">
-                <Messages
-                  messages={messages.map((msg) => ({
-                    ...msg,
-                    isQueued: false,
-                    isEditing: false,
-                    file_attachments: msg.file_attachments ? [...msg.file_attachments] : undefined,
-                    tool_usages: msg.tool_usages ? [...msg.tool_usages] : undefined,
-                  }))}
-                  isLoading={false}
-                  conversationId={conversationId || undefined}
-                  isStreaming={isStreaming}
-                  canStop={false}
-                  onStop={stopStreaming}
-                  activeTools={[]}
-                  onResendMessage={handleResendMessage}
-                  onAskUserSubmit={handleAskUserSubmit}
-                />
+                <MessageList />
               </div>
             )}
           </div>
@@ -201,7 +172,6 @@ export function Chat() {
               shouldFocus={uiSnapshot.shouldFocusInput}
               isSubscribed={uiSnapshot.isWsSubscribed}
               conversationId={conversationId || undefined}
-              className="lg:ml-[-10px] lg:mr-[40px]"
             />
           </div>
         </div>

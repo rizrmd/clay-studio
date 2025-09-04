@@ -14,7 +14,7 @@ impl MigrationTrait for Migration {
                     .add_column(
                         ColumnDef::new(Conversations::ForgottenAfterMessageId)
                             .string()
-                            .null()
+                            .null(),
                     )
                     .to_owned(),
             )
@@ -29,7 +29,7 @@ impl MigrationTrait for Migration {
                         ColumnDef::new(Conversations::ForgottenCount)
                             .integer()
                             .default(0)
-                            .not_null()
+                            .not_null(),
                     )
                     .to_owned(),
             )

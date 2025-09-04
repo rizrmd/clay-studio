@@ -5,19 +5,14 @@
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 
-pub mod core;
-pub mod utils;
 pub mod api;
+pub mod core;
 pub mod models;
+pub mod utils;
 
 // Re-export commonly used types for convenience
 pub use core::claude::{
-    ClaudeManager,
-    ClaudeSDK,
-    ClaudeSetup,
-    ClaudeMessage,
-    QueryOptions,
-    QueryRequest,
+    ClaudeManager, ClaudeMessage, ClaudeSDK, ClaudeSetup, QueryOptions, QueryRequest,
 };
 
 pub use utils::AppError;

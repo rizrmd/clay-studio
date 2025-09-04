@@ -1,8 +1,8 @@
 pub mod admin;
 pub mod auth;
 pub mod chat_ws;
-pub mod clients;
 pub mod client_management;
+pub mod clients;
 pub mod conversations;
 pub mod conversations_forget;
 pub mod debug;

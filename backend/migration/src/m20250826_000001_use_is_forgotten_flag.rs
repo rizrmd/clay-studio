@@ -15,7 +15,7 @@ impl MigrationTrait for Migration {
                         ColumnDef::new(Messages::IsForgotten)
                             .boolean()
                             .default(false)
-                            .not_null()
+                            .not_null(),
                     )
                     .to_owned(),
             )
@@ -59,11 +59,7 @@ impl MigrationTrait for Migration {
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         // Drop the index
         manager
-            .drop_index(
-                Index::drop()
-                    .name("idx_messages_is_forgotten")
-                    .to_owned(),
-            )
+            .drop_index(Index::drop().name("idx_messages_is_forgotten").to_owned())
             .await?;
 
         // Remove is_forgotten column from messages
@@ -84,7 +80,7 @@ impl MigrationTrait for Migration {
                     .add_column(
                         ColumnDef::new(Conversations::ForgottenAfterMessageId)
                             .string()
-                            .null()
+                            .null(),
                     )
                     .to_owned(),
             )
@@ -98,7 +94,7 @@ impl MigrationTrait for Migration {
                         ColumnDef::new(Conversations::ForgottenCount)
                             .integer()
                             .default(0)
-                            .not_null()
+                            .not_null(),
                     )
                     .to_owned(),
             )

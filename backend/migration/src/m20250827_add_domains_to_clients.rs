@@ -13,7 +13,7 @@ impl MigrationTrait for Migration {
                     .add_column(
                         ColumnDef::new(Clients::Domains)
                             .array(ColumnType::Text)
-                            .null()
+                            .null(),
                     )
                     .to_owned(),
             )

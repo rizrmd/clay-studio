@@ -1,9 +1,9 @@
-use serde::{Deserialize, Serialize};
-use chrono::Utc;
-use uuid::Uuid;
 use crate::models::file_upload::FileUploadResponse;
-use crate::models::tool_usage::ToolUsage;
 use crate::models::message_role::MessageRole;
+use crate::models::tool_usage::ToolUsage;
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
