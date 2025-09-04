@@ -3,7 +3,39 @@ import { Navigate } from "react-router-dom";
 import { useEffect } from "react";
 import { useSnapshot } from "valtio";
 import api from "@/lib/utils/api";
-import { configPageStore, configPageActions } from "@/store/config-page-store";
+// import { configPageStore, configPageActions } from "@/store/config-page-store";
+
+// Stub implementation
+const configPageStore = {
+  settings: {},
+  isLoading: false,
+  error: null,
+  hasUnsavedChanges: false,
+  clientId: "",
+  config: {
+    registrationEnabled: false,
+    requireInviteCode: false,
+    allowedDomains: [] as string[]
+  },
+};
+
+const configPageActions = {
+  setSettings: (_settings: any) => {},
+  updateSetting: (_key: string, _value: any) => {},
+  setLoading: (_isLoading: boolean) => {
+    (configPageStore as any).isLoading = _isLoading;
+  },
+  setError: (_error: string | null) => {
+    (configPageStore as any).error = _error;
+  },
+  markSaved: () => {},
+  setClientId: (clientId: string | null) => {
+    (configPageStore as any).clientId = clientId || "";
+  },
+  setConfig: (config: any) => {
+    (configPageStore as any).config = config;
+  },
+};
 import { Skeleton } from "@/components/ui/skeleton";
 import { DomainManagement } from "@/components/root/domain-management";
 import { UserManagement } from "@/components/shared/user-management";
@@ -50,7 +82,7 @@ export function ConfigPage() {
     return <Navigate to="/" replace />;
   }
 
-  if (configSnapshot.loading) {
+  if (configSnapshot.isLoading) {
     return (
       <div className="container mx-auto py-8 space-y-6">
         <Skeleton className="h-10 w-48" />

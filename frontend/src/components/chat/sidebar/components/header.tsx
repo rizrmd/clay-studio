@@ -1,23 +1,22 @@
 import { ChevronLeft, X, MessageSquare, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useSnapshot } from "valtio";
-import { sidebarStore, sidebarActions } from "@/store/sidebar-store";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { sidebarActions, sidebarStore } from "@/lib/store/chat/sidebar-store";
 
 interface ConversationSidebarHeaderProps {
-  onCreateNewConversation: () => void;
   onNavigateToProjects: () => void;
   onBulkDelete: () => void;
-  projectId?:string
+  projectId?: string;
 }
 
 export function ConversationSidebarHeader({
-  onCreateNewConversation,
   onNavigateToProjects,
   onBulkDelete,
-  projectId
+  projectId,
 }: ConversationSidebarHeaderProps) {
   const sidebarSnapshot = useSnapshot(sidebarStore);
+  const navigate = useNavigate();
 
   return (
     <div className="px-1 py-2 border-b">
@@ -26,7 +25,10 @@ export function ConversationSidebarHeader({
           <Button
             variant="ghost"
             size="sm"
-            onClick={onNavigateToProjects}
+            onClick={() => {
+              onNavigateToProjects();
+              navigate('/projects');
+            }}
             className="pl-1 gap-1 h-[25px] border border-transparent hover:border-gray-200"
           >
             <ChevronLeft size={10} />
@@ -54,7 +56,9 @@ export function ConversationSidebarHeader({
               title="Delete Selected"
             >
               <Trash2 size={10} />
-              <span className="text-xs">Delete ({sidebarSnapshot.selectedConversations.size})</span>
+              <span className="text-xs">
+                Delete ({sidebarSnapshot.selectedConversations.length})
+              </span>
             </Button>
           </div>
         ) : (
@@ -62,7 +66,6 @@ export function ConversationSidebarHeader({
             <Button
               variant="ghost"
               size="sm"
-              onClick={onCreateNewConversation}
               className="gap-1 h-[25px] border border-transparent hover:border-gray-200"
               title="New Chat"
             >

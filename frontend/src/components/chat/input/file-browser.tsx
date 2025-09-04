@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from "react";
-import { logger } from "@/lib/utils/logger";
 import {
   X,
   Check,
@@ -11,10 +10,7 @@ import {
   Edit2,
   Trash2,
 } from "lucide-react";
-import {
-  Dialog,
-  DialogContent,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -179,20 +175,17 @@ export function FileBrowser({
       const clientId = localStorage.getItem("activeClientId");
       if (!clientId) return;
 
-      const response = await api.fetchStream(
-        `/uploads/${fileId}/description`,
-        {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            description: editedDescription,
-            client_id: clientId,
-            project_id: projectId,
-          }),
-        }
-      );
+      const response = await api.fetchStream(`/uploads/${fileId}/description`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          description: editedDescription,
+          client_id: clientId,
+          project_id: projectId,
+        }),
+      });
 
       if (response.ok) {
         // Update local state
@@ -241,7 +234,7 @@ export function FileBrowser({
       }
     } catch (error) {
       // Failed to delete file
-      logger.error("FileBrowser: Failed to delete file:", error);
+      console.error("FileBrowser: Failed to delete file:", error);
     }
   };
 
@@ -498,13 +491,17 @@ export function FileBrowser({
                             <div className="mt-1 flex items-start gap-1 group">
                               <div className="text-xs text-muted-foreground line-clamp-3 flex-1">
                                 <div className="line-clamp-2">
-                                  {file.description || file.auto_description || "No description"}
+                                  {file.description ||
+                                    file.auto_description ||
+                                    "No description"}
                                 </div>
                                 <div className="opacity-70 mt-1 text-[10px] sm:text-xs">
                                   {formatFileSize(file.file_size)}
                                 </div>
                                 <div className="opacity-70 text-[10px] sm:text-xs hidden sm:block">
-                                  {new Date(file.created_at).toLocaleDateString()}
+                                  {new Date(
+                                    file.created_at
+                                  ).toLocaleDateString()}
                                 </div>
                               </div>
                               <Button
@@ -688,7 +685,7 @@ export function FileBrowser({
                             </div>
                           )}
                         </div>
-                        
+
                         {/* Delete button */}
                         <div className="pt-3">
                           <Button
@@ -697,7 +694,11 @@ export function FileBrowser({
                             className="w-full"
                             onClick={(e) => {
                               e.stopPropagation();
-                              if (confirm(`Are you sure you want to delete "${file.original_name}"?`)) {
+                              if (
+                                confirm(
+                                  `Are you sure you want to delete "${file.original_name}"?`
+                                )
+                              ) {
                                 deleteFile(file.id);
                               }
                             }}
@@ -737,7 +738,11 @@ export function FileBrowser({
             {selectedFiles.size > 0 && `${selectedFiles.size} file(s) selected`}
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={() => onOpenChange(false)} className="flex-1 sm:flex-none">
+            <Button
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              className="flex-1 sm:flex-none"
+            >
               Cancel
             </Button>
             <Button

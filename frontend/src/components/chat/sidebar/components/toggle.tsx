@@ -1,7 +1,7 @@
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useSnapshot } from "valtio";
-import { sidebarStore, sidebarActions } from "@/store/sidebar-store";
+import { sidebarStore, sidebarActions } from "@/lib/store/chat/sidebar-store";
 
 export function MobileMenuToggle() {
   const sidebarSnapshot = useSnapshot(sidebarStore);

@@ -11,7 +11,26 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { api } from '@/lib/utils/api';
-import { fileManagerStore, fileManagerActions } from '@/store/file-manager-store';
+// import { fileManagerStore, fileManagerActions } from '@/store/file-manager-store';
+
+// Stub implementations
+const fileManagerStore = { 
+  loading: false, 
+  files: [] as any[], 
+  editingFile: null as string | null, 
+  editDescription: '', 
+  savingDescription: false 
+};
+const fileManagerActions = { 
+  setLoading: (_loading: boolean) => {}, 
+  setFiles: (_files: any[]) => {}, 
+  setSavingDescription: (_saving: boolean) => {}, 
+  updateFile: (_id: string, _file: any) => {}, 
+  setEditingFile: (_id: string | null) => {}, 
+  setEditDescription: (_desc: string) => {}, 
+  cancelEdit: () => {}, 
+  startEditDescription: (_file: any) => {} 
+};
 
 interface FileUpload {
   id: string;

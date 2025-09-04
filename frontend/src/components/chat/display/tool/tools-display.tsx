@@ -6,7 +6,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { Badge } from "@/components/ui/badge"
-import type { ToolContext } from '@/types/chat'
+import type { ToolContext } from '@/lib/types/chat'
 
 interface ToolsDisplayProps {
   tools: ToolContext[]

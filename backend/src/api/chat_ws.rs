@@ -3,9 +3,9 @@ use crate::utils::{AppState, StreamingState};
 use crate::utils::AppError;
 use crate::core::claude::{ClaudeManager, QueryOptions, ClaudeMessage};
 use chrono::Utc;
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 
-use crate::api::websocket::{broadcast_to_subscribers, ServerMessage};
+use crate::api::websocket::{broadcast_to_subscribers, broadcast_activity_to_project, ServerMessage};
 use uuid;
 
 
@@ -253,6 +253,42 @@ pub async fn handle_chat_message_ws(
     tracing::info!("Parsing client ID and starting Claude query");
     let client_id = client_id_str.parse::<uuid::Uuid>().map_err(|e| format!("Invalid client ID: {}", e))?;
     tracing::info!("Client ID parsed successfully: {}", client_id);
+    
+    // Get user information for activity notification
+    let user_info = sqlx::query(
+        "SELECT u.username, c.name as client_name FROM users u 
+         JOIN clients c ON u.client_id = c.id 
+         WHERE u.client_id = $1"
+    )
+    .bind(client_id)
+    .fetch_optional(&db_pool)
+    .await;
+    
+    let user_name = match user_info {
+        Ok(Some(row)) => {
+            let username: String = row.try_get("username").unwrap_or_else(|_| "unknown".to_string());
+            let client_name: String = row.try_get("client_name").unwrap_or_else(|_| "unknown".to_string());
+            format!("{} ({})", username, client_name)
+        }
+        _ => "unknown user".to_string()
+    };
+    
+    // Create message preview (first 100 chars)
+    let message_preview = if content.len() > 100 {
+        format!("{}...", content.chars().take(97).collect::<String>())
+    } else {
+        content.clone()
+    };
+    
+    // Broadcast activity to other users in the same project
+    broadcast_activity_to_project(
+        &project_id,
+        &actual_conversation_id,
+        &client_id.to_string(), // Use client_id as unique identifier
+        &user_name,
+        "new_message",
+        Some(message_preview),
+    ).await;
     
     match ClaudeManager::query_claude_with_project_and_db(
         client_id,

@@ -1,5 +1,5 @@
 import { useRef, useEffect } from "react";
-import { inputActions } from "@/store/input-store";
+import { inputActions } from "@/lib/store/chat/input-store";
 
 export function useDragAndDrop(onFilesDropped: (files: File[]) => void) {
   const dragCounter = useRef(0);

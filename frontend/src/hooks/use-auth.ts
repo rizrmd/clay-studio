@@ -7,12 +7,10 @@ import {
   register as registerAction,
   logout as logoutAction,
   checkRegistrationStatus,
-} from "../store/auth-store";
+} from "../lib/store/auth-store";
 
 export function useAuth() {
   const snapshot = useSnapshot(authStore);
-
-  // No need to initialize here since ValtioProvider already does it
 
   // Update registration status when firstClient changes
   useEffect(() => {

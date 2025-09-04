@@ -6,8 +6,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useSnapshot } from "valtio";
-import { sidebarStore } from "@/store/sidebar-store";
 import { useAuth } from "@/hooks/use-auth";
+import { sidebarStore } from "@/lib/store/chat/sidebar-store";
 
 interface ConversationSidebarFooterProps {
   isCollapsed: boolean;
@@ -54,16 +54,10 @@ export function ConversationSidebarFooter({
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-56 z-50">
-        <DropdownMenuItem
-          onClick={onProfile}
-          className="cursor-pointer"
-        >
+        <DropdownMenuItem onClick={onProfile} className="cursor-pointer">
           Profile
         </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={onLogout}
-          className="cursor-pointer"
-        >
+        <DropdownMenuItem onClick={onLogout} className="cursor-pointer">
           Sign out
         </DropdownMenuItem>
       </DropdownMenuContent>

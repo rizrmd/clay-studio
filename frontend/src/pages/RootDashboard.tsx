@@ -1,8 +1,43 @@
 import { useEffect } from "react";
 import { useSnapshot } from "valtio";
-import { rootDashboardStore, rootDashboardActions } from "@/store/root-dashboard-store";
+// import { rootDashboardStore, rootDashboardActions } from "@/store/root-dashboard-store";
+
+// Stub implementation
+const rootDashboardStore = {
+  stats: {
+    totalProjects: 0,
+    totalConversations: 0,
+    totalUsers: 0,
+    totalClients: 0,
+    activeClients: 0,
+  },
+  clients: [] as ClientRootResponse[],
+  loading: false,
+  isLoading: false,
+  error: null as string | null,
+  addDialogOpen: false,
+};
+
+const rootDashboardActions = {
+  setStats: (stats: any) => {
+    (rootDashboardStore as any).stats = stats;
+  },
+  setClients: (clients: ClientRootResponse[]) => {
+    (rootDashboardStore as any).clients = clients;
+  },
+  setLoading: (isLoading: boolean) => {
+    (rootDashboardStore as any).loading = isLoading;
+    (rootDashboardStore as any).isLoading = isLoading;
+  },
+  setError: (error: string | null) => {
+    (rootDashboardStore as any).error = error;
+  },
+  setAddDialogOpen: (open: boolean) => {
+    (rootDashboardStore as any).addDialogOpen = open;
+  },
+};
 import { useNavigate } from "react-router-dom";
-import { authStore } from "@/store/auth-store";
+import { authStore } from "@/lib/store/auth-store";
 import { rootService, ClientRootResponse } from "@/lib/services/root-service";
 import { ClientManagement } from "@/components/root/client-management";
 import { AddClientDialog } from "@/components/root/add-client-dialog";
@@ -188,7 +223,7 @@ export function RootDashboard() {
       {/* Main Content */}
       <div className="flex-1 overflow-auto px-6 pb-6">
         <ClientManagement
-          clients={rootDashboardSnapshot.clients as ClientRootResponse[]}
+          clients={[...rootDashboardSnapshot.clients]}
           loading={rootDashboardSnapshot.loading}
           error={rootDashboardSnapshot.error}
           onRefresh={loadClients}

@@ -1,13 +1,21 @@
+import { memo, useMemo, lazy, Suspense } from "react";
 import { FileAttachments } from "./file-attachments";
-import { getToolNamesFromMessage } from "@/types/chat";
+import { getToolNamesFromMessage } from "@/lib/types/chat";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ToolCallIndicator } from "../tool/tool-call-indicator";
 import { AskUser } from "../interaction/ask-user";
 import {
-  InteractionRenderer,
   hasInteraction,
 } from "../interaction/interaction-renderer";
+
+// Lazy load heavy components for better code splitting
+const InteractionRenderer = lazy(() => 
+  import("../interaction/interaction-renderer").then(m => ({ default: m.InteractionRenderer }))
+);
+const MarkdownRenderer = lazy(() => 
+  import("./markdown-renderer").then(m => ({ default: m.MarkdownRenderer }))
+);
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,7 +24,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { css } from "goober";
-import "github-markdown-css/github-markdown-light.css";
 import {
   Copy,
   MoreVertical,
@@ -25,13 +32,8 @@ import {
   User,
   Bot,
 } from "lucide-react";
-import { memo, useMemo } from "react";
-import ReactMarkdown from "react-markdown";
-import rehypeHighlight from "rehype-highlight";
-import rehypeRaw from "rehype-raw";
-import remarkGfm from "remark-gfm";
 
-import { DisplayMessage, Message } from "../types";
+import { DisplayMessage, Message, ToolUsage } from "../types";
 
 interface MessageListItemProps {
   message: DisplayMessage;
@@ -87,7 +89,7 @@ export const MessageListItem = memo(
 
       // Check for indicators of large/complex content
       const hasCodeBlocks = content.includes("```");
-      const hasLongLines = content.split("\n").some((line) => line.length > 80);
+      const hasLongLines = content.split("\n").some((line: string) => line.length > 80);
       const hasTables = content.includes("|") && content.includes("---");
       const hasMultipleTools = (message.tool_usages?.length || 0) > 3;
       const isLongContent = contentLength > 1500;
@@ -122,7 +124,7 @@ export const MessageListItem = memo(
     const findInteractionResponse = () => {
       if (
         !message.tool_usages?.some(
-          (u) => u.tool_name === "mcp__interaction__ask_user"
+          (u: ToolUsage) => u.tool_name === "mcp__interaction__ask_user"
         )
       ) {
         return { hasResponse: false, response: undefined };
@@ -134,7 +136,7 @@ export const MessageListItem = memo(
 
       // Get the interaction ID from this message
       const interactionUsage = message.tool_usages.find(
-        (u) => u.tool_name === "mcp__interaction__ask_user"
+        (u: ToolUsage) => u.tool_name === "mcp__interaction__ask_user"
       );
       if (!interactionUsage?.output) {
         return { hasResponse: false, response: undefined };
@@ -371,12 +373,11 @@ export const MessageListItem = memo(
                         `
                       )}
                     >
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm]}
-                        rehypePlugins={[rehypeHighlight, rehypeRaw]}
-                      >
-                        {message.content}
-                      </ReactMarkdown>
+                      <Suspense fallback={<div className="animate-pulse bg-gray-100 h-4 rounded w-full" />}>
+                        <MarkdownRenderer
+                          content={message.content}
+                        />
+                      </Suspense>
                     </div>
                   )}
                 </div>
@@ -391,12 +392,12 @@ export const MessageListItem = memo(
               {/* Interaction Tool Rendering */}
               {(() => {
                 const interactionUsages = message.tool_usages?.filter(
-                  (usage) =>
+                  (usage: ToolUsage) =>
                     usage.tool_name === "mcp__interaction__ask_user" ||
                     usage.tool_name === "mcp__interaction__show_table" ||
                     usage.tool_name === "mcp__interaction__show_chart"
                 );
-                return interactionUsages?.some((usage) =>
+                return interactionUsages?.some((usage: ToolUsage) =>
                   hasInteraction(usage.output)
                 );
               })() && (
@@ -409,21 +410,22 @@ export const MessageListItem = memo(
                 >
                   {(message.tool_usages || [])
                     .filter(
-                      (usage) =>
+                      (usage: ToolUsage) =>
                         usage.tool_name === "mcp__interaction__ask_user" ||
                         usage.tool_name === "mcp__interaction__show_table" ||
                         usage.tool_name === "mcp__interaction__show_chart"
                     )
-                    .map((usage, index) => (
-                      <InteractionRenderer
-                        key={`${usage.id}-${index}`}
-                        toolOutput={usage.output}
-                        onAskUserSubmit={onAskUserSubmit}
-                        isDisabled={isStreaming || isLoading}
-                        hasResponse={hasUserResponse}
-                        selectedResponse={extractedResponse}
-                        onScroll={onScroll}
-                      />
+                    .map((usage: ToolUsage, index: number) => (
+                      <Suspense key={`${usage.id}-${index}`} fallback={<div className="h-12 bg-gray-100 animate-pulse rounded" />}>
+                        <InteractionRenderer
+                          toolOutput={usage.output}
+                          onAskUserSubmit={onAskUserSubmit}
+                          isDisabled={isStreaming || isLoading}
+                          hasResponse={hasUserResponse}
+                          selectedResponse={extractedResponse}
+                          onScroll={onScroll}
+                        />
+                      </Suspense>
                     ))}
                 </div>
               )}
@@ -432,7 +434,7 @@ export const MessageListItem = memo(
               {message.ask_user &&
                 message.role === "assistant" &&
                 !message.tool_usages?.some(
-                  (usage) =>
+                  (usage: ToolUsage) =>
                     usage.tool_name === "mcp__interaction__ask_user" &&
                     hasInteraction(usage.output)
                 ) && (

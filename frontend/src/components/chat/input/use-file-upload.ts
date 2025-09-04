@@ -1,6 +1,5 @@
-import { multimodalInputActions } from "@/store/multimodal-input-store";
-import { inputActions } from "@/store/input-store";
 import { API_BASE_URL } from "@/lib/utils/url";
+import { multimodalInputActions, inputActions, type StoreFileWithDescription } from "@/lib/store/chat/input-store";
 
 interface ComponentFileWithDescription extends File {
   description?: string;
@@ -8,11 +7,6 @@ interface ComponentFileWithDescription extends File {
   preview?: string;
 }
 
-interface StoreFileWithDescription {
-  file: File;
-  description?: string;
-  id: string;
-}
 
 export function useFileUpload(activeConversationId: string, projectId?: string) {
   const uploadFiles = async (files: File[]) => {
@@ -22,14 +16,12 @@ export function useFileUpload(activeConversationId: string, projectId?: string) 
     }
 
     inputActions.setUploading(true);
-    const abortController = new AbortController();
-    multimodalInputActions.setUploadAbortController(activeConversationId, abortController);
+    multimodalInputActions.setUploadCancelled(activeConversationId, false);
 
     const uploadedFilesList: ComponentFileWithDescription[] = [];
 
     const cleanup = () => {
       inputActions.setUploading(false);
-      multimodalInputActions.setUploadAbortController(activeConversationId, null);
       inputActions.clearUploadProgress();
     };
 
@@ -78,10 +70,6 @@ export function useFileUpload(activeConversationId: string, projectId?: string) 
           xhr.open("POST", `${API_BASE_URL}/upload?client_id=${clientId}&project_id=${projectId}`);
           xhr.withCredentials = true;
           xhr.send(formData);
-
-          abortController.signal.addEventListener("abort", () => {
-            xhr.abort();
-          });
         });
       }
 
@@ -102,11 +90,7 @@ export function useFileUpload(activeConversationId: string, projectId?: string) 
   };
 
   const cancelUpload = () => {
-    const abortController = multimodalInputActions.getUploadAbortController(activeConversationId);
-    if (abortController) {
-      abortController.abort();
-    }
-    multimodalInputActions.setUploadAbortController(activeConversationId, null);
+    multimodalInputActions.setUploadCancelled(activeConversationId, true);
     inputActions.setUploading(false);
     inputActions.clearUploadProgress();
   };

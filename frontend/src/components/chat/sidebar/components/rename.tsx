@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { useSnapshot } from "valtio";
-import { sidebarStore, sidebarActions } from "@/store/sidebar-store";
+import { sidebarStore, sidebarActions } from "@/lib/store/chat/sidebar-store";
 
 interface RenameConversationDialogProps {
   onRename: () => void;

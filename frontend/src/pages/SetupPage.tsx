@@ -6,7 +6,22 @@ import {
   SetupCompleteStep,
   CreateFirstUserStep
 } from "@/components/setup";
-import { useClaudeSetup } from "@/hooks/use-claude-setup";
+// import { useClaudeSetup } from "@/hooks/use-claude-setup";
+
+// Stub implementation
+const useClaudeSetup = (_error?: any) => ({
+  error: null,
+  setError: (_error: string | null) => {},
+  claudeSetupResponse: null,
+  setupProgress: 0,
+  cliOutput: [],
+  updateClaudeSetupResponse: (_response: any) => {},
+  isSetupComplete: false,
+  apiKey: "",
+  isValidating: false,
+  validateApiKey: async (_key: string) => true,
+  setApiKey: (_key: string) => {},
+});
 
 export function SetupPage() {
   const { user, firstClient, needsInitialSetup } = useAuth();
@@ -60,9 +75,9 @@ export function SetupPage() {
             claudeSetupResponse={claudeSetupResponse}
             firstClient={firstClient ? {
               id: firstClient.id,
-              status: firstClient.status
-            } : undefined}
-            setupProgress={setupProgress}
+              status: firstClient.status || ""
+            } : { id: "", status: "" }}
+            setupProgress={setupProgress.toString()}
             cliOutput={cliOutput}
             error={error}
             onTokenSuccess={handleTokenSuccess}

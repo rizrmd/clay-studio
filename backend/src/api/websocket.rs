@@ -36,6 +36,30 @@ pub enum ClientMessage {
         content: String,
         uploaded_file_paths: Option<Vec<String>>,
     },
+    // Conversation management
+    CreateConversation {
+        project_id: String,
+        title: Option<String>,
+    },
+    ListConversations {
+        project_id: String,
+    },
+    GetConversation {
+        conversation_id: String,
+    },
+    UpdateConversation {
+        conversation_id: String,
+        title: Option<String>,
+    },
+    DeleteConversation {
+        conversation_id: String,
+    },
+    BulkDeleteConversations {
+        conversation_ids: Vec<String>,
+    },
+    GetConversationMessages {
+        conversation_id: String,
+    },
 }
 
 // WebSocket message types to client
@@ -53,10 +77,6 @@ pub enum ServerMessage {
     Subscribed { 
         project_id: String, 
         conversation_id: Option<String> 
-    },
-    ConversationHistory {
-        conversation_id: String,
-        messages: Vec<crate::models::Message>,
     },
     ConversationRedirect {
         old_conversation_id: String,
@@ -107,6 +127,38 @@ pub enum ServerMessage {
     Error { 
         error: String,
         conversation_id: String 
+    },
+    ConversationActivity {
+        conversation_id: String,
+        user_id: String,
+        user_name: String,
+        activity_type: String,
+        timestamp: String,
+        message_preview: Option<String>,
+    },
+    // Conversation management responses
+    ConversationList {
+        conversations: Vec<crate::models::Conversation>,
+    },
+    ConversationCreated {
+        conversation: crate::models::Conversation,
+    },
+    ConversationDetails {
+        conversation: crate::models::Conversation,
+    },
+    ConversationUpdated {
+        conversation: crate::models::Conversation,
+    },
+    ConversationDeleted {
+        conversation_id: String,
+    },
+    ConversationsBulkDeleted {
+        conversation_ids: Vec<String>,
+        failed_ids: Vec<String>,
+    },
+    ConversationMessages {
+        conversation_id: String,
+        messages: Vec<crate::models::Message>,
     },
 }
 
@@ -419,7 +471,7 @@ async fn handle_client_message(
                         Ok(messages) => {
                             tracing::info!("Sending {} cached messages for conversation {}", 
                                           messages.len(), conv_id);
-                            let _ = sender.send(ServerMessage::ConversationHistory {
+                            let _ = sender.send(ServerMessage::ConversationMessages {
                                 conversation_id: conv_id.clone(),
                                 messages,
                             });
@@ -613,6 +665,215 @@ async fn handle_client_message(
                 });
             }
         },
+        
+        ClientMessage::CreateConversation { project_id, title } => {
+            tracing::info!("Received create conversation request for project: {}", project_id);
+            
+            if let Some(client_id_str) = client_id.clone() {
+                match handle_create_conversation(&project_id, title, &client_id_str, state).await {
+                    Ok(conversation) => {
+                        // Automatically subscribe the connection to the new conversation
+                        let conversation_id = conversation.id.clone();
+                        
+                        // Add as subscriber to conversation cache
+                        state.add_conversation_subscriber(&conversation_id, connection_id).await;
+                        
+                        // Update connection's subscription in connection manager
+                        {
+                            let mut connections = WS_CONNECTIONS.write().await;
+                            if let Some(conn) = connections.get_mut(connection_id) {
+                                conn.project_id = Some(project_id.clone());
+                                conn.conversation_id = Some(conversation_id.clone());
+                            }
+                        }
+                        
+                        tracing::info!("Auto-subscribed user {} to new conversation {}", user_id, conversation_id);
+                        
+                        // Send creation confirmation
+                        let _ = sender.send(ServerMessage::ConversationCreated { conversation });
+                        
+                        // Send subscription confirmation
+                        let _ = sender.send(ServerMessage::Subscribed { 
+                            project_id,
+                            conversation_id: Some(conversation_id),
+                        });
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to create conversation: {}", e);
+                        let _ = sender.send(ServerMessage::Error {
+                            error: format!("Failed to create conversation: {}", e),
+                            conversation_id: "".to_string(),
+                        });
+                    }
+                }
+            } else {
+                let _ = sender.send(ServerMessage::Error {
+                    error: "Not authenticated".to_string(),
+                    conversation_id: "".to_string(),
+                });
+            }
+        },
+        
+        ClientMessage::ListConversations { project_id } => {
+            tracing::info!("Received list conversations request for project: {}", project_id);
+            
+            if let Some(client_id_str) = client_id.clone() {
+                match handle_list_conversations(&project_id, &client_id_str, state).await {
+                    Ok(conversations) => {
+                        let _ = sender.send(ServerMessage::ConversationList { conversations });
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to list conversations: {}", e);
+                        let _ = sender.send(ServerMessage::Error {
+                            error: format!("Failed to list conversations: {}", e),
+                            conversation_id: "".to_string(),
+                        });
+                    }
+                }
+            } else {
+                let _ = sender.send(ServerMessage::Error {
+                    error: "Not authenticated".to_string(),
+                    conversation_id: "".to_string(),
+                });
+            }
+        },
+        
+        ClientMessage::GetConversation { conversation_id } => {
+            tracing::info!("Received get conversation request: {}", conversation_id);
+            
+            if let Some(client_id_str) = client_id.clone() {
+                match handle_get_conversation(&conversation_id, &client_id_str, state).await {
+                    Ok(conversation) => {
+                        let _ = sender.send(ServerMessage::ConversationDetails { conversation });
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to get conversation: {}", e);
+                        let _ = sender.send(ServerMessage::Error {
+                            error: format!("Failed to get conversation: {}", e),
+                            conversation_id: conversation_id.clone(),
+                        });
+                    }
+                }
+            } else {
+                let _ = sender.send(ServerMessage::Error {
+                    error: "Not authenticated".to_string(),
+                    conversation_id: conversation_id.clone(),
+                });
+            }
+        },
+        
+        ClientMessage::UpdateConversation { conversation_id, title } => {
+            tracing::info!("Received update conversation request: {}", conversation_id);
+            
+            if let Some(client_id_str) = client_id.clone() {
+                match handle_update_conversation(&conversation_id, title, &client_id_str, state).await {
+                    Ok(conversation) => {
+                        let _ = sender.send(ServerMessage::ConversationUpdated { conversation });
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to update conversation: {}", e);
+                        let _ = sender.send(ServerMessage::Error {
+                            error: format!("Failed to update conversation: {}", e),
+                            conversation_id: conversation_id.clone(),
+                        });
+                    }
+                }
+            } else {
+                let _ = sender.send(ServerMessage::Error {
+                    error: "Not authenticated".to_string(),
+                    conversation_id: conversation_id.clone(),
+                });
+            }
+        },
+        
+        ClientMessage::DeleteConversation { conversation_id } => {
+            tracing::info!("Received delete conversation request: {}", conversation_id);
+            
+            if let Some(client_id_str) = client_id.clone() {
+                match handle_delete_conversation(&conversation_id, &client_id_str, state).await {
+                    Ok(_) => {
+                        let _ = sender.send(ServerMessage::ConversationDeleted { 
+                            conversation_id: conversation_id.clone() 
+                        });
+                        
+                        // Remove from conversation cache
+                        let _ = state.invalidate_conversation_cache(&conversation_id).await;
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to delete conversation: {}", e);
+                        let _ = sender.send(ServerMessage::Error {
+                            error: format!("Failed to delete conversation: {}", e),
+                            conversation_id: conversation_id.clone(),
+                        });
+                    }
+                }
+            } else {
+                let _ = sender.send(ServerMessage::Error {
+                    error: "Not authenticated".to_string(),
+                    conversation_id: conversation_id.clone(),
+                });
+            }
+        },
+        
+        ClientMessage::BulkDeleteConversations { conversation_ids } => {
+            tracing::info!("Received bulk delete conversations request: {} conversations", conversation_ids.len());
+            
+            if let Some(client_id_str) = client_id.clone() {
+                let mut deleted_ids = Vec::new();
+                let mut failed_ids = Vec::new();
+                
+                for conversation_id in conversation_ids {
+                    match handle_delete_conversation(&conversation_id, &client_id_str, state).await {
+                        Ok(_) => {
+                            deleted_ids.push(conversation_id.clone());
+                            // Remove from conversation cache
+                            let _ = state.invalidate_conversation_cache(&conversation_id).await;
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to delete conversation {}: {}", conversation_id, e);
+                            failed_ids.push(conversation_id);
+                        }
+                    }
+                }
+                
+                let _ = sender.send(ServerMessage::ConversationsBulkDeleted {
+                    conversation_ids: deleted_ids,
+                    failed_ids,
+                });
+            } else {
+                let _ = sender.send(ServerMessage::Error {
+                    error: "Not authenticated".to_string(),
+                    conversation_id: "".to_string(),
+                });
+            }
+        },
+        
+        ClientMessage::GetConversationMessages { conversation_id } => {
+            tracing::info!("Received get conversation messages request: {}", conversation_id);
+            
+            if let Some(client_id_str) = client_id.clone() {
+                match handle_get_conversation_messages(&conversation_id, &client_id_str, state).await {
+                    Ok(messages) => {
+                        let _ = sender.send(ServerMessage::ConversationMessages { 
+                            conversation_id: conversation_id.clone(),
+                            messages 
+                        });
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to get conversation messages: {}", e);
+                        let _ = sender.send(ServerMessage::Error {
+                            error: format!("Failed to get conversation messages: {}", e),
+                            conversation_id: conversation_id.clone(),
+                        });
+                    }
+                }
+            } else {
+                let _ = sender.send(ServerMessage::Error {
+                    error: "Not authenticated".to_string(),
+                    conversation_id: conversation_id.clone(),
+                });
+            }
+        },
     }
 }
 
@@ -652,6 +913,355 @@ async fn store_ask_user_response(
     Ok(())
 }
 
+// WebSocket conversation management handlers
+async fn handle_create_conversation(
+    project_id: &str,
+    title: Option<String>,
+    client_id_str: &str,
+    state: &AppState,
+) -> Result<crate::models::Conversation, crate::utils::AppError> {
+    let client_id = uuid::Uuid::parse_str(client_id_str)
+        .map_err(|_| crate::utils::AppError::BadRequest("Invalid client ID".to_string()))?;
+    
+    // Verify project exists and belongs to client
+    let project_exists = sqlx::query!(
+        "SELECT id FROM projects WHERE id = $1 AND client_id = $2",
+        project_id,
+        client_id
+    )
+    .fetch_optional(&state.db_pool)
+    .await
+    .map_err(|e| crate::utils::AppError::InternalServerError(format!("Database error: {}", e)))?;
+    
+    if project_exists.is_none() {
+        return Err(crate::utils::AppError::NotFound(format!("Project {} not found or access denied", project_id)));
+    }
+    
+    // Generate new conversation ID
+    let conversation_id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now();
+    
+    // Insert new conversation
+    sqlx::query!(
+        r#"
+        INSERT INTO conversations (id, project_id, title, created_at, updated_at, is_title_manually_set)
+        VALUES ($1, $2, $3, NOW(), NOW(), $4)
+        "#,
+        conversation_id,
+        project_id,
+        title,
+        title.is_some() // Set manually if title was provided
+    )
+    .execute(&state.db_pool)
+    .await
+    .map_err(|e| crate::utils::AppError::InternalServerError(format!("Failed to create conversation: {}", e)))?;
+    
+    // Return the created conversation
+    let is_title_set = title.is_some();
+    Ok(crate::models::Conversation {
+        id: conversation_id,
+        project_id: project_id.to_string(),
+        title,
+        created_at: now,
+        updated_at: now,
+        message_count: 0, // New conversation has no messages
+        is_title_manually_set: Some(is_title_set),
+    })
+}
+
+async fn handle_list_conversations(
+    project_id: &str,
+    client_id_str: &str,
+    state: &AppState,
+) -> Result<Vec<crate::models::Conversation>, crate::utils::AppError> {
+    let client_id = uuid::Uuid::parse_str(client_id_str)
+        .map_err(|_| crate::utils::AppError::BadRequest("Invalid client ID".to_string()))?;
+    
+    let conversations = sqlx::query(
+        "SELECT 
+            c.id, 
+            c.project_id, 
+            c.title, 
+            (
+                SELECT COUNT(*)::INTEGER 
+                FROM messages m 
+                WHERE m.conversation_id = c.id
+                AND (m.is_forgotten = false OR m.is_forgotten IS NULL)
+            ) AS message_count,
+            c.created_at, 
+            c.updated_at, 
+            c.is_title_manually_set 
+         FROM conversations c
+         JOIN projects p ON c.project_id = p.id
+         WHERE c.project_id = $1 AND p.client_id = $2
+         ORDER BY c.created_at DESC 
+         LIMIT 100"
+    )
+    .bind(project_id)
+    .bind(client_id)
+    .fetch_all(&state.db_pool)
+    .await
+    .map_err(|e| crate::utils::AppError::InternalServerError(format!("Database error: {}", e)))?;
+    
+    let mut conversation_list = Vec::new();
+    for row in conversations {
+        use sqlx::Row;
+        conversation_list.push(crate::models::Conversation {
+            id: row.try_get("id")
+                .map_err(|e| crate::utils::AppError::InternalServerError(format!("Failed to get id: {}", e)))?,
+            project_id: row.try_get("project_id")
+                .map_err(|e| crate::utils::AppError::InternalServerError(format!("Failed to get project_id: {}", e)))?,
+            title: row.try_get("title").ok(),
+            created_at: row.try_get("created_at")
+                .map_err(|e| crate::utils::AppError::InternalServerError(format!("Failed to get created_at: {}", e)))?,
+            updated_at: row.try_get("updated_at")
+                .map_err(|e| crate::utils::AppError::InternalServerError(format!("Failed to get updated_at: {}", e)))?,
+            message_count: row.try_get("message_count")
+                .map_err(|e| crate::utils::AppError::InternalServerError(format!("Failed to get message_count: {}", e)))?,
+            is_title_manually_set: row.try_get("is_title_manually_set").ok(),
+        });
+    }
+
+    Ok(conversation_list)
+}
+
+async fn handle_get_conversation(
+    conversation_id: &str,
+    client_id_str: &str,
+    state: &AppState,
+) -> Result<crate::models::Conversation, crate::utils::AppError> {
+    let client_id = uuid::Uuid::parse_str(client_id_str)
+        .map_err(|_| crate::utils::AppError::BadRequest("Invalid client ID".to_string()))?;
+    use sqlx::Row;
+    
+    let conversation_row = sqlx::query(
+        "SELECT 
+            c.id, 
+            c.project_id, 
+            c.title, 
+            (
+                SELECT COUNT(*)::INTEGER 
+                FROM messages m 
+                WHERE m.conversation_id = c.id
+                AND (m.is_forgotten = false OR m.is_forgotten IS NULL)
+            ) AS message_count,
+            c.created_at, 
+            c.updated_at, 
+            c.is_title_manually_set 
+         FROM conversations c
+         JOIN projects p ON c.project_id = p.id
+         WHERE c.id = $1 AND p.client_id = $2"
+    )
+    .bind(conversation_id)
+    .bind(client_id)
+    .fetch_optional(&state.db_pool)
+    .await
+    .map_err(|e| crate::utils::AppError::InternalServerError(format!("Database error: {}", e)))?
+    .ok_or(crate::utils::AppError::NotFound(format!("Conversation {} not found or access denied", conversation_id)))?;
+    
+    Ok(crate::models::Conversation {
+        id: conversation_row.try_get("id")
+            .map_err(|e| crate::utils::AppError::InternalServerError(format!("Failed to get id: {}", e)))?,
+        project_id: conversation_row.try_get("project_id")
+            .map_err(|e| crate::utils::AppError::InternalServerError(format!("Failed to get project_id: {}", e)))?,
+        title: conversation_row.try_get("title").ok(),
+        created_at: conversation_row.try_get("created_at")
+            .map_err(|e| crate::utils::AppError::InternalServerError(format!("Failed to get created_at: {}", e)))?,
+        updated_at: conversation_row.try_get("updated_at")
+            .map_err(|e| crate::utils::AppError::InternalServerError(format!("Failed to get updated_at: {}", e)))?,
+        message_count: conversation_row.try_get("message_count")
+            .map_err(|e| crate::utils::AppError::InternalServerError(format!("Failed to get message_count: {}", e)))?,
+        is_title_manually_set: conversation_row.try_get("is_title_manually_set").ok(),
+    })
+}
+
+async fn handle_update_conversation(
+    conversation_id: &str,
+    title: Option<String>,
+    client_id_str: &str,
+    state: &AppState,
+) -> Result<crate::models::Conversation, crate::utils::AppError> {
+    let client_id = uuid::Uuid::parse_str(client_id_str)
+        .map_err(|_| crate::utils::AppError::BadRequest("Invalid client ID".to_string()))?;
+    use sqlx::Row;
+    
+    let now = chrono::Utc::now();
+    
+    // Update in database and mark as manually set if title is provided
+    // Include authorization check
+    if title.is_some() {
+        sqlx::query(
+            "UPDATE conversations 
+             SET title = $1, is_title_manually_set = true, updated_at = $2 
+             FROM projects p
+             WHERE conversations.id = $3 AND conversations.project_id = p.id AND p.client_id = $4"
+        )
+        .bind(&title)
+        .bind(now)
+        .bind(conversation_id)
+        .bind(client_id)
+    } else {
+        sqlx::query(
+            "UPDATE conversations 
+             SET updated_at = $1 
+             FROM projects p
+             WHERE conversations.id = $2 AND conversations.project_id = p.id AND p.client_id = $3"
+        )
+        .bind(now)
+        .bind(conversation_id)
+        .bind(client_id)
+    }
+    .execute(&state.db_pool)
+    .await
+    .map_err(|e| crate::utils::AppError::InternalServerError(format!("Database error: {}", e)))?;
+    
+    // Fetch updated conversation
+    let updated = sqlx::query(
+        "SELECT 
+            c.id, 
+            c.project_id, 
+            c.title, 
+            (
+                SELECT COUNT(*)::INTEGER 
+                FROM messages m 
+                WHERE m.conversation_id = c.id
+                AND (m.is_forgotten = false OR m.is_forgotten IS NULL)
+            ) AS message_count,
+            c.created_at, 
+            c.updated_at, 
+            c.is_title_manually_set 
+         FROM conversations c
+         WHERE c.id = $1"
+    )
+    .bind(conversation_id)
+    .fetch_one(&state.db_pool)
+    .await
+    .map_err(|e| crate::utils::AppError::InternalServerError(format!("Database error: {}", e)))?;
+    
+    Ok(crate::models::Conversation {
+        id: updated.try_get("id")
+            .map_err(|e| crate::utils::AppError::InternalServerError(format!("Failed to get id: {}", e)))?,
+        project_id: updated.try_get("project_id")
+            .map_err(|e| crate::utils::AppError::InternalServerError(format!("Failed to get project_id: {}", e)))?,
+        title: updated.try_get("title").ok(),
+        created_at: updated.try_get("created_at")
+            .map_err(|e| crate::utils::AppError::InternalServerError(format!("Failed to get created_at: {}", e)))?,
+        updated_at: updated.try_get("updated_at")
+            .map_err(|e| crate::utils::AppError::InternalServerError(format!("Failed to get updated_at: {}", e)))?,
+        message_count: updated.try_get("message_count")
+            .map_err(|e| crate::utils::AppError::InternalServerError(format!("Failed to get message_count: {}", e)))?,
+        is_title_manually_set: updated.try_get("is_title_manually_set").ok(),
+    })
+}
+
+async fn handle_delete_conversation(
+    conversation_id: &str,
+    client_id_str: &str,
+    state: &AppState,
+) -> Result<(), crate::utils::AppError> {
+    let client_id = uuid::Uuid::parse_str(client_id_str)
+        .map_err(|_| crate::utils::AppError::BadRequest("Invalid client ID".to_string()))?;
+    // Delete from database with authorization check (messages will cascade delete)
+    let result = sqlx::query(
+        "DELETE FROM conversations 
+         USING projects p 
+         WHERE conversations.id = $1 AND conversations.project_id = p.id AND p.client_id = $2"
+    )
+    .bind(conversation_id)
+    .bind(client_id)
+    .execute(&state.db_pool)
+    .await
+    .map_err(|e| crate::utils::AppError::InternalServerError(format!("Database error: {}", e)))?;
+    
+    // Check if any rows were affected (conversation existed and was deleted)
+    if result.rows_affected() == 0 {
+        return Err(crate::utils::AppError::NotFound(format!("Conversation {} not found or access denied", conversation_id)));
+    }
+    
+    Ok(())
+}
+
+async fn handle_get_conversation_messages(
+    conversation_id: &str,
+    client_id_str: &str,
+    state: &AppState,
+) -> Result<Vec<crate::models::Message>, crate::utils::AppError> {
+    let client_id = uuid::Uuid::parse_str(client_id_str)
+        .map_err(|_| crate::utils::AppError::BadRequest("Invalid client ID".to_string()))?;
+    // Try to get from cache first
+    match state.get_conversation_messages(conversation_id).await {
+        Ok(messages) => Ok(messages),
+        Err(_) => {
+            // Fall back to direct database query with authorization check
+            let message_rows = sqlx::query(
+                "SELECT 
+                    m.id, 
+                    m.content, 
+                    m.role, 
+                    m.processing_time_ms,
+                    m.created_at,
+                    m.file_attachments,
+                    COALESCE(
+                        JSON_AGG(
+                            JSON_BUILD_OBJECT(
+                                'id', tu.id,
+                                'message_id', tu.message_id,
+                                'tool_name', tu.tool_name,
+                                'tool_use_id', tu.tool_use_id,
+                                'parameters', tu.parameters,
+                                'output', tu.output,
+                                'execution_time_ms', tu.execution_time_ms,
+                                'createdAt', tu.created_at
+                            )
+                        ) FILTER (WHERE tu.id IS NOT NULL),
+                        '[]'::json
+                    ) as tool_usages
+                FROM messages m
+                LEFT JOIN tool_usages tu ON m.id = tu.message_id
+                JOIN conversations c ON m.conversation_id = c.id
+                JOIN projects p ON c.project_id = p.id
+                WHERE m.conversation_id = $1 AND p.client_id = $2
+                AND (m.is_forgotten = false OR m.is_forgotten IS NULL)
+                GROUP BY m.id, m.content, m.role, m.processing_time_ms, m.created_at, m.file_attachments
+                ORDER BY m.created_at ASC"
+            )
+            .bind(conversation_id)
+            .bind(client_id)
+            .fetch_all(&state.db_pool)
+            .await
+            .map_err(|e| crate::utils::AppError::InternalServerError(format!("Database error: {}", e)))?;
+            
+            let mut messages = Vec::new();
+            for row in message_rows {
+                use sqlx::Row;
+                messages.push(crate::models::Message {
+                    id: row.try_get("id")
+                        .map_err(|e| crate::utils::AppError::InternalServerError(format!("Failed to get id: {}", e)))?,
+                    content: row.try_get("content")
+                        .map_err(|e| crate::utils::AppError::InternalServerError(format!("Failed to get content: {}", e)))?,
+                    role: match row.try_get::<String, _>("role")
+                        .map_err(|e| crate::utils::AppError::InternalServerError(format!("Failed to get role: {}", e)))?.as_str() {
+                        "user" => crate::models::MessageRole::User,
+                        "assistant" => crate::models::MessageRole::Assistant,
+                        "system" => crate::models::MessageRole::System,
+                        _ => crate::models::MessageRole::User,
+                    },
+                    processing_time_ms: row.try_get("processing_time_ms").ok(),
+                    created_at: row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").ok()
+                        .map(|dt| dt.to_rfc3339()),
+                    file_attachments: row.try_get::<Option<serde_json::Value>, _>("file_attachments").ok()
+                        .flatten()
+                        .and_then(|v| serde_json::from_value(v).ok()),
+                    tool_usages: row.try_get::<serde_json::Value, _>("tool_usages").ok()
+                        .and_then(|v| serde_json::from_value(v).ok()),
+                });
+            }
+            
+            Ok(messages)
+        }
+    }
+}
+
 // Global storage for active WebSocket connections (keyed by connection_id, not user_id)
 lazy_static::lazy_static! {
     pub static ref WS_CONNECTIONS: Arc<RwLock<HashMap<String, UserConnection>>> = Arc::new(RwLock::new(HashMap::new()));
@@ -666,26 +1276,67 @@ pub async fn broadcast_to_subscribers(
     let connections = WS_CONNECTIONS.read().await;
     
     for (connection_id, conn) in connections.iter() {
+        // More strict matching to prevent wrong recipients
+        let should_send = match (&conn.project_id, &conn.conversation_id) {
+            (Some(user_project), Some(user_conversation)) => {
+                // User is subscribed to specific project + conversation
+                user_project == project_id && user_conversation == conversation_id
+            },
+            (Some(user_project), None) => {
+                // User is subscribed to project only - only send for "new" conversations
+                user_project == project_id && conversation_id == "new"
+            },
+            _ => false, // Not subscribed to anything
+        };
         
-        // Check if connection is subscribed to this project/conversation
-        if let (Some(user_project), Some(user_conversation)) = (&conn.project_id, &conn.conversation_id) {
-            if user_project == project_id && user_conversation == conversation_id {
-                if conn.sender.send(message.clone()).is_ok() {
-                    // sent
-                } else {
-                    tracing::warn!("Failed to send message to connection {} (user {})", connection_id, conn.user_id);
-                }
-            }
-        } else if let Some(user_project) = &conn.project_id {
-            // Connection is subscribed to project but not specific conversation
-            // Send if the message is for "new" conversation or no specific conversation
-            if user_project == project_id && (conversation_id == "new" || conversation_id.is_empty()) {
-                tracing::info!("Sending to project match for new/empty conversation: {}", connection_id);
-                if conn.sender.send(message.clone()).is_ok() {
-                    // sent
-                }
+        if should_send {
+            if conn.sender.send(message.clone()).is_err() {
+                tracing::warn!("Failed to send message to connection {} (user {})", connection_id, conn.user_id);
             }
         }
     }
+}
+
+pub async fn broadcast_activity_to_project(
+    project_id: &str,
+    conversation_id: &str,
+    sender_client_id: &str, // Changed from sender_user_id to be more explicit
+    user_name: &str,
+    activity_type: &str,
+    message_preview: Option<String>,
+) {
+    let connections = WS_CONNECTIONS.read().await;
     
+    for (connection_id, conn) in connections.iter() {
+        // More precise filtering to prevent wrong notifications
+        let should_notify = match &conn.project_id {
+            Some(user_project) if user_project == project_id => {
+                // User is in the same project
+                let is_not_sender = conn.user_id != sender_client_id;
+                let is_not_in_conversation = conn.conversation_id.as_ref() != Some(&conversation_id.to_string());
+                
+                is_not_sender && is_not_in_conversation
+            },
+            _ => false, // Not in same project or not subscribed
+        };
+        
+        if should_notify {
+            let activity_message = ServerMessage::ConversationActivity {
+                conversation_id: conversation_id.to_string(),
+                user_id: sender_client_id.to_string(),
+                user_name: user_name.to_string(),
+                activity_type: activity_type.to_string(),
+                timestamp: chrono::Utc::now().to_rfc3339(),
+                message_preview: message_preview.clone(),
+            };
+            
+            if conn.sender.send(activity_message).is_err() {
+                tracing::warn!("Failed to send activity notification to connection {} (user {})", 
+                              connection_id, conn.user_id);
+            } else {
+                tracing::debug!("Sent activity notification to user {} about conversation {}", 
+                               conn.user_id, conversation_id);
+            }
+        }
+    }
 }

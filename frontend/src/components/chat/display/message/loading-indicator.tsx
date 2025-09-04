@@ -2,9 +2,9 @@ import { Button } from "@/components/ui/button";
 import { Bot, Square } from "lucide-react";
 import { ToolCallIndicator } from "../tool/tool-call-indicator";
 import { TodoList } from "../interaction/todo-list";
-import type { ToolUsage } from "@/types/chat";
+import type { ToolUsage } from "@/lib/types/chat";
 import type { Message } from "../types";
-import type { ActiveToolInfo } from "@/store/chat/types";
+import type { ActiveToolInfo } from "../types";
 import { useMemo } from "react";
 
 interface LoadingIndicatorProps {

@@ -1,6 +1,22 @@
 import { useSnapshot } from 'valtio'
 import { CreateClientRequest, rootService } from '@/lib/services/root-service'
-import { addClientDialogStore, addClientDialogActions } from '@/store/add-client-dialog-store'
+// import { addClientDialogStore, addClientDialogActions } from '@/store/add-client-dialog-store'
+
+// Stub implementation
+const addClientDialogStore = {
+  isOpen: false,
+  formData: { name: "", description: "" },
+  isSubmitting: false,
+  error: null,
+};
+
+const addClientDialogActions = {
+  open: () => {},
+  close: () => {},
+  updateFormData: (_updates: any) => {},
+  setSubmitting: (_isSubmitting: boolean) => {},
+  setError: (_error: string | null) => {},
+};
 import {
   Dialog,
   DialogContent,

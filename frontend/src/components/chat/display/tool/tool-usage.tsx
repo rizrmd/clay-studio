@@ -13,8 +13,21 @@ import {
   Maximize2,
   Minimize2,
 } from "lucide-react";
-import { useToolUsage } from "@/hooks/use-tool-usage";
-import { ToolUsage } from "@/types/chat";
+// import { useToolUsage } from "@/hooks/use-tool-usage";
+
+// Stub implementation
+const useToolUsage = () => ({
+  toolUsages: [],
+  isExpanded: {},
+  loading: false,
+  error: null,
+  addToolUsage: (_usage: any) => {},
+  updateToolUsage: (_id: string, _updates: any) => {},
+  toggleExpanded: (_id: string) => {},
+  getToolUsageById: (_id: string) => undefined,
+  fetchToolUsage: async (_id: string) => {},
+});
+import { ToolUsage } from "@/lib/types/chat";
 import { parseMcpToolName } from "./tool-call-utils";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";

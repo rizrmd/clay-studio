@@ -1,12 +1,25 @@
-import { Chat, ConversationSidebar } from "@/components/chat";
-import { NewChat } from "@/components/chat/main/new-chat";
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
+// Lazy load major components for better code splitting
+const Chat = lazy(() =>
+  import("@/components/chat").then((m) => ({ default: m.Chat }))
+);
+const ConversationSidebar = lazy(() =>
+  import("@/components/chat").then((m) => ({ default: m.ConversationSidebar }))
+);
+const NewChat = lazy(() =>
+  import("@/components/chat/main/new-chat").then((m) => ({
+    default: m.NewChat,
+  }))
+);
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useSnapshot } from "valtio";
-import { useLoggerDebug } from "@/hooks/use-logger-debug";
-import { uiStore, uiActions } from "@/store/ui-store";
+import { uiStore, uiActions } from "@/lib/store/chat/ui-store";
 import { api } from "@/lib/utils/api";
+import { useChat } from "@/lib/hooks/use-chat";
+import { wsService } from "@/lib/services/ws-service";
 
+// Stub implementations
+const useLoggerDebug = () => ({ isDebugMode: false });
 
 export function MainApp() {
   const uiSnapshot = useSnapshot(uiStore);
@@ -16,9 +29,10 @@ export function MainApp() {
   }>();
   const navigate = useNavigate();
   const location = useLocation();
-  
+  const chat = useChat();
+
   // Check if we're on the new conversation route
-  const isNewRoute = location.pathname.endsWith('/new');
+  const isNewRoute = location.pathname.endsWith("/new");
 
   // Enable debug logging hooks
   useLoggerDebug();
@@ -30,15 +44,8 @@ export function MainApp() {
     }
     if (conversationId) {
       uiActions.setCurrentConversation(conversationId);
-    }
-    // Set transition flag based on navigation state
-    if (location.state?.fromNewChat) {
-      uiActions.setTransitioningFromNew(true);
-      // Clear the flag after a short delay to reset state
-      const timer = setTimeout(() => {
-        uiActions.setTransitioningFromNew(false);
-      }, 100);
-      return () => clearTimeout(timer);
+      // Also update the chat store's active conversation
+      chat.setConversationId(conversationId);
     }
   }, [projectId, conversationId, location.state]);
 
@@ -60,13 +67,30 @@ export function MainApp() {
     }
   }, [projectId, conversationId, navigate]);
 
+  useEffect(() => {
+    if (projectId && projectId !== chat.projectId) {
+      chat.setProjectId(projectId);
+      wsService.listConversations(projectId);
+    }
+  }, [projectId]);
+
+  // Auto-subscribe to conversation when project and conversation IDs are available
+  useEffect(() => {
+    if (projectId && conversationId && conversationId !== "new") {
+      // Only subscribe if we're not already subscribed to this project/conversation
+      if (!wsService.isSubscribed(projectId, conversationId)) {
+        wsService.subscribe(projectId, conversationId);
+      }
+    }
+  }, [projectId, conversationId]);
+
   // Create new conversation immediately instead of using 'new' pseudo-state
   const createNewConversationAndRedirect = async () => {
     if (!projectId) return;
 
     try {
       const response = await api.fetchStream("/conversations", {
-        method: "POST", 
+        method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
@@ -88,12 +112,12 @@ export function MainApp() {
     }
   };
 
-  // Handle 'new' conversation ID - don't save it to localStorage  
+  // Handle 'new' conversation ID - don't save it to localStorage
   const effectiveConversationId = isNewRoute ? undefined : conversationId;
 
   // Save current conversation ID to localStorage when it changes
   useEffect(() => {
-    if (projectId && conversationId && conversationId !== 'new') {
+    if (projectId && conversationId && conversationId !== "new") {
       const lastConversationKey = `last_conversation_${projectId}`;
       localStorage.setItem(lastConversationKey, conversationId);
     }
@@ -132,18 +156,30 @@ export function MainApp() {
 
   return (
     <div className="flex-1 flex relative h-full w-full">
-      <ConversationSidebar
-        isCollapsed={uiSnapshot.isMobile ? true : uiSnapshot.isSidebarCollapsed}
-        onToggle={toggleSidebar}
-        projectId={projectId}
-        currentConversationId={effectiveConversationId}
-        onConversationSelect={handleConversationSelect}
-      />
+      <Suspense fallback={<div className="w-64 bg-gray-50 animate-pulse" />}>
+        <ConversationSidebar
+          isCollapsed={
+            uiSnapshot.isMobile ? true : uiSnapshot.isSidebarCollapsed
+          }
+          onToggle={toggleSidebar}
+          projectId={projectId}
+          currentConversationId={effectiveConversationId}
+          onConversationSelect={handleConversationSelect}
+        />
+      </Suspense>
       <div className="flex flex-1 flex-col min-w-0">
         {isNewRoute ? (
-          <NewChat />
+          <Suspense
+            fallback={<div className="flex-1 animate-pulse bg-gray-50" />}
+          >
+            <NewChat />
+          </Suspense>
         ) : (
-          <Chat />
+          <Suspense
+            fallback={<div className="flex-1 animate-pulse bg-gray-50" />}
+          >
+            <Chat />
+          </Suspense>
         )}
       </div>
     </div>

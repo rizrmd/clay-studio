@@ -22,6 +22,5 @@ export { InteractionRenderer } from './interaction/interaction-renderer'
 export { TodoList } from './interaction/todo-list'
 
 // Types and utilities
-export * from './types'
 export * from './utils'
 export * from './tool/tool-call-utils'

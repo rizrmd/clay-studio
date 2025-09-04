@@ -1,21 +1,31 @@
 import { useRef, useEffect } from "react";
 import { useSnapshot } from "valtio";
-import { multimodalInputActions } from "@/store/multimodal-input-store";
+
 import { Send, Paperclip } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { API_BASE_URL } from "@/lib/utils/url";
 import { FileBrowser } from "./file-browser";
-import { inputStore, inputActions } from "@/store/input-store";
-import { conversationStore } from "@/store/chat/conversation-store";
 
 import { FileUploadProgress } from "./file-upload-progress";
 import { DragDropOverlay } from "./drag-drop-overlay";
 import { AttachedFileItem } from "./attached-file-item";
 import { useFileUpload } from "./use-file-upload";
 import { useDragAndDrop } from "./use-drag-and-drop";
+import {
+  inputStore,
+  inputActions,
+  multimodalInputActions,
+  type StoreFileWithDescription,
+} from "@/lib/store/chat/input-store";
+import { chatStore } from "@/lib/store/chat/chat-store";
 
 interface ComponentFileWithDescription extends File {
   description?: string;
@@ -23,16 +33,15 @@ interface ComponentFileWithDescription extends File {
   preview?: string;
 }
 
-interface StoreFileWithDescription {
-  file: File;
-  description?: string;
-  id: string;
-}
 
 interface ChatInputProps {
   input: string;
   setInput: (input: string) => void;
-  handleSubmit: (e: React.FormEvent, message: string, files?: ComponentFileWithDescription[]) => void;
+  handleSubmit: (
+    e: React.FormEvent,
+    message: string,
+    files?: ComponentFileWithDescription[]
+  ) => void;
   isLoading?: boolean;
   isStreaming?: boolean;
   projectId?: string;
@@ -69,8 +78,11 @@ export function ChatInput({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputSnapshot = useSnapshot(inputStore, { sync: true });
 
-  const activeConversationId = conversationStore.activeConversationId || 'new';
-  const { uploadFiles, cancelUpload, generatePreview } = useFileUpload(activeConversationId, projectId);
+  const activeConversationId = chatStore.active || "new";
+  const { uploadFiles, cancelUpload, generatePreview } = useFileUpload(
+    activeConversationId,
+    projectId
+  );
 
   // Handle dropped files
   const handleFilesDropped = (files: File[]) => {
@@ -78,7 +90,8 @@ export function ChatInput({
     uploadFiles(files);
   };
 
-  const { handleDragEnter, handleDragLeave, handleDragOver, handleDrop } = useDragAndDrop(handleFilesDropped);
+  const { handleDragEnter, handleDragLeave, handleDragOver, handleDrop } =
+    useDragAndDrop(handleFilesDropped);
 
   // Sync local input with prop input when it changes externally
   useEffect(() => {
@@ -105,25 +118,29 @@ export function ChatInput({
   useEffect(() => {
     const isDisabled = inputSnapshot.isDragging || inputSnapshot.isUploading;
     if (isDisabled) {
-      console.debug('Chat input disabled:', {
+      console.debug("Chat input disabled:", {
         isDragging: inputSnapshot.isDragging,
         isUploading: inputSnapshot.isUploading,
-        conversationId: activeConversationId
+        conversationId: activeConversationId,
       });
     }
-  }, [inputSnapshot.isDragging, inputSnapshot.isUploading, activeConversationId]);
+  }, [
+    inputSnapshot.isDragging,
+    inputSnapshot.isUploading,
+    activeConversationId,
+  ]);
 
   // Manual reset function for development/debugging
   const resetInputState = () => {
     inputActions.setDragging(false);
     inputActions.setUploading(false);
     inputActions.clearUploadProgress();
-    console.log('Manually reset input state');
+    console.log("Manually reset input state");
   };
 
   // Expose reset function to window for debugging (only in development)
   useEffect(() => {
-    if (process.env.NODE_ENV === 'development') {
+    if (process.env.NODE_ENV === "development") {
       (window as any).resetChatInput = resetInputState;
     }
   }, []);
@@ -143,26 +160,49 @@ export function ChatInput({
   const removeFile = (index: number) => {
     const file = inputSnapshot.selectedFiles[index];
     if (file) {
-      multimodalInputActions.clearFilePreview(activeConversationId, file.file.name);
-      multimodalInputActions.clearFileDescription(activeConversationId, file.file.name);
-      multimodalInputActions.setEditingDescription(activeConversationId, file.file.name, false);
+      multimodalInputActions.clearFilePreview(
+        activeConversationId,
+        file.file.name
+      );
+      multimodalInputActions.clearFileDescription(
+        activeConversationId,
+        file.file.name
+      );
+      multimodalInputActions.setEditingDescription(
+        activeConversationId,
+        file.file.name,
+        false
+      );
     }
     inputActions.removeSelectedFile(file?.id || index.toString());
   };
 
   const toggleEditDescription = (fileName: string) => {
-    const currentEditing = multimodalInputActions.getEditingDescription(activeConversationId, fileName);
-    multimodalInputActions.setEditingDescription(activeConversationId, fileName, !currentEditing);
+    const currentEditing = multimodalInputActions.getEditingDescription(
+      activeConversationId,
+      fileName
+    );
+    multimodalInputActions.setEditingDescription(
+      activeConversationId,
+      fileName,
+      !currentEditing
+    );
   };
 
   const updateFileDescription = (fileName: string, description: string) => {
-    multimodalInputActions.setFileDescription(activeConversationId, fileName, description);
-    const fileIndex = inputSnapshot.selectedFiles.findIndex(f => f.file?.name === fileName);
+    multimodalInputActions.setFileDescription(
+      activeConversationId,
+      fileName,
+      description
+    );
+    const fileIndex = inputSnapshot.selectedFiles.findIndex(
+      (f) => f.file?.name === fileName
+    );
     if (fileIndex !== -1) {
       const updatedFiles = [...inputSnapshot.selectedFiles];
       updatedFiles[fileIndex] = {
         ...updatedFiles[fileIndex],
-        description
+        description,
       };
       inputActions.setSelectedFiles(updatedFiles);
     }
@@ -175,7 +215,10 @@ export function ChatInput({
       return;
     }
 
-    const allFiles = [...inputSnapshot.selectedFiles.map(f => f.file), ...externalFiles];
+    const allFiles = [
+      ...inputSnapshot.selectedFiles.map((f) => f.file),
+      ...externalFiles,
+    ];
     handleSubmit(e, input.trim(), allFiles);
 
     multimodalInputActions.setLocalInput(activeConversationId, "");
@@ -184,7 +227,7 @@ export function ChatInput({
   };
 
   // Only show connecting message for real conversations that aren't subscribed
-  if (!isSubscribed && conversationId !== 'new') {
+  if (!isSubscribed && conversationId !== "new") {
     return (
       <div className={cn("relative m-3", className)}>
         <div className="bg-muted/50 rounded-lg p-4 border border-border min-h-[60px] flex items-center justify-center">
@@ -214,27 +257,43 @@ export function ChatInput({
       onDrop={handleDrop}
     >
       <DragDropOverlay isDragging={inputSnapshot.isDragging} />
-      
+
       {inputSnapshot.isUploading && (
-        <FileUploadProgress 
+        <FileUploadProgress
           uploadProgress={inputSnapshot.uploadProgress}
           onCancel={cancelUpload}
         />
       )}
 
-      {(inputSnapshot.selectedFiles.length > 0 || externalFiles.length > 0 || uploadedFiles.length > 0) && (
+      {(inputSnapshot.selectedFiles.length > 0 ||
+        externalFiles.length > 0 ||
+        uploadedFiles.length > 0) && (
         <div className="mb-2 space-y-2">
-          {(inputSnapshot.selectedFiles.length > 0 || externalFiles.length > 0) && (
+          {(inputSnapshot.selectedFiles.length > 0 ||
+            externalFiles.length > 0) && (
             <>
               <div className="text-xs text-muted-foreground">
                 Attached files:
               </div>
               <div className="space-y-2">
-                {inputSnapshot.selectedFiles.map((fileData, index) => {
+                {inputSnapshot.selectedFiles.map((fileData: any, index: number) => {
                   const file = fileData.file;
-                  const preview = multimodalInputActions.getFilePreview(activeConversationId, file.name);
-                  const isEditingDesc = multimodalInputActions.getEditingDescription(activeConversationId, file.name);
-                  const description = multimodalInputActions.getFileDescription(activeConversationId, file.name) || fileData.description || "";
+                  const preview = multimodalInputActions.getFilePreview(
+                    activeConversationId,
+                    file.name
+                  );
+                  const isEditingDesc =
+                    multimodalInputActions.getEditingDescription(
+                      activeConversationId,
+                      file.name
+                    );
+                  const description =
+                    multimodalInputActions.getFileDescription(
+                      activeConversationId,
+                      file.name
+                    ) ||
+                    fileData.description ||
+                    "";
 
                   return (
                     <AttachedFileItem
@@ -246,15 +305,29 @@ export function ChatInput({
                       isUploading={inputSnapshot.isUploading}
                       onRemove={() => removeFile(index)}
                       onToggleEdit={() => toggleEditDescription(file.name)}
-                      onUpdateDescription={(desc) => updateFileDescription(file.name, desc)}
+                      onUpdateDescription={(desc) =>
+                        updateFileDescription(file.name, desc)
+                      }
                     />
                   );
                 })}
-                {externalFiles.map((file, index) => {
-                  const preview = multimodalInputActions.getFilePreview(activeConversationId, file.name);
-                  const isEditingDesc = multimodalInputActions.getEditingDescription(activeConversationId, `external-${file.name}`);
-                  const description = multimodalInputActions.getFileDescription(activeConversationId, `external-${file.name}`) ||
-                    (file as ComponentFileWithDescription).description || "";
+                {externalFiles.map((file: any, index: number) => {
+                  const preview = multimodalInputActions.getFilePreview(
+                    activeConversationId,
+                    file.name
+                  );
+                  const isEditingDesc =
+                    multimodalInputActions.getEditingDescription(
+                      activeConversationId,
+                      `external-${file.name}`
+                    );
+                  const description =
+                    multimodalInputActions.getFileDescription(
+                      activeConversationId,
+                      `external-${file.name}`
+                    ) ||
+                    (file as ComponentFileWithDescription).description ||
+                    "";
 
                   return (
                     <AttachedFileItem
@@ -264,12 +337,32 @@ export function ChatInput({
                       preview={preview}
                       isEditingDescription={isEditingDesc}
                       onRemove={() => {
-                        onExternalFilesChange?.(externalFiles.filter((_, i) => i !== index));
-                        multimodalInputActions.clearFilePreview(activeConversationId, file.name);
-                        multimodalInputActions.clearFileDescription(activeConversationId, `external-${file.name}`);
+                        onExternalFilesChange?.(
+                          externalFiles.filter((_, i) => i !== index)
+                        );
+                        multimodalInputActions.clearFilePreview(
+                          activeConversationId,
+                          file.name
+                        );
+                        multimodalInputActions.clearFileDescription(
+                          activeConversationId,
+                          `external-${file.name}`
+                        );
                       }}
-                      onToggleEdit={() => multimodalInputActions.setEditingDescription(activeConversationId, `external-${file.name}`, !isEditingDesc)}
-                      onUpdateDescription={(desc) => multimodalInputActions.setFileDescription(activeConversationId, `external-${file.name}`, desc)}
+                      onToggleEdit={() =>
+                        multimodalInputActions.setEditingDescription(
+                          activeConversationId,
+                          `external-${file.name}`,
+                          !isEditingDesc
+                        )
+                      }
+                      onUpdateDescription={(desc) =>
+                        multimodalInputActions.setFileDescription(
+                          activeConversationId,
+                          `external-${file.name}`,
+                          desc
+                        )
+                      }
                     />
                   );
                 })}
@@ -285,7 +378,10 @@ export function ChatInput({
         autoFocus
         onChange={(e) => {
           setInput(e.target.value);
-          multimodalInputActions.setLocalInput(activeConversationId, e.target.value);
+          multimodalInputActions.setLocalInput(
+            activeConversationId,
+            e.target.value
+          );
         }}
         onEnterSubmit={(e) => handleFormSubmit(e as any)}
         placeholder={
@@ -304,7 +400,9 @@ export function ChatInput({
             ? undefined
             : "Enter to send, Shift+Enter for new line"
         }
-        className={cn("min-h-[60px] max-h-[200px] resize-none pr-12 bg-background")}
+        className={cn(
+          "min-h-[60px] max-h-[200px] resize-none pr-12 bg-background"
+        )}
         disabled={inputSnapshot.isDragging || inputSnapshot.isUploading}
         rows={1}
       />
@@ -354,7 +452,10 @@ export function ChatInput({
                 }
                 type="submit"
                 disabled={
-                  !input.trim() || inputSnapshot.isUploading || isLoading || isStreaming
+                  !input.trim() ||
+                  inputSnapshot.isUploading ||
+                  isLoading ||
+                  isStreaming
                 }
                 className="h-8 w-8"
               >
@@ -394,19 +495,29 @@ export function ChatInput({
               };
             });
 
-            convertedFiles.forEach(file => {
+            convertedFiles.forEach((file) => {
               const storeFile: StoreFileWithDescription = {
                 file,
-                description: (file as any).description || '',
-                id: (file as any).fileId || Date.now().toString() + Math.random().toString(36).substring(2, 11)
+                description: (file as any).description || "",
+                id:
+                  (file as any).fileId ||
+                  Date.now().toString() +
+                    Math.random().toString(36).substring(2, 11),
               };
               inputActions.addSelectedFile(storeFile);
             });
 
             convertedFiles.forEach((file) => {
-              const description = (file as any).description || (file as any).autoDescription || "";
+              const description =
+                (file as any).description ||
+                (file as any).autoDescription ||
+                "";
               if (description) {
-                multimodalInputActions.setFileDescription(activeConversationId, file.name, description);
+                multimodalInputActions.setFileDescription(
+                  activeConversationId,
+                  file.name,
+                  description
+                );
               }
 
               if (file.type.startsWith("image/")) {
@@ -414,7 +525,11 @@ export function ChatInput({
                 if (clientId && projectId) {
                   const fileName = (file as any).filePath.split("/").pop();
                   const previewUrl = `${API_BASE_URL}/uploads/${clientId}/${projectId}/${fileName}`;
-                  multimodalInputActions.setFilePreview(activeConversationId, file.name, previewUrl);
+                  multimodalInputActions.setFilePreview(
+                    activeConversationId,
+                    file.name,
+                    previewUrl
+                  );
                 }
               }
             });

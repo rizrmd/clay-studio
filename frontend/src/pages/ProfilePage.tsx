@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Shield, User, AlertCircle, CheckCircle } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { AppLayout } from '@/components/layout/app-layout'
 import axios from '@/lib/utils/axios'
 
 export function ProfilePage() {
@@ -61,7 +62,7 @@ export function ProfilePage() {
 
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <AppLayout>
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="grid gap-6 md:grid-cols-2">
           <Card>
@@ -189,6 +190,6 @@ export function ProfilePage() {
           </Card>
         </div>
       </div>
-    </div>
+    </AppLayout>
   )
 }

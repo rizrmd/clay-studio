@@ -1,35 +1,33 @@
 import { useSnapshot } from "valtio";
-import { sidebarStore } from "@/store/sidebar-store";
+// import { sidebarStore } from "@/store/sidebar-store";
+import { useChat } from "@/lib/hooks/use-chat";
+import { sidebarStore } from "@/lib/store/chat/sidebar-store";
+import { Conversation } from "../types";
 import { ConversationItem } from "./item";
 
-interface Conversation {
-  id: string;
-  project_id: string;
-  title: string;
-  message_count: number;
-  created_at: string;
-  updated_at: string;
-  is_title_manually_set?: boolean;
-}
-
 interface ConversationListProps {
-  conversations: Conversation[];
   currentConversationId?: string;
-  onConversationClick: (conversationId: string, e: React.MouseEvent) => void;
-  onConversationHover: (conversationId: string) => void;
+  onConversationClick: (conversationId: string) => void;
   onRenameConversation: (conversation: Conversation) => void;
   onDeleteConversation: (conversationId: string) => void;
 }
 
 export function ConversationList({
-  conversations,
   currentConversationId,
   onConversationClick,
-  onConversationHover,
   onRenameConversation,
   onDeleteConversation,
 }: ConversationListProps) {
   const sidebarSnapshot = useSnapshot(sidebarStore);
+  const chat = useChat();
+
+  // Convert conversation list to array of conversation objects
+  const conversations = chat.conversationList
+    .map((id) => ({
+      ...chat.conversationMap[id],
+      title: chat.conversationMap[id]?.title || `Conversation ${id}`,
+    }))
+    .filter(Boolean);
 
   if (sidebarSnapshot.loading) {
     return (
@@ -65,10 +63,10 @@ export function ConversationList({
       {conversations.map((conversation) => (
         <ConversationItem
           key={conversation.id}
+          href={`/p/${chat.projectId}/c/${chat.conversationId}`}
           conversation={conversation}
           isActive={currentConversationId === conversation.id}
           onClick={onConversationClick}
-          onHover={onConversationHover}
           onRename={onRenameConversation}
           onDelete={onDeleteConversation}
         />

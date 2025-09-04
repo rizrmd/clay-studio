@@ -5,6 +5,7 @@ import App from "./app";
 import "./styles/globals.css";
 import "./styles/markdown.css";
 import "./lib/utils/axios"; // Configure axios
+import { initializeApp } from "./lib/store/auth-store";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -15,10 +16,13 @@ const queryClient = new QueryClient({
   },
 });
 
+// Initialize app authentication and setup
+initializeApp();
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   // <React.StrictMode>
   <QueryClientProvider client={queryClient}>
-    <BrowserRouter>
+    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <App />
     </BrowserRouter>
   </QueryClientProvider>

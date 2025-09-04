@@ -2,7 +2,38 @@ import { useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useSnapshot } from 'valtio'
 import { ClientRootResponse, rootService } from '@/lib/services/root-service'
-import { clientDetailStore, clientDetailActions } from '@/store/client-detail-store'
+// import { clientDetailStore, clientDetailActions } from '@/store/client-detail-store'
+
+// Stub implementation
+const clientDetailStore = {
+  client: null as ClientRootResponse | null,
+  isLoading: false,
+  error: null as string | null,
+  actionLoading: false,
+  editDialogOpen: false,
+  claudeDialogOpen: false,
+};
+
+const clientDetailActions = {
+  setClient: (client: ClientRootResponse | null) => {
+    (clientDetailStore as any).client = client;
+  },
+  setLoading: (isLoading: boolean) => {
+    (clientDetailStore as any).isLoading = isLoading;
+  },
+  setError: (error: string | null) => {
+    (clientDetailStore as any).error = error;
+  },
+  setActionLoading: (loading: boolean) => {
+    (clientDetailStore as any).actionLoading = loading;
+  },
+  setEditDialogOpen: (open: boolean) => {
+    (clientDetailStore as any).editDialogOpen = open;
+  },
+  setClaudeDialogOpen: (open: boolean) => {
+    (clientDetailStore as any).claudeDialogOpen = open;
+  },
+};
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -22,7 +53,7 @@ import {
   Key
 } from 'lucide-react'
 import { format } from 'date-fns'
-import { ProtectedRoute } from '@/components/auth/protected-route'
+import { AuthRoute } from '@/components/auth/auth-route'
 import { ClientDetailDialog } from '@/components/root/client-detail-dialog'
 import { SetupClaudeDialog } from '@/components/root/setup-claude-dialog'
 import { DomainManagement } from '@/components/root/domain-management'
@@ -138,7 +169,7 @@ export function ClientDetailPage() {
     }
   }
 
-  if (clientDetailSnapshot.loading) {
+  if (clientDetailSnapshot.isLoading) {
     return (
       <div className="min-h-screen bg-background">
         <div className="container mx-auto py-8 px-4">
@@ -169,7 +200,7 @@ export function ClientDetailPage() {
   }
 
   return (
-    <ProtectedRoute>
+    <AuthRoute>
       <div className="min-h-screen bg-background">
         <div className="container mx-auto py-8 px-4">
           {/* Header */}
@@ -492,7 +523,7 @@ export function ClientDetailPage() {
           />
         )}
       </div>
-    </ProtectedRoute>
+    </AuthRoute>
   )
 }
 

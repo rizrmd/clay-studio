@@ -18,7 +18,7 @@ use tokio::signal;
 use crate::utils::{Config, AppState};
 use crate::api::{
     admin, auth, clients, client_management,
-    conversations, conversations_forget, projects, prompt, tool_usage, upload, user_management, websocket
+    conversations_forget, projects, prompt, tool_usage, upload, user_management, websocket
 };
 use crate::utils::middleware::{inject_state, client_scoped, auth::{auth_required, admin_required, root_required}};
 use crate::core::sessions::PostgresSessionStore;
@@ -298,10 +298,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         // Conversation routes - more specific paths first
         .push(
-            Router::with_path("/conversations/{conversation_id}/messages")
-                .get(conversations::get_conversation_messages)
-        )
-        .push(
             Router::with_path("/conversations/{conversation_id}/forget-after")
                 .put(conversations_forget::forget_messages_after)
                 .delete(conversations_forget::restore_forgotten_messages)
@@ -314,25 +310,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .push(
             Router::with_path("/messages/{message_id}/tool-usage/{tool_name}")
                 .get(tool_usage::get_tool_usage_by_name)
-        )
-        .push(
-            Router::with_path("/conversations/{conversation_id}/context")
-                .get(conversations::get_conversation_context)
-        )
-        .push(
-            Router::with_path("/conversations/{conversation_id}")
-                .get(conversations::get_conversation)
-                .put(conversations::update_conversation)
-                .delete(conversations::delete_conversation)
-        )
-        .push(
-            Router::with_path("/conversations/new-from-message")
-                .post(conversations::create_conversation_from_message)
-        )
-        .push(
-            Router::with_path("/conversations")
-                .get(conversations::list_conversations)
-                .post(conversations::create_conversation)
         )
         .push(Router::with_path("/upload").post(upload::handle_file_upload))
         .push(Router::with_path("/uploads").get(upload::handle_list_uploads))
