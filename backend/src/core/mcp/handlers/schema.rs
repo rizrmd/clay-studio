@@ -202,9 +202,17 @@ impl McpHandlers {
         source_type: &str,
     ) -> Result<Value, JsonRpcError> {
         match config {
-            Value::String(connection_url) => {
-                // Parse connection URL into config object
-                self.parse_connection_url(connection_url, source_type)
+            Value::String(string_value) => {
+                // First, try to parse as JSON object (in case it's a serialized JSON string)
+                if let Ok(parsed_json) = serde_json::from_str::<Value>(string_value) {
+                    if parsed_json.is_object() {
+                        // It's a JSON object string, use the parsed object
+                        return Ok(parsed_json);
+                    }
+                }
+                
+                // Otherwise, treat as connection URL and parse it
+                self.parse_connection_url(string_value, source_type)
                     .map(Value::Object)
             }
             Value::Object(_) => {
@@ -225,25 +233,51 @@ impl McpHandlers {
         url: &str,
         source_type: &str,
     ) -> Result<serde_json::Map<String, Value>, JsonRpcError> {
+        eprintln!("🔗 parse_connection_url called with:");
+        eprintln!("   url: '{}'", url);
+        eprintln!("   source_type: '{}'", source_type);
+        
         let config = match source_type {
-            "postgresql" | "postgres" => self.parse_postgres_url(url),
-            "mysql" => self.parse_mysql_url(url),
-            "clickhouse" => self.parse_clickhouse_url(url),
-            _ => self.parse_generic_url(url),
+            "postgresql" | "postgres" => {
+                eprintln!("   Attempting PostgreSQL URL parsing");
+                self.parse_postgres_url(url)
+            },
+            "mysql" => {
+                eprintln!("   Attempting MySQL URL parsing");
+                self.parse_mysql_url(url)
+            },
+            "clickhouse" => {
+                eprintln!("   Attempting ClickHouse URL parsing");
+                self.parse_clickhouse_url(url)
+            },
+            _ => {
+                eprintln!("   Attempting generic URL parsing");
+                self.parse_generic_url(url)
+            },
         };
 
-        config.ok_or_else(|| JsonRpcError {
-            code: INVALID_PARAMS,
-            message: format!("Invalid connection URL format for {}", source_type),
-            data: None,
-        })
+        match config {
+            Some(c) => {
+                eprintln!("✅ URL parsing succeeded: {:?}", c);
+                Ok(c)
+            },
+            None => {
+                eprintln!("❌ URL parsing failed for '{}' ({})", url, source_type);
+                Err(JsonRpcError {
+                    code: INVALID_PARAMS,
+                    message: format!("Invalid connection URL format for {}", source_type),
+                    data: None,
+                })
+            }
+        }
     }
 
     pub fn parse_postgres_url(&self, url: &str) -> Option<serde_json::Map<String, Value>> {
         let re = regex::Regex::new(
-            r"postgresql://(?:([^:]+)(?::([^@]+))?@)?([^:/]+)(?::(\d+))?/([^?]+)(?:\?(.+))?",
+            r"postgres(?:ql)?://(?:([^:]+)(?::([^@]+))?@)?([^:/]+)(?::(\d+))?/([^?]+)(?:\?(.+))?",
         )
         .ok()?;
+        
         let caps = re.captures(url)?;
 
         let mut config = serde_json::Map::new();

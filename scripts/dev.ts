@@ -47,10 +47,11 @@ const cleanupPort = (port: number) => {
   }
 };
 
-// Initial cleanup - kill processes on ports 7680 and 7690
+// Initial cleanup - kill processes on ports 7680, 7690, and 7670
 console.log("🧹 Cleaning up existing processes...");
 cleanupPort(7680); // backend
 cleanupPort(7690); // frontend
+cleanupPort(7670); // MCP server
 
 // Build MCP server debug binary first
 console.log("🔧 Building MCP server debug binary...");
@@ -94,8 +95,9 @@ const restartBackend = async () => {
     backendProcess.kill();
   }
   
-  // Clean up port
-  cleanupPort(7680);
+  // Clean up ports
+  cleanupPort(7680); // backend
+  cleanupPort(7670); // MCP server (started by backend)
   
   // Wait a bit for cleanup
   await new Promise(resolve => setTimeout(resolve, 1000));
@@ -169,8 +171,9 @@ const monitorBackend = async () => {
           if (backendRunning) {
             console.log("🔄 Recompiling backend...");
             backendRunning = false;
-            // Clean up port immediately when recompilation starts
-            cleanupPort(7680);
+            // Clean up ports immediately when recompilation starts
+            cleanupPort(7680); // backend
+            cleanupPort(7670); // MCP server
           } else {
             console.log("🔧 Compiling backend...");
           }
@@ -229,8 +232,9 @@ const monitorBackend = async () => {
           } else {
             console.error("💥 Backend crashed - cleaning up and restarting...");
             
-            // Clean up port 7680 immediately when we detect a crash
-            cleanupPort(7680);
+            // Clean up ports immediately when we detect a crash
+            cleanupPort(7680); // backend
+            cleanupPort(7670); // MCP server
             
             // Restart backend if we haven't exceeded max attempts
             if (restartAttempts < MAX_RESTART_ATTEMPTS) {

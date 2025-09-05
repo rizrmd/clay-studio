@@ -6,9 +6,7 @@ use handlers::McpHandlers;
 use salvo::prelude::*;
 use sqlx::PgPool;
 use std::io::{self, BufRead, BufReader, Write};
-use std::sync::Arc;
 use tokio::runtime::Runtime;
-use tokio::sync::Mutex;
 use types::*;
 
 pub struct McpServer {
@@ -357,9 +355,9 @@ pub fn run_with_http(project_id: String, client_id: String, server_type: String,
 }
 
 async fn run_http_server(
-    project_id: String,
-    client_id: String,
-    server_type: String,
+    _project_id: String,
+    _client_id: String,
+    _server_type: String,
     port: u16,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Create database connection pool
@@ -377,17 +375,10 @@ async fn run_http_server(
         Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
     );
 
-    let handlers = Arc::new(Mutex::new(McpHandlers {
-        project_id: project_id.clone(),
-        client_id: client_id.clone(),
-        server_type: server_type.clone(),
-        db_pool,
-    }));
-
     let router = Router::new()
-        .push(Router::with_path("/mcp").post(handle_mcp_request))
-        .push(Router::with_path("/mcp/sse").get(handle_sse_connection))
-        .hoop(McpHandlerMiddleware { handlers: handlers.clone() })
+        .push(Router::with_path("/data-analysis/{client_id}/{project_id}").post(handle_mcp_request).get(handle_sse_connection))
+        .push(Router::with_path("/interaction/{client_id}/{project_id}").post(handle_mcp_request).get(handle_sse_connection))
+        .hoop(DbMiddleware { db_pool })
         .hoop(CorsMiddleware);
 
     let acceptor = TcpListener::new(format!("0.0.0.0:{}", port)).bind().await;
@@ -403,14 +394,14 @@ async fn run_http_server(
     Ok(())
 }
 
-struct McpHandlerMiddleware {
-    handlers: Arc<Mutex<McpHandlers>>,
+struct DbMiddleware {
+    db_pool: PgPool,
 }
 
 #[async_trait::async_trait]
-impl Handler for McpHandlerMiddleware {
+impl Handler for DbMiddleware {
     async fn handle(&self, req: &mut Request, depot: &mut Depot, res: &mut Response, ctrl: &mut FlowCtrl) {
-        depot.insert("mcp_handlers", self.handlers.clone());
+        depot.insert("db_pool", self.db_pool.clone());
         ctrl.call_next(req, depot, res).await;
     }
 }
@@ -429,7 +420,36 @@ impl Handler for CorsMiddleware {
 
 #[handler]
 async fn handle_mcp_request(req: &mut Request, depot: &mut Depot, res: &mut Response) {
-    let handlers = depot.get::<Arc<Mutex<McpHandlers>>>("mcp_handlers").unwrap();
+    let db_pool = depot.get::<PgPool>("db_pool").unwrap().clone();
+    
+    // Extract client_id and project_id from URL parameters
+    let client_id = req.param::<String>("client_id").unwrap_or_else(|| "unknown".to_string());
+    let project_id = req.param::<String>("project_id").unwrap_or_else(|| "default".to_string());
+    
+    // Determine server type from URL path
+    let server_type = if req.uri().path().starts_with("/data-analysis") {
+        "data-analysis".to_string()
+    } else if req.uri().path().starts_with("/interaction") {
+        "interaction".to_string()
+    } else {
+        "data-analysis".to_string()
+    };
+    
+    // Create handlers for this specific request
+    let handlers = McpHandlers {
+        project_id: project_id.clone(),
+        client_id: client_id.clone(),
+        server_type: server_type.clone(),
+        db_pool,
+    };
+    
+    eprintln!(
+        "[{}] [INFO] Processing MCP request for server_type: {}, client_id: {}, project_id: {}",
+        Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+        server_type,
+        client_id,
+        project_id
+    );
     
     // Parse JSON-RPC request
     let request_body = match req.payload().await {
@@ -469,10 +489,9 @@ async fn handle_mcp_request(req: &mut Request, depot: &mut Depot, res: &mut Resp
         }
     };
 
-    // Handle the request using the same logic as stdio
-    let handlers_guard = handlers.lock().await;
+    // Handle the request
     let result = match json_request.method.as_str() {
-        "initialize" => handlers_guard.handle_initialize(json_request.params).await,
+        "initialize" => handlers.handle_initialize(json_request.params).await,
         "notifications/initialized" => {
             eprintln!(
                 "[{}] [INFO] Client initialization complete - MCP server fully ready",
@@ -480,10 +499,10 @@ async fn handle_mcp_request(req: &mut Request, depot: &mut Depot, res: &mut Resp
             );
             Ok(serde_json::json!({}))
         }
-        "resources/list" => handlers_guard.handle_resources_list(json_request.params).await,
-        "resources/read" => handlers_guard.handle_resources_read(json_request.params).await,
-        "tools/list" => handlers_guard.handle_tools_list(json_request.params).await,
-        "tools/call" => handlers_guard.handle_tools_call(json_request.params).await,
+        "resources/list" => handlers.handle_resources_list(json_request.params).await,
+        "resources/read" => handlers.handle_resources_read(json_request.params).await,
+        "tools/list" => handlers.handle_tools_list(json_request.params).await,
+        "tools/call" => handlers.handle_tools_call(json_request.params).await,
         _ => Err(JsonRpcError {
             code: METHOD_NOT_FOUND,
             message: format!("Method not found: {}", json_request.method),
@@ -510,15 +529,36 @@ async fn handle_mcp_request(req: &mut Request, depot: &mut Depot, res: &mut Resp
 }
 
 #[handler]
-async fn handle_sse_connection(_req: &mut Request, _depot: &mut Depot, res: &mut Response) {
+async fn handle_sse_connection(req: &mut Request, _depot: &mut Depot, res: &mut Response) {
     use salvo::sse::{self as sse, SseEvent};
     use futures_util::stream;
     use std::convert::Infallible;
     
+    // Extract client_id and project_id from URL parameters for logging
+    let client_id = req.param::<String>("client_id").unwrap_or_else(|| "unknown".to_string());
+    let project_id = req.param::<String>("project_id").unwrap_or_else(|| "default".to_string());
+    
+    // Determine server type from URL path
+    let server_type = if req.uri().path().starts_with("/data-analysis") {
+        "data-analysis"
+    } else if req.uri().path().starts_with("/interaction") {
+        "interaction"
+    } else {
+        "data-analysis"
+    };
+    
+    eprintln!(
+        "[{}] [INFO] SSE connection established for server_type: {}, client_id: {}, project_id: {}",
+        Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+        server_type,
+        client_id,
+        project_id
+    );
+    
     let event_stream = stream::iter(vec![
         Ok::<_, Infallible>(
             SseEvent::default()
-                .text("MCP SSE connection established")
+                .text(format!("MCP {} SSE connection established for client {} project {}", server_type, client_id, project_id))
                 .name("connected")
         )
     ]);

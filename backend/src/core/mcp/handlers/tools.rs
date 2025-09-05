@@ -305,7 +305,7 @@ impl McpHandlers {
                             "oneOf": [
                                 {
                                     "type": "string",
-                                    "description": "Connection URL (e.g., postgresql://user:pass@host:port/db)"
+                                    "description": "Connection URL (e.g., postgres://user:pass@host:port/db or postgresql://user:pass@host:port/db)"
                                 },
                                 {
                                     "type": "object",

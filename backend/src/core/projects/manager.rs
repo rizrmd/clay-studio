@@ -57,7 +57,7 @@ impl ProjectManager {
                 AppError::InternalServerError(format!("Failed to create project directory: {}", e))
             })?;
 
-            self.initialize_project_files(&project_dir)?;
+            self.initialize_project_files(&project_dir, client_id, project_id)?;
 
             tracing::info!("Created project directory: {:?}", project_dir);
         }
@@ -71,7 +71,7 @@ impl ProjectManager {
             .join(project_id)
     }
 
-    fn initialize_project_files(&self, project_dir: &Path) -> Result<(), AppError> {
+    fn initialize_project_files(&self, project_dir: &Path, client_id: Uuid, project_id: &str) -> Result<(), AppError> {
         let claude_dir = project_dir.join(".claude");
         if !claude_dir.exists() {
             fs::create_dir(&claude_dir).map_err(|e| {
@@ -82,55 +82,19 @@ impl ProjectManager {
         // Create MCP configuration for this project
         let mcp_config_file = claude_dir.join("settings.local.json");
         if !mcp_config_file.exists() {
-            // Get MCP server path - look for the built binary
-            let mcp_server_path = {
-                let release_path = std::env::current_dir()
-                    .map(|p| p.join("target/release/mcp_server"))
-                    .unwrap_or_else(|_| PathBuf::from("target/release/mcp_server"));
-                let debug_path = std::env::current_dir()
-                    .map(|p| p.join("target/debug/mcp_server"))
-                    .unwrap_or_else(|_| PathBuf::from("target/debug/mcp_server"));
-
-                if release_path.exists() {
-                    release_path.canonicalize().unwrap_or(release_path)
-                } else if debug_path.exists() {
-                    debug_path.canonicalize().unwrap_or(debug_path)
-                } else {
-                    // Default path where it should be after build
-                    std::env::current_dir()
-                        .map(|p| p.join("target/debug/mcp_server"))
-                        .unwrap_or_else(|_| PathBuf::from("/usr/local/bin/mcp_server"))
-                }
-            };
-
-            // Get database URL from environment
-            let database_url = std::env::var("DATABASE_URL").unwrap_or_default();
-
-            // Extract project ID from directory name
-            let project_id = project_dir
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("default")
-                .to_string();
-
-            // Extract client ID from parent directory
-            let client_id = self
-                .extract_client_id_from_path(project_dir)
-                .map(|id| id.to_string())
-                .unwrap_or_else(|| "unknown".to_string());
+            // Use the actual project_id and client_id parameters passed to the method
+            let project_id_str = project_id.to_string();
+            let client_id_str = client_id.to_string();
 
             let mcp_config = serde_json::json!({
                 "mcpServers": {
-                    "clay-studio": {
-                        "type": "stdio",
-                        "command": mcp_server_path.to_string_lossy(),
-                        "args": [
-                            "--project-id", project_id,
-                            "--client-id", client_id
-                        ],
-                        "env": {
-                            "DATABASE_URL": database_url
-                        }
+                    "data-analysis": {
+                        "type": "sse",
+                        "url": format!("http://localhost:7670/data-analysis/{}/{}", client_id_str, project_id_str)
+                    },
+                    "interaction": {
+                        "type": "sse",
+                        "url": format!("http://localhost:7670/interaction/{}/{}", client_id_str, project_id_str)
                     }
                 }
             });
@@ -168,23 +132,11 @@ Add any project-specific context or instructions here that Claude should be awar
         }
 
         let project_info = ProjectInfo {
-            id: project_dir
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("unknown")
-                .to_string(),
-            name: format!(
-                "Project {}",
-                project_dir
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("unknown")
-            ),
+            id: project_id.to_string(),
+            name: format!("Project {}", project_id),
             created_at: Utc::now().to_rfc3339(),
             updated_at: Utc::now().to_rfc3339(),
-            client_id: self
-                .extract_client_id_from_path(project_dir)
-                .unwrap_or(Uuid::new_v4()),
+            client_id,
         };
 
         let project_info_path = project_dir.join(".project.json");
@@ -199,13 +151,6 @@ Add any project-specific context or instructions here that Claude should be awar
         Ok(())
     }
 
-    fn extract_client_id_from_path(&self, project_dir: &Path) -> Option<Uuid> {
-        project_dir
-            .parent()
-            .and_then(|p| p.file_name())
-            .and_then(|n| n.to_str())
-            .and_then(|s| Uuid::parse_str(s).ok())
-    }
 
     #[allow(dead_code)]
     pub fn list_projects(&self, client_id: Uuid) -> Result<Vec<ProjectInfo>, AppError> {

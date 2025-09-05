@@ -8,10 +8,10 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Code2, Clock, FileText, Play } from "lucide-react";
 import { api } from "@/lib/utils/api";
+import { InteractionRenderer, hasInteraction } from "@/components/chat/display/interaction/interaction-renderer";
 
 interface ToolUsageDetails {
   id: string;
@@ -78,7 +78,9 @@ export function ToolUsageDialog({
   const parseMcpToolResult = (text: string): any => {
     try {
       if (text.includes("[Resource from interaction at mcp://tool-result/")) {
-        const match = text.match(/\[Resource from interaction at mcp:\/\/tool-result\/[^\]]+\]\s*(.+)/s);
+        const match = text.match(
+          /\[Resource from interaction at mcp:\/\/tool-result\/[^\]]+\]\s*(.+)/s
+        );
         if (match && match[1]) {
           const jsonText = match[1].trim();
           return JSON.parse(jsonText);
@@ -96,7 +98,12 @@ export function ToolUsageDialog({
     // Check for array format with MCP tool result
     if (Array.isArray(output) && output.length > 0) {
       const firstItem = output[0];
-      if (firstItem && typeof firstItem === "object" && firstItem.text && firstItem.type === "text") {
+      if (
+        firstItem &&
+        typeof firstItem === "object" &&
+        firstItem.text &&
+        firstItem.type === "text"
+      ) {
         const parsedMcp = parseMcpToolResult(firstItem.text);
         if (parsedMcp) {
           return JSON.stringify(parsedMcp, null, 2);
@@ -115,7 +122,7 @@ export function ToolUsageDialog({
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>{children}</DialogTrigger>
-      <DialogContent className="min-w-[95vw] max-h-[90vh] text-xs">
+      <DialogContent className="min-w-[95vw] min-h-[90vh] text-xs flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Code2 className="h-5 w-5" />
@@ -137,7 +144,7 @@ export function ToolUsageDialog({
         )}
 
         {toolUsage && (
-          <div className="space-y-4">
+          <div className="space-y-4 flex-1 flex flex-col">
             {/* Tool Info */}
             <div className="flex items-center gap-4 p-4 border rounded-lg bg-muted/50">
               <Play className="h-5 w-5 text-green-500" />
@@ -153,34 +160,40 @@ export function ToolUsageDialog({
               )}
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {/* Parameters */}
+            {/* Interactive Content */}
+            {hasInteraction(toolUsage.output) && (
               <div className="space-y-2">
+                <h3 className="font-semibold text-sm">Interactive Content</h3>
+                <div className="border rounded-lg p-4 bg-muted/30">
+                  <InteractionRenderer toolOutput={toolUsage.output} />
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 flex-1">
+              {/* Parameters */}
+              <div className="space-y-2 flex flex-col">
                 <div className="flex items-center gap-2">
                   <FileText className="h-4 w-4" />
                   <h3 className="font-semibold">Parameters</h3>
                 </div>
-                <div className="border rounded-lg">
-                  <ScrollArea className="h-60">
-                    <pre className="p-4 text-xs font-mono bg-muted/30 rounded-lg whitespace-pre-wrap">
-                      {formatJson(toolUsage.parameters)}
-                    </pre>
-                  </ScrollArea>
+                <div className="border  relative overflow-auto flex-1 bg-muted/30 rounded-lg">
+                  <pre className="p-4 absolute inset-0 text-xs font-mono whitespace-pre-wrap">
+                    {formatJson(toolUsage.parameters)}
+                  </pre>
                 </div>
               </div>
 
               {/* Output */}
-              <div className="space-y-2">
+              <div className="space-y-2 flex flex-col">
                 <div className="flex items-center gap-2">
                   <FileText className="h-4 w-4" />
                   <h3 className="font-semibold">Output</h3>
                 </div>
-                <div className="border rounded-lg">
-                  <ScrollArea className="h-60">
-                    <pre className="p-4 text-xs font-mono bg-muted/30 rounded-lg whitespace-pre-wrap">
-                      {formatOutput(toolUsage.output)}
-                    </pre>
-                  </ScrollArea>
+                <div className="border relative overflow-auto flex-1 bg-muted/30 rounded-lg ">
+                  <pre className="p-4 absolute inset-0 text-xs font-mono whitespace-pre-wrap">
+                    {formatOutput(toolUsage.output)}
+                  </pre>
                 </div>
               </div>
             </div>
@@ -188,7 +201,7 @@ export function ToolUsageDialog({
             <Separator />
 
             {/* Metadata */}
-            <div className="text-xs text-muted-foreground space-y-1">
+            <div className="text-xs text-muted-foreground gap-x-7 flex-wrap flex flex-row justify-center items-center">
               <div>Message ID: {toolUsage.message_id}</div>
               {toolUsage.tool_use_id && (
                 <div>Tool Use ID: {toolUsage.tool_use_id}</div>

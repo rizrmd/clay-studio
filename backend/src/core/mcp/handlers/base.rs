@@ -17,6 +17,36 @@ pub struct McpHandlers {
 }
 
 impl McpHandlers {
+    /// Verify that the client and project exist in the database
+    pub async fn verify_client_and_project_exist(&self) -> Result<(), String> {
+        // First verify the client exists
+        let client_uuid = uuid::Uuid::parse_str(&self.client_id)
+            .map_err(|e| format!("Invalid client ID format: {}", e))?;
+        
+        let client_exists = sqlx::query("SELECT 1 FROM clients WHERE id = $1 AND deleted_at IS NULL")
+            .bind(client_uuid)
+            .fetch_optional(&self.db_pool)
+            .await
+            .map_err(|e| format!("Database error checking client existence: {}", e))?;
+
+        if client_exists.is_none() {
+            return Err(format!("Client {} does not exist", &self.client_id));
+        }
+
+        // Verify the project exists
+        let exists = sqlx::query("SELECT 1 FROM projects WHERE id = $1 AND deleted_at IS NULL")
+            .bind(&self.project_id)
+            .fetch_optional(&self.db_pool)
+            .await
+            .map_err(|e| format!("Database error checking project existence: {}", e))?;
+
+        if exists.is_none() {
+            return Err(format!("Project {} does not exist", &self.project_id));
+        }
+
+        Ok(())
+    }
+
     /// Refresh CLAUDE.md with current datasource information
     pub async fn refresh_claude_md(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Get all datasources for this project

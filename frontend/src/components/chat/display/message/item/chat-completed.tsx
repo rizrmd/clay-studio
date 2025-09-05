@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { motion } from "framer-motion";
-import { Ban, Code2 } from "lucide-react";
+import { Code2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import {
@@ -12,11 +12,8 @@ import {
 import { FilePreview } from "@/components/ui/file-preview";
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
 import { ToolUsageDialog } from "@/components/chat/display/message/item/tool-usage-dialog";
-import {
-  ChevronRightIcon,
-  ReloadIcon,
-  RocketIcon,
-} from "@radix-ui/react-icons";
+import { InteractionRenderer, hasInteraction } from "@/components/chat/display/interaction/interaction-renderer";
+import { ChevronRightIcon } from "@radix-ui/react-icons";
 
 const chatBubbleVariants = cva(
   "group/message relative break-words rounded-lg p-3 text-sm sm:max-w-[70%]",
@@ -104,7 +101,6 @@ interface TextPart {
   text: string;
 }
 
-// For compatibility with AI SDK types, not used
 interface SourcePart {
   type: "source";
   source?: any;
@@ -138,13 +134,13 @@ export interface Message {
   parts?: MessagePart[];
 }
 
-export interface ChatMessageProps extends Message {
+export interface ChatCompletedProps extends Message {
   showTimeStamp?: boolean;
   animation?: Animation;
   actions?: React.ReactNode;
 }
 
-export const ChatMessage: React.FC<ChatMessageProps> = ({
+export const ChatCompleted: React.FC<ChatCompletedProps> = ({
   role,
   content,
   createdAt,
@@ -241,7 +237,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
         return <ReasoningBlock key={`reasoning-${index}`} part={part} />;
       } else if (part.type === "tool-invocation") {
         return (
-          <ToolCall
+          <CompletedToolCall
             key={`tool-${index}`}
             toolInvocations={[part.toolInvocation]}
           />
@@ -251,10 +247,19 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
     });
   }
 
-  if (toolInvocations && toolInvocations.length > 0 && !content) {
+  const completedToolInvocations = toolInvocations?.filter(
+    (invocation) =>
+      invocation.state === "result" && !invocation.result.__cancelled
+  );
+
+  if (
+    completedToolInvocations &&
+    completedToolInvocations.length > 0 &&
+    !content
+  ) {
     return (
       <div className="flex text-xs flex-row gap-2 flex-wrap">
-        <ToolCall toolInvocations={toolInvocations} />
+        <CompletedToolCall toolInvocations={completedToolInvocations} />
       </div>
     );
   }
@@ -269,9 +274,9 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
           </div>
         ) : null}
 
-        {toolInvocations && toolInvocations.length > 0 && (
+        {completedToolInvocations && completedToolInvocations.length > 0 && (
           <div className="flex [&_.tool-use]:bg-white [&_.tool-use]:border-0 text-xs mt-3 flex-row gap-2 flex-wrap">
-            <ToolCall toolInvocations={toolInvocations} />
+            <CompletedToolCall toolInvocations={completedToolInvocations} />
           </div>
         )}
       </div>
@@ -337,61 +342,99 @@ const ReasoningBlock = ({ part }: { part: ReasoningPart }) => {
   );
 };
 
-function ToolCall({
+function CompletedToolCall({
   toolInvocations,
-}: Pick<ChatMessageProps, "toolInvocations">) {
+}: {
+  toolInvocations?: ToolInvocation[];
+}) {
+  const [expanded, setExpanded] = useState(false);
+  
   if (!toolInvocations?.length) return null;
 
-  return (
-    <>
-      {toolInvocations.map((invocation, index) => {
-        const isCancelled =
-          invocation.state === "result" &&
-          invocation.result.__cancelled === true;
+  const validInvocations = toolInvocations.filter(
+    (invocation) => invocation.state === "result" && !invocation.result.__cancelled
+  );
 
-        if (isCancelled) {
-          return (
-            <div
-              key={index}
-              className="flex items-center gap-2 border tool-use text-muted-foreground"
-            >
-              <Ban />
-              <span>
-                Cancelled{" "}
-                <span className="font-mono">
-                  {"`"}
-                  {invocation.toolName}
-                  {"`"}
-                </span>
+  if (validInvocations.length === 0) return null;
+
+  if (validInvocations.length === 1) {
+    const invocation = validInvocations[0];
+    
+    // Check if this tool result contains an interaction (show_table or show_chart)
+    if (invocation.state === "result" && hasInteraction(invocation.result)) {
+      return (
+        <div className="flex flex-col gap-2 mt-2">
+          <div className="flex items-center gap-2 text-muted-foreground text-xs">
+            <Code2 className="w-3 h-3" />
+            <span className="font-mono capitalize">
+              {invocation.toolName
+                .split("__")
+                .pop()
+                ?.split("_")
+                .join(" ")}
+            </span>
+          </div>
+          <InteractionRenderer toolOutput={invocation.result} />
+        </div>
+      );
+    }
+
+    return (
+      <ToolUsageDialog toolUsageId={invocation.id}>
+        <div className="flex flex-col gap-1.5 border tool-use cursor-pointer hover:bg-muted/70 transition-colors">
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <Code2 />
+            <span>
+              <span className="font-mono capitalize">
+                {invocation.toolName
+                  .split("__")
+                  .pop()
+                  ?.split("_")
+                  .join(" ")}
               </span>
-            </div>
-          );
-        }
+            </span>
+          </div>
+        </div>
+      </ToolUsageDialog>
+    );
+  }
 
-        switch (invocation.state) {
-          case "partial-call":
-          case "call":
-            return (
-              <div
-                key={index}
-                className="flex items-center gap-2 border tool-use text-muted-foreground"
-              >
-                <RocketIcon />
-                <span>
-                  Calling{" "}
-                  <span className="font-mono">
-                    {invocation.toolName
-                      .split("__")
-                      .pop()
-                      ?.split("_")
-                      .join(" ")}
-                  </span>
-                  ...
-                </span>
-                <ReloadIcon className="h-3 w-3 animate-spin" />
-              </div>
-            );
-          case "result":
+  return (
+    <div className="flex flex-col gap-2">
+      <div 
+        className="flex flex-col gap-1.5 border tool-use cursor-pointer hover:bg-muted/70 transition-colors"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <div className="flex items-center gap-2 text-muted-foreground">
+          <Code2 />
+          <span className="font-mono">
+            {validInvocations.length} Tools used
+          </span>
+        </div>
+      </div>
+      
+      {expanded && (
+        <div className="flex flex-col gap-2 pl-4">
+          {validInvocations.map((invocation, index) => {
+            // Check if this tool result contains an interaction
+            if (invocation.state === "result" && hasInteraction(invocation.result)) {
+              return (
+                <div key={index} className="flex flex-col gap-2">
+                  <div className="flex items-center gap-2 text-muted-foreground text-xs">
+                    <Code2 className="w-3 h-3" />
+                    <span className="font-mono capitalize">
+                      {invocation.toolName
+                        .split("__")
+                        .pop()
+                        ?.split("_")
+                        .join(" ")}
+                    </span>
+                  </div>
+                  <InteractionRenderer toolOutput={invocation.result} />
+                </div>
+              );
+            }
+
             return (
               <ToolUsageDialog key={index} toolUsageId={invocation.id}>
                 <div className="flex flex-col gap-1.5 border tool-use cursor-pointer hover:bg-muted/70 transition-colors">
@@ -410,10 +453,9 @@ function ToolCall({
                 </div>
               </ToolUsageDialog>
             );
-          default:
-            return null;
-        }
-      })}
-    </>
+          })}
+        </div>
+      )}
+    </div>
   );
 }

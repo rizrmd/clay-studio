@@ -318,6 +318,11 @@ class WebSocketService extends EventEmitter {
   }
 
   private handleServerMessage(message: ServerMessage): void {
+    // Debug log for tool events
+    if (message.type === "tool_use" || message.type === "tool_complete") {
+      console.log("🔧 WebSocket received tool event:", message);
+    }
+    
     // Emit the message for components to listen to
     this.emit(message.type, message);
 
@@ -546,6 +551,27 @@ class WebSocketService extends EventEmitter {
   isStreaming(conversationId: string): boolean {
     const stream = this.activeStreams.get(conversationId);
     return stream ? !stream.isComplete : false;
+  }
+
+  // DEBUG: Test tool events (temporary)
+  testToolEvents(conversationId: string): void {
+    console.log("🔧 Testing tool events for conversation:", conversationId);
+    
+    // Simulate tool_use event
+    this.emit("tool_started", { 
+      tool: "test_tool", 
+      toolUsageId: "test_id_123", 
+      conversationId 
+    });
+    
+    // Simulate tool_complete after 3 seconds
+    setTimeout(() => {
+      this.emit("tool_completed", {
+        tool: "test_tool",
+        toolUsageId: "test_id_123", 
+        conversationId
+      });
+    }, 3000);
   }
 }
 

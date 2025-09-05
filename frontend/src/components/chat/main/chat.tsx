@@ -29,6 +29,7 @@ export function Chat() {
     stopStreaming: _stopStreaming,
     isConnected,
     isStreaming,
+    testToolEvents: _testToolEvents, // Keep for potential future debug use
   } = useChat();
 
   // Update UI WebSocket status

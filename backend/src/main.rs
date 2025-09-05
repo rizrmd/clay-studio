@@ -161,6 +161,59 @@ async fn shutdown_signal() {
     }
 }
 
+/// Start the MCP server instance
+async fn start_mcp_server() -> Result<(), Box<dyn std::error::Error>> {
+    use std::process::Command;
+    
+    // Get MCP server path - look for the built binary
+    let mcp_server_path = {
+        let release_path = std::env::current_dir()
+            .map(|p| p.join("target/release/mcp_server"))
+            .unwrap_or_else(|_| std::path::PathBuf::from("target/release/mcp_server"));
+        let debug_path = std::env::current_dir()
+            .map(|p| p.join("target/debug/mcp_server"))
+            .unwrap_or_else(|_| std::path::PathBuf::from("target/debug/mcp_server"));
+
+        if release_path.exists() {
+            release_path.canonicalize().unwrap_or(release_path)
+        } else if debug_path.exists() {
+            debug_path.canonicalize().unwrap_or(debug_path)
+        } else {
+            return Err("MCP server binary not found. Run 'cargo build --bin mcp_server' first.".into());
+        }
+    };
+
+    tracing::info!("🔧 Starting MCP server at {:?}", mcp_server_path);
+
+    // Start the MCP server as a background process
+    let mut child = Command::new(mcp_server_path)
+        .arg("--http")
+        .arg("--port")
+        .arg("7670")
+        .spawn()?;
+
+    // Give the server a moment to start
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+
+    // Check if the process is still running
+    match child.try_wait() {
+        Ok(Some(status)) => {
+            return Err(format!("MCP server exited immediately with status: {}", status).into());
+        }
+        Ok(None) => {
+            tracing::info!("✅ MCP server started successfully on port 7670");
+        }
+        Err(e) => {
+            return Err(format!("Failed to check MCP server status: {}", e).into());
+        }
+    }
+
+    // Detach the process so it continues running independently
+    std::mem::forget(child);
+
+    Ok(())
+}
+
 /// Ensure global Bun installation is available for all clients
 async fn ensure_global_bun_installation() -> Result<(), Box<dyn std::error::Error>> {
     use std::path::PathBuf;
@@ -259,7 +312,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Ensure global Bun installation is available for all clients
     ensure_global_bun_installation().await?;
 
-    // Note: MCP servers are now started per-project dynamically
+    // Start the MCP server instance
+    start_mcp_server().await?;
 
     // Session configuration
     let default_secret = "clay-studio-secret-key-change-in-production-this-is-64-bytes-long";

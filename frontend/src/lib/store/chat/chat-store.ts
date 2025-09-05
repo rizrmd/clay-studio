@@ -1,10 +1,19 @@
 import { proxy } from "valtio";
 import { Conversation, CONVERSATION_ID, PROJECT_ID } from "../../types/chat";
 
+interface ToolState {
+  tool: string;
+  toolUsageId: string;
+  startTime: number;
+  status: 'active' | 'completed' | 'error';
+  executionTime?: number;
+  completedAt?: number;
+}
+
 interface StreamingState {
   messageId: string;
   partialContent: string;
-  activeTools: Array<{ tool: string; toolUsageId: string; startTime: number }>;
+  activeTools: Array<ToolState>;
   isComplete: boolean;
 }
 

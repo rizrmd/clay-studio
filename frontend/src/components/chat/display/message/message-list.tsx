@@ -5,7 +5,7 @@ import { MessageItem } from "./message-item";
 import { TypingIndicator } from "@/components/ui/typing-indicator";
 
 export const MessageList = () => {
-  const { currentMessages, isStreaming, conversationId } = useChat();
+  const { currentMessages, isStreaming, conversationId, currentActiveTools } = useChat();
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const endOfMessagesRef = useRef<HTMLDivElement>(null);
 
@@ -33,10 +33,22 @@ export const MessageList = () => {
       <div className="flex flex-col absolute inset-0 mx-auto max-w-2xl ">
         {currentMessages.map((message, index) => {
           if (message.content === "") return null;
+          const isLastMessage = index === currentMessages.length - 1;
+          // DEBUG: Log last message detection
+          if (isLastMessage) {
+            console.log("🔧 Last message detected:", { 
+              messageId: message.id, 
+              role: message.role,
+              index, 
+              totalMessages: currentMessages.length 
+            });
+          }
           return (
             <MessageItem
               key={message.id || index}
               message={message as Message}
+              activeTools={currentActiveTools}
+              isLastMessage={isLastMessage}
             />
           );
         })}
@@ -45,7 +57,7 @@ export const MessageList = () => {
             <TypingIndicator />
           </div>
         )}
-        <div ref={endOfMessagesRef} />
+        <div ref={endOfMessagesRef} className="end-of-chat min-h-[90px] w-full" />
       </div>
     </div>
   );

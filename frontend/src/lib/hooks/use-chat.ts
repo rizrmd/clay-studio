@@ -172,8 +172,56 @@ export const useChat = () => {
     });
 
     // Tool event listeners
-    // wsService.on("tool_started", handleToolStarted);
-    // wsService.on("tool_completed", handleToolCompleted);
+    const handleToolStarted = (message: { tool: string; toolUsageId: string; conversationId: string }) => {
+      console.log("🔧 Tool started:", message);
+      console.log("🔧 Current streaming state before:", JSON.stringify(chatStore.streaming, null, 2));
+      
+      if (!chatStore.streaming[message.conversationId]) {
+        console.log("🔧 Creating new streaming state for:", message.conversationId);
+        chatStore.streaming[message.conversationId] = {
+          messageId: "",
+          partialContent: "",
+          activeTools: [],
+          isComplete: false,
+        };
+      }
+      
+      const activeTools = chatStore.streaming[message.conversationId].activeTools;
+      if (!activeTools.find(t => t.toolUsageId === message.toolUsageId)) {
+        console.log("🔧 Adding tool to activeTools:", message.tool);
+        activeTools.push({
+          tool: message.tool,
+          toolUsageId: message.toolUsageId,
+          startTime: Date.now(),
+          status: 'active',
+        });
+        console.log("🔧 ActiveTools after push:", activeTools);
+      } else {
+        console.log("🔧 Tool already exists in activeTools");
+      }
+      
+      console.log("🔧 Final streaming state:", JSON.stringify(chatStore.streaming[message.conversationId], null, 2));
+    };
+
+    const handleToolCompleted = (message: { tool: string; toolUsageId: string; executionTimeMs?: number; conversationId: string }) => {
+      console.log("🔧 Tool completed:", message);
+      if (chatStore.streaming[message.conversationId]) {
+        const activeTools = chatStore.streaming[message.conversationId].activeTools;
+        const toolIndex = activeTools.findIndex(t => t.toolUsageId === message.toolUsageId);
+        if (toolIndex !== -1) {
+          // Mark tool as completed instead of removing it
+          activeTools[toolIndex].status = 'completed';
+          activeTools[toolIndex].completedAt = Date.now();
+          if (message.executionTimeMs) {
+            activeTools[toolIndex].executionTime = message.executionTimeMs;
+          }
+          console.log("🔧 Tool marked as completed:", activeTools[toolIndex]);
+        }
+      }
+    };
+
+    wsService.on("tool_started", handleToolStarted);
+    wsService.on("tool_completed", handleToolCompleted);
 
     // New conversation management listeners
     wsService.on("conversation_list", handleConversationList);
@@ -194,8 +242,8 @@ export const useChat = () => {
       wsService.off("error", handleError);
 
       // Tool event cleanup
-      // wsService.off("tool_started", handleToolStarted);
-      // wsService.off("tool_completed", handleToolCompleted);
+      wsService.off("tool_started", handleToolStarted);
+      wsService.off("tool_completed", handleToolCompleted);
 
       // New conversation management cleanup
       wsService.off("conversation_list", handleConversationList);
@@ -300,6 +348,16 @@ export const useChat = () => {
       ? snap.map[snap.conversation_id].messages || []
       : [];
 
+  // Helper to get active tools for current conversation
+  const currentActiveTools = snap.conversation_id && snap.streaming[snap.conversation_id]
+    ? snap.streaming[snap.conversation_id].activeTools || []
+    : [];
+    
+  // DEBUG: Log active tools (only when there are tools)
+  if (currentActiveTools.length > 0) {
+    console.log("🔧 Current active tools:", currentActiveTools);
+  }
+
   return {
     // Current state
     projectId: snap.project_id,
@@ -307,6 +365,7 @@ export const useChat = () => {
     conversationMap: snap.map,
     conversationList: snap.list,
     currentMessages,
+    currentActiveTools,
 
     // Status
     isConnected: wsService.isConnected(),
@@ -335,6 +394,13 @@ export const useChat = () => {
 
     setConversationId(id: CONVERSATION_ID) {
       chatStore.conversation_id = id;
+    },
+
+    // DEBUG: Test tool events
+    testToolEvents() {
+      if (snap.conversation_id) {
+        wsService.testToolEvents(snap.conversation_id);
+      }
     },
   };
 };

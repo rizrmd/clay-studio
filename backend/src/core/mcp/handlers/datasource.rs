@@ -34,6 +34,9 @@ impl McpHandlers {
                 return Err(format!("Connection test failed: {}", e).into());
             }
 
+            // Verify that client and project exist before inserting datasource
+            self.verify_client_and_project_exist().await?;
+
             // Generate UUID for the new datasource
             let datasource_id = uuid::Uuid::new_v4().to_string();
 
@@ -46,7 +49,7 @@ impl McpHandlers {
             .bind(&self.project_id)
             .bind(name)
             .bind(source_type)
-            .bind(serde_json::to_string(&parsed_config)?)
+            .bind(&parsed_config)
             .execute(&self.db_pool)
             .await?;
 
@@ -197,7 +200,7 @@ impl McpHandlers {
             .ok_or_else(|| "Datasource not found".to_string())?;
 
             let mut name_update: Option<String> = None;
-            let mut config_update: Option<String> = None;
+            let mut config_update: Option<Value> = None;
 
             // Handle updates
             if let Some(name) = args.get("name").and_then(|v| v.as_str()) {
@@ -215,7 +218,7 @@ impl McpHandlers {
                     return Err(format!("Connection test failed: {}", e).into());
                 }
                 
-                config_update = Some(serde_json::to_string(&parsed_config)?);
+                config_update = Some(parsed_config);
             }
 
             if name_update.is_none() && config_update.is_none() {
