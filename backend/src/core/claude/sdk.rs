@@ -76,6 +76,33 @@ impl ClaudeSDK {
                 let _ = std::fs::create_dir_all(&claude_dir);
             }
 
+            // Check if existing config needs migration from stdio to HTTP
+            let force_update = if mcp_servers_file.exists() {
+                match std::fs::read_to_string(&mcp_servers_file) {
+                    Ok(content) => {
+                        let is_stdio = content.contains("\"type\": \"stdio\"") || content.contains("\"type\":\"stdio\"");
+                        if is_stdio {
+                            tracing::info!("🔄 Migrating MCP config from stdio to HTTP transport for project {}", project_id);
+                            // Backup the stdio config
+                            let backup_path = claude_dir.join("mcp_servers_stdio_backup.json");
+                            let _ = std::fs::write(&backup_path, &content);
+                            true
+                        } else {
+                            // Already HTTP, but verify servers are running
+                            tracing::debug!("🔍 Verifying existing HTTP MCP servers for project {}", project_id);
+                            false
+                        }
+                    }
+                    Err(_) => {
+                        tracing::warn!("⚠️ Cannot read existing MCP config, recreating for project {}", project_id);
+                        true
+                    }
+                }
+            } else {
+                tracing::info!("📝 Creating new HTTP MCP config for project {}", project_id);
+                true
+            };
+
             // Check if we're in Docker/production environment
             let is_production = std::env::var("STATIC_FILES_PATH")
                 .unwrap_or_default()
@@ -116,8 +143,20 @@ impl ClaudeSDK {
                 }
             };
 
-            // Create MCP servers configuration using HTTP transport with dynamic ports
+            // Get or allocate ports for this project
             let (data_analysis_port, interaction_port) = Self::allocate_mcp_ports(project_id, &self.client_id);
+
+            // If config already exists and is HTTP, verify servers are running before proceeding
+            if !force_update {
+                if Self::check_mcp_server_ready(data_analysis_port).await && Self::check_mcp_server_ready(interaction_port).await {
+                    tracing::debug!("✅ HTTP MCP servers already running and ready for project {}", project_id);
+                    return;
+                } else {
+                    tracing::warn!("⚠️ HTTP MCP config exists but servers not ready, restarting for project {}", project_id);
+                }
+            }
+
+            // Create MCP servers configuration using HTTP transport with dynamic ports
             
             let mcp_servers = json!({
                 "mcpServers": {
