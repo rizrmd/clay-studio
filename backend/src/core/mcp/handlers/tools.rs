@@ -65,7 +65,7 @@ impl McpHandlers {
             .and_then(|p| p.get("protocolVersion"))
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
-            .unwrap_or_else(|| "2024-11-05".to_string());
+            .unwrap_or_else(|| "2025-06-18".to_string());
             
         eprintln!(
             "[{}] [INFO] Client requested protocol version: {}",
