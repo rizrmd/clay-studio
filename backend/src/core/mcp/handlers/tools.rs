@@ -73,6 +73,11 @@ impl McpHandlers {
             client_protocol_version
         );
         
+        eprintln!(
+            "[{}] [INFO] MCP Server fully initialized and ready for requests",
+            Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
+        );
+        
         let result = InitializeResult {
             protocol_version: client_protocol_version,
             server_info: ServerInfo {

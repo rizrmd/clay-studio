@@ -123,8 +123,10 @@ impl McpServer {
         let stdin = io::stdin();
         let reader = BufReader::new(stdin.lock());
 
-        for line in reader.lines() {
-            match line {
+        // Set up timeout to avoid hanging indefinitely
+        let mut line_iter = reader.lines();
+        while let Some(line_result) = line_iter.next() {
+            match line_result {
                 Ok(line) => {
                     if line.trim().is_empty() {
                         continue;
