@@ -30,6 +30,7 @@ pub struct UpdateConversationRequest {
 }
 
 #[derive(Debug, Serialize)]
+#[allow(dead_code)]
 pub struct MessageResponse {
     pub id: String,
     pub content: String,

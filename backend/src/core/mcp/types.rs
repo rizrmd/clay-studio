@@ -83,6 +83,7 @@ pub struct Resource {
 }
 
 #[derive(Debug, Serialize)]
+#[allow(dead_code)]
 pub struct ResourceContent {
     pub uri: String,
     #[serde(rename = "mimeType")]
@@ -100,6 +101,7 @@ pub struct Tool {
 }
 
 #[derive(Debug, Serialize)]
+#[allow(dead_code)]
 pub struct ToolCallResult {
     pub content: Vec<ToolContent>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -107,6 +109,7 @@ pub struct ToolCallResult {
 }
 
 #[derive(Debug, Serialize)]
+#[allow(dead_code)]
 pub struct ToolContent {
     #[serde(rename = "type")]
     pub content_type: String,

@@ -18,6 +18,7 @@ pub struct Message {
 }
 
 impl Message {
+    #[allow(dead_code)]
     pub fn new_user(content: String) -> Self {
         Message {
             id: Uuid::new_v4().to_string(),
@@ -30,6 +31,7 @@ impl Message {
         }
     }
 
+    #[allow(dead_code)]
     pub fn new_assistant(content: String) -> Self {
         Message {
             id: Uuid::new_v4().to_string(),
