@@ -126,6 +126,9 @@ pub async fn handle_prompt_stream(
                 // Interaction Tools
                 "mcp__interaction__show_table".to_string(),
                 "mcp__interaction__show_chart".to_string(),
+                // regular tools
+                "WebSearch".to_string(),
+                "WebFetch".to_string(),
             ]),
             permission_mode: Some("relaxed".to_string()),
             resume_session_id: None,
