@@ -35,13 +35,6 @@ impl McpServer {
         // Get database URL from environment
         let database_url = std::env::var("DATABASE_URL")
             .map_err(|_| "DATABASE_URL environment variable not set")?;
-        
-        eprintln!(
-            "[{}] [INFO] DATABASE_URL received: {} (length: {})",
-            Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
-            if database_url.is_empty() { "EMPTY" } else { "***REDACTED***" },
-            database_url.len()
-        );
 
         // Create database connection pool
         eprintln!(
@@ -91,13 +84,6 @@ impl McpServer {
         // Get database URL from environment
         let database_url = std::env::var("DATABASE_URL")
             .map_err(|_| "DATABASE_URL environment variable not set")?;
-        
-        eprintln!(
-            "[{}] [INFO] DATABASE_URL received: {} (length: {})",
-            Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
-            if database_url.is_empty() { "EMPTY" } else { "***REDACTED***" },
-            database_url.len()
-        );
 
         // Create database connection pool
         eprintln!(
