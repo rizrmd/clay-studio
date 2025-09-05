@@ -162,7 +162,7 @@ export function ProjectsPage() {
                     key={project.id}
                     className="relative bg-white dark:bg-gray-800 rounded-lg shadow-sm hover:shadow-md transition-shadow border border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-600 group"
                   >
-                    <Link to={`/p/${project.id}`} className="block p-6">
+                    <Link to={`/p/${project.id}/new`} className="block p-6">
                       <div className="flex items-start justify-between mb-4">
                         <div className="flex items-center">
                           <FolderOpen className="h-8 w-8 text-blue-600 dark:text-blue-400" />
