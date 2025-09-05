@@ -1,4 +1,4 @@
-use crate::core::claude::{ClaudeMessage, ClaudeSDK, QueryOptions, QueryRequest};
+use crate::core::claude::{ClaudeMessage, ClaudeSDK, QueryRequest};
 use crate::utils::AppError;
 use crate::utils::AppState;
 use salvo::prelude::*;
@@ -11,6 +11,7 @@ use uuid::Uuid;
 pub struct PromptRequest {
     pub prompt: String,
     #[serde(default)]
+    #[allow(dead_code)]
     pub max_turns: Option<u32>,
 }
 
