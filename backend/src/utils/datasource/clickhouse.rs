@@ -335,7 +335,7 @@ impl DataSourceConnector for ClickHouseConnector {
     async fn search_tables(&self, pattern: &str) -> Result<Value, Box<dyn Error>> {
         let query = format!(
             "SELECT database, name FROM system.tables WHERE database NOT IN ('system', 'information_schema', 'INFORMATION_SCHEMA') AND name LIKE '{}' ORDER BY database, name",
-            pattern.replace('%', "%").replace('*', "%")
+            pattern.replace(['%', '*'], "%")
         );
 
         let tables_info: Vec<(String, String)> = self.client.query(&query).fetch_all().await?;

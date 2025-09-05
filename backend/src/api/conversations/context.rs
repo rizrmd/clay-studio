@@ -1,8 +1,7 @@
 use crate::core::tools::ToolApplicabilityChecker;
 use crate::models::tool_usage::ToolUsage;
 use crate::models::*;
-use crate::utils::AppError;
-use crate::utils::AppState;
+use crate::utils::{get_app_state, AppError};
 use salvo::prelude::*;
 use sqlx::Row;
 
@@ -12,7 +11,7 @@ pub async fn get_conversation_context(
     depot: &mut Depot,
     res: &mut Response,
 ) -> Result<(), AppError> {
-    let state = depot.obtain::<AppState>().unwrap();
+    let state = get_app_state(depot)?;
     let conversation_id = req
         .param::<String>("conversation_id")
         .ok_or(AppError::BadRequest("Missing conversation_id".to_string()))?;

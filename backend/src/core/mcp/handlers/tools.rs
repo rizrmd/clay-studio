@@ -70,7 +70,11 @@ impl McpHandlers {
             },
         };
 
-        Ok(serde_json::to_value(result).unwrap())
+        Ok(serde_json::to_value(result).map_err(|e| JsonRpcError {
+            code: INTERNAL_ERROR,
+            message: format!("Failed to serialize response: {}", e),
+            data: None,
+        })?)
     }
 
     pub async fn handle_resources_list(
@@ -648,7 +652,7 @@ impl McpHandlers {
         }?;
 
         // Check if result is JSON, if so use resource type with application/json
-        if let Ok(_) = serde_json::from_str::<Value>(&result) {
+        if serde_json::from_str::<Value>(&result).is_ok() {
             Ok(json!({
                 "content": [
                     {
@@ -731,11 +735,11 @@ impl McpHandlers {
         });
 
 
-        Ok(serde_json::to_string(&interaction_spec).map_err(|e| JsonRpcError {
+        serde_json::to_string(&interaction_spec).map_err(|e| JsonRpcError {
             code: INTERNAL_ERROR,
             message: format!("Failed to serialize response: {}", e),
             data: None,
-        })?)
+        })
     }
 
     pub async fn handle_show_chart(
@@ -805,10 +809,10 @@ impl McpHandlers {
         });
 
 
-        Ok(serde_json::to_string(&interaction_spec).map_err(|e| JsonRpcError {
+        serde_json::to_string(&interaction_spec).map_err(|e| JsonRpcError {
             code: INTERNAL_ERROR,
             message: format!("Failed to serialize response: {}", e),
             data: None,
-        })?)
+        })
     }
 }

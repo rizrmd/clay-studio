@@ -19,7 +19,7 @@ pub fn auto_organize_logs(logs_dir: &Path) -> Result<(), Box<dyn std::error::Err
         let path = entry.path();
         
         // Only process files that are directly in the root directory
-        if !path.is_file() || path.extension().map_or(true, |ext| ext != "log") {
+        if !path.is_file() || path.extension().is_none_or(|ext| ext != "log") {
             continue;
         }
 
@@ -91,7 +91,7 @@ pub fn reorganize_claude_logs(logs_dir: &Path, dry_run: bool) -> Result<(usize, 
     for entry in entries {
         let entry = entry?;
         let path = entry.path();
-        if path.is_file() && path.extension().map_or(false, |ext| ext == "log") {
+        if path.is_file() && path.extension().is_some_and(|ext| ext == "log") {
             log_files.push(path);
         }
     }
@@ -180,7 +180,7 @@ pub fn find_claude_logs_directories(base_path: &Path) -> Result<Vec<PathBuf>, Bo
     let mut claude_logs_dirs = Vec::new();
 
     // If the path itself is a .claude_logs directory
-    if base_path.file_name().map_or(false, |name| name == ".claude_logs") && base_path.exists() {
+    if base_path.file_name().is_some_and(|name| name == ".claude_logs") && base_path.exists() {
         claude_logs_dirs.push(base_path.to_path_buf());
         return Ok(claude_logs_dirs);
     }
@@ -197,7 +197,7 @@ pub fn find_claude_logs_directories(base_path: &Path) -> Result<Vec<PathBuf>, Bo
             let path = entry.path();
             
             if path.is_dir() {
-                if path.file_name().map_or(false, |name| name == ".claude_logs") {
+                if path.file_name().is_some_and(|name| name == ".claude_logs") {
                     results.push(path);
                 } else {
                     // Recursively search subdirectories, but skip hidden dirs except .claude_logs

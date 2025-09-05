@@ -9,7 +9,7 @@ use tokio::sync::mpsc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-use crate::utils::{AppError, AppState};
+use crate::utils::{get_app_state, AppError, AppState};
 use async_session::SessionStore;
 
 // WebSocket message types from client
@@ -177,7 +177,7 @@ pub async fn handle_websocket(
     res: &mut Response,
     depot: &mut Depot,
 ) -> Result<(), AppError> {
-    let state = depot.obtain::<AppState>().unwrap().clone();
+    let state = get_app_state(depot)?.clone();
 
     // Try to get session from query parameter first (for compatibility)
     // Note: req.query automatically URL-decodes the parameter
@@ -738,7 +738,7 @@ async fn handle_client_message(
 
             // Store the response in the database
             if let Err(e) =
-                store_ask_user_response(&state, &conversation_id, &interaction_id, &response).await
+                store_ask_user_response(state, &conversation_id, &interaction_id, &response).await
             {
                 tracing::error!("Failed to store ask_user response: {}", e);
             }
@@ -1519,14 +1519,12 @@ pub async fn broadcast_to_subscribers(
             _ => false, // Not subscribed to anything
         };
 
-        if should_send {
-            if conn.sender.send(message.clone()).is_err() {
-                tracing::warn!(
-                    "Failed to send message to connection {} (user {})",
-                    connection_id,
-                    conn.user_id
-                );
-            }
+        if should_send && conn.sender.send(message.clone()).is_err() {
+            tracing::warn!(
+                "Failed to send message to connection {} (user {})",
+                connection_id,
+                conn.user_id
+            );
         }
     }
 }

@@ -472,7 +472,7 @@ impl DataSourceConnector for OracleConnector {
                 });
                 
                 schema_map.entry(table_name)
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(column_info);
             }
             
@@ -544,12 +544,10 @@ impl DataSourceConnector for OracleConnector {
             let pooled_conn = runtime.block_on(pool.get_connection())?;
 
             // Get database size - using user_segments if dba_segments is not accessible
-            let size_sql = format!(
-                r#"
+            let size_sql = r#"
                 SELECT SUM(bytes) as total_bytes
                 FROM user_segments
-            "#
-            );
+            "#.to_string();
 
             let mut total_size: u64 = 0;
             if let Ok(rows) = pooled_conn.connection.query(&size_sql, &[]) {
@@ -680,7 +678,7 @@ impl DataSourceConnector for OracleConnector {
                 });
                 
                 schema_map.entry(table_name)
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(column_info);
             }
             

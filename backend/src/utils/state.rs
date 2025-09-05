@@ -12,6 +12,7 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 use uuid::Uuid;
+use salvo::Depot;
 
 #[derive(Clone, Debug, serde::Serialize)]
 #[allow(dead_code)]
@@ -444,4 +445,12 @@ impl AppState {
         // Reload from database (this will create a fresh cache entry)
         self.load_conversation_cache(conversation_id).await
     }
+}
+
+/// Helper function to safely extract AppState from Depot
+/// This prevents panics from unwrap() calls throughout the codebase
+pub fn get_app_state(depot: &Depot) -> Result<&AppState, salvo::http::StatusError> {
+    depot
+        .obtain::<AppState>()
+        .map_err(|_| salvo::http::StatusError::internal_server_error())
 }

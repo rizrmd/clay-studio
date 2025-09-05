@@ -3,8 +3,7 @@ use super::types::{
 };
 use crate::models::*;
 use crate::utils::middleware::{get_current_client_id, is_current_user_root};
-use crate::utils::AppError;
-use crate::utils::AppState;
+use crate::utils::{get_app_state, AppError};
 use chrono::Utc;
 use salvo::prelude::*;
 use sqlx::Row;
@@ -16,7 +15,7 @@ pub async fn list_conversations(
     depot: &mut Depot,
     res: &mut Response,
 ) -> Result<(), AppError> {
-    let state = depot.obtain::<AppState>().unwrap();
+    let state = get_app_state(depot)?;
 
     // Get current user's client_id for filtering
     let client_id = get_current_client_id(depot)?;
@@ -76,53 +75,51 @@ pub async fn list_conversations(
             .fetch_all(&state.db_pool)
             .await
         }
+    } else if is_current_user_root(depot) {
+        sqlx::query(
+            "SELECT 
+                c.id, 
+                c.project_id, 
+                c.title, 
+                (
+                    SELECT COUNT(*)::INTEGER 
+                    FROM messages m 
+                    WHERE m.conversation_id = c.id
+                    AND (m.is_forgotten = false OR m.is_forgotten IS NULL)
+                ) AS message_count,
+                c.created_at, 
+                c.updated_at, 
+                c.is_title_manually_set 
+             FROM conversations c
+             ORDER BY c.created_at DESC 
+             LIMIT 100",
+        )
+        .fetch_all(&state.db_pool)
+        .await
     } else {
-        if is_current_user_root(depot) {
-            sqlx::query(
-                "SELECT 
-                    c.id, 
-                    c.project_id, 
-                    c.title, 
-                    (
-                        SELECT COUNT(*)::INTEGER 
-                        FROM messages m 
-                        WHERE m.conversation_id = c.id
-                        AND (m.is_forgotten = false OR m.is_forgotten IS NULL)
-                    ) AS message_count,
-                    c.created_at, 
-                    c.updated_at, 
-                    c.is_title_manually_set 
-                 FROM conversations c
-                 ORDER BY c.created_at DESC 
-                 LIMIT 100",
-            )
-            .fetch_all(&state.db_pool)
-            .await
-        } else {
-            sqlx::query(
-                "SELECT 
-                    c.id, 
-                    c.project_id, 
-                    c.title, 
-                    (
-                        SELECT COUNT(*)::INTEGER 
-                        FROM messages m 
-                        WHERE m.conversation_id = c.id
-                        AND (m.is_forgotten = false OR m.is_forgotten IS NULL)
-                    ) AS message_count,
-                    c.created_at, 
-                    c.updated_at, 
-                    c.is_title_manually_set 
-                 FROM conversations c
-                 JOIN projects p ON c.project_id = p.id
-                 WHERE p.client_id = $1
-                 ORDER BY c.created_at DESC 
-                 LIMIT 100",
-            )
-            .bind(client_id)
-            .fetch_all(&state.db_pool)
-            .await
-        }
+        sqlx::query(
+            "SELECT 
+                c.id, 
+                c.project_id, 
+                c.title, 
+                (
+                    SELECT COUNT(*)::INTEGER 
+                    FROM messages m 
+                    WHERE m.conversation_id = c.id
+                    AND (m.is_forgotten = false OR m.is_forgotten IS NULL)
+                ) AS message_count,
+                c.created_at, 
+                c.updated_at, 
+                c.is_title_manually_set 
+             FROM conversations c
+             JOIN projects p ON c.project_id = p.id
+             WHERE p.client_id = $1
+             ORDER BY c.created_at DESC 
+             LIMIT 100",
+        )
+        .bind(client_id)
+        .fetch_all(&state.db_pool)
+        .await
     }
     .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
 
@@ -165,7 +162,7 @@ pub async fn get_conversation(
     depot: &mut Depot,
     res: &mut Response,
 ) -> Result<(), AppError> {
-    let state = depot.obtain::<AppState>().unwrap();
+    let state = get_app_state(depot)?;
     let conversation_id = req
         .param::<String>("conversation_id")
         .ok_or(AppError::BadRequest("Missing conversation_id".to_string()))?;
@@ -226,7 +223,7 @@ pub async fn create_conversation(
     depot: &mut Depot,
     res: &mut Response,
 ) -> Result<(), AppError> {
-    let state = depot.obtain::<AppState>().unwrap();
+    let state = get_app_state(depot)?;
     let create_req: CreateConversationRequest = req
         .parse_json()
         .await
@@ -281,7 +278,7 @@ pub async fn create_conversation_from_message(
     depot: &mut Depot,
     res: &mut Response,
 ) -> Result<(), AppError> {
-    let state = depot.obtain::<AppState>().unwrap();
+    let state = get_app_state(depot)?;
     let create_req: CreateFromMessageRequest = req
         .parse_json()
         .await
@@ -410,7 +407,7 @@ pub async fn update_conversation(
     depot: &mut Depot,
     res: &mut Response,
 ) -> Result<(), AppError> {
-    let state = depot.obtain::<AppState>().unwrap();
+    let state = get_app_state(depot)?;
     let conversation_id = req
         .param::<String>("conversation_id")
         .ok_or(AppError::BadRequest("Missing conversation_id".to_string()))?;
@@ -498,7 +495,7 @@ pub async fn delete_conversation(
     depot: &mut Depot,
     res: &mut Response,
 ) -> Result<(), AppError> {
-    let state = depot.obtain::<AppState>().unwrap();
+    let state = get_app_state(depot)?;
     let conversation_id = req
         .param::<String>("conversation_id")
         .ok_or(AppError::BadRequest("Missing conversation_id".to_string()))?;

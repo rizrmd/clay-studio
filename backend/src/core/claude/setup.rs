@@ -132,7 +132,7 @@ impl ClaudeSetup {
             .env_clear()
             .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
             .env("HOME", ".clients")
-            .env("BUN_INSTALL", self.bun_path.to_str().unwrap())
+            .env("BUN_INSTALL", self.bun_path.to_str().ok_or("Invalid path for BUN_INSTALL")?)
             .output()?;
 
         if !output.status.success() {
@@ -179,7 +179,7 @@ impl ClaudeSetup {
                 "PATH",
                 format!(
                     "{}/bin:/usr/bin:/bin:/usr/local/bin",
-                    self.bun_path.to_str().unwrap()
+                    self.bun_path.to_str().ok_or("Invalid bun path")?
                 ),
             )
             .env(
@@ -188,7 +188,7 @@ impl ClaudeSetup {
             )
             .env(
                 "BUN_INSTALL",
-                self.bun_path.canonicalize()?.to_str().unwrap(),
+                self.bun_path.canonicalize()?.to_str().ok_or("Invalid canonicalized bun path")?,
             )
             .output()?;
 
@@ -254,7 +254,7 @@ impl ClaudeSetup {
             .await;
 
         // Run in a blocking task since expectrl is not async
-        let claude_path_str = claude_path.to_str().unwrap().to_string();
+        let claude_path_str = claude_path.to_str().ok_or("Invalid claude path")?.to_string();
         let client_id = self.client_id;
         let client_dir = self.client_dir.clone();
         let session_arc = self.session.clone();

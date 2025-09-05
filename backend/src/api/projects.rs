@@ -4,7 +4,7 @@ use crate::models::*;
 use crate::utils::claude_md_template;
 use crate::utils::middleware::{get_current_client_id, is_current_user_root};
 use crate::utils::AppError;
-use crate::utils::AppState;
+use crate::utils::get_app_state;
 use chrono::Utc;
 use salvo::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -17,7 +17,7 @@ pub async fn get_project_context(
     depot: &mut Depot,
     res: &mut Response,
 ) -> Result<(), AppError> {
-    let state = depot.obtain::<AppState>().unwrap();
+    let state = get_app_state(depot)?;
     let project_id = req
         .param::<String>("project_id")
         .ok_or(AppError::BadRequest("Missing project_id".to_string()))?;
@@ -238,7 +238,7 @@ pub async fn create_project(
     depot: &mut Depot,
     res: &mut Response,
 ) -> Result<(), AppError> {
-    let state = depot.obtain::<AppState>().unwrap();
+    let state = get_app_state(depot)?;
     let create_req: CreateProjectRequest = req
         .parse_json()
         .await
@@ -287,7 +287,7 @@ pub async fn create_project(
 
 #[handler]
 pub async fn list_projects(depot: &mut Depot, res: &mut Response) -> Result<(), AppError> {
-    let state = depot.obtain::<AppState>().unwrap();
+    let state = get_app_state(depot)?;
 
     // Get current user's client_id for filtering
     let client_id = get_current_client_id(depot)?;
@@ -377,7 +377,7 @@ pub async fn save_query(
     depot: &mut Depot,
     res: &mut Response,
 ) -> Result<(), AppError> {
-    let state = depot.obtain::<AppState>().unwrap();
+    let state = get_app_state(depot)?;
     let project_id = req
         .param::<String>("project_id")
         .ok_or(AppError::BadRequest("Missing project_id".to_string()))?;
@@ -428,7 +428,7 @@ pub async fn list_queries(
     depot: &mut Depot,
     res: &mut Response,
 ) -> Result<(), AppError> {
-    let state = depot.obtain::<AppState>().unwrap();
+    let state = get_app_state(depot)?;
     let project_id = req
         .param::<String>("project_id")
         .ok_or(AppError::BadRequest("Missing project_id".to_string()))?;
@@ -461,7 +461,7 @@ pub async fn get_claude_md(
     depot: &mut Depot,
     res: &mut Response,
 ) -> Result<(), AppError> {
-    let state = depot.obtain::<AppState>().unwrap();
+    let state = get_app_state(depot)?;
     let project_id = req
         .param::<String>("project_id")
         .ok_or(AppError::BadRequest("Missing project_id".to_string()))?;
@@ -504,7 +504,7 @@ pub async fn save_claude_md(
     depot: &mut Depot,
     res: &mut Response,
 ) -> Result<(), AppError> {
-    let state = depot.obtain::<AppState>().unwrap();
+    let state = get_app_state(depot)?;
     let project_id = req
         .param::<String>("project_id")
         .ok_or(AppError::BadRequest("Missing project_id".to_string()))?;
@@ -548,7 +548,7 @@ pub async fn refresh_claude_md(
     depot: &mut Depot,
     res: &mut Response,
 ) -> Result<(), AppError> {
-    let state = depot.obtain::<AppState>().unwrap();
+    let state = get_app_state(depot)?;
     let project_id = req
         .param::<String>("project_id")
         .ok_or(AppError::BadRequest("Missing project_id".to_string()))?;
@@ -645,7 +645,7 @@ pub async fn delete_project(
     depot: &mut Depot,
     res: &mut Response,
 ) -> Result<(), AppError> {
-    let state = depot.obtain::<AppState>().unwrap();
+    let state = get_app_state(depot)?;
     let project_id = req
         .param::<String>("project_id")
         .ok_or(AppError::BadRequest("Missing project_id".to_string()))?;

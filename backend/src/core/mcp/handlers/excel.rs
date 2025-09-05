@@ -202,7 +202,7 @@ impl McpHandlers {
                             _ => {
                                 // Convert other types to string
                                 worksheet
-                                    .write_string(row_idx, col_idx as u16, &cell_value.to_string())
+                                    .write_string(row_idx, col_idx as u16, cell_value.to_string())
                                     .map_err(|e| JsonRpcError {
                                         code: INTERNAL_ERROR,
                                         message: format!("Failed to write cell: {}", e),
@@ -264,7 +264,7 @@ impl McpHandlers {
                         if let Ok(col_idx) = col_str.parse::<u16>() {
                             if let Some(width) = width_val.as_f64() {
                                 worksheet
-                                    .set_column_width(col_idx, width as f64)
+                                    .set_column_width(col_idx, width)
                                     .map_err(|e| JsonRpcError {
                                         code: INTERNAL_ERROR,
                                         message: format!("Failed to set column width: {}", e),
@@ -323,11 +323,11 @@ impl McpHandlers {
             "created_at": chrono::Utc::now().to_rfc3339(),
         });
 
-        Ok(serde_json::to_string(&interaction_spec).map_err(|e| JsonRpcError {
+        serde_json::to_string(&interaction_spec).map_err(|e| JsonRpcError {
             code: INTERNAL_ERROR,
             message: format!("Failed to serialize Excel export response: {}", e),
             data: None,
-        })?)
+        })
     }
 
     pub async fn cleanup_old_excel_files(
@@ -347,7 +347,7 @@ impl McpHandlers {
         if let Ok(mut entries) = fs::read_dir(&export_dir).await {
             while let Some(entry) = entries.next_entry().await? {
                 let path = entry.path();
-                if path.is_file() && path.extension().map_or(false, |ext| ext == "xlsx") {
+                if path.is_file() && path.extension().is_some_and(|ext| ext == "xlsx") {
                     if let Ok(metadata) = fs::metadata(&path).await {
                         if let Ok(modified) = metadata.modified() {
                             let modified_time = chrono::DateTime::<Utc>::from(modified);

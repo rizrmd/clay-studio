@@ -12,7 +12,7 @@ impl McpHandlers {
             let datasource_id = args
                 .get("datasource_id")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| format!("Missing required parameter: datasource_id"))?;
+                .ok_or_else(|| "Missing required parameter: datasource_id".to_string())?;
 
             // Get connector
             let source = self.get_datasource_connector(datasource_id).await?;
@@ -46,12 +46,12 @@ impl McpHandlers {
             let datasource_id = args
                 .get("datasource_id")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| format!("Missing required parameter: datasource_id"))?;
+                .ok_or_else(|| "Missing required parameter: datasource_id".to_string())?;
 
             let search_term = args
                 .get("search_term")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| format!("Missing required parameter: search_term"))?;
+                .ok_or_else(|| "Missing required parameter: search_term".to_string())?;
 
             // Get connector
             let source = self.get_datasource_connector(datasource_id).await?;
@@ -86,12 +86,12 @@ impl McpHandlers {
             let datasource_id = args
                 .get("datasource_id")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| format!("Missing required parameter: datasource_id"))?;
+                .ok_or_else(|| "Missing required parameter: datasource_id".to_string())?;
 
             let table_name = args
                 .get("table_name")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| format!("Missing required parameter: table_name"))?;
+                .ok_or_else(|| "Missing required parameter: table_name".to_string())?;
 
             // Get connector
             let source = self.get_datasource_connector(datasource_id).await?;
@@ -126,7 +126,7 @@ impl McpHandlers {
             let datasource_id = args
                 .get("datasource_id")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| format!("Missing required parameter: datasource_id"))?;
+                .ok_or_else(|| "Missing required parameter: datasource_id".to_string())?;
 
             // Get connector
             let source = self.get_datasource_connector(datasource_id).await?;
@@ -205,7 +205,7 @@ impl McpHandlers {
             Value::String(connection_url) => {
                 // Parse connection URL into config object
                 self.parse_connection_url(connection_url, source_type)
-                    .map(|map| Value::Object(map.into()))
+                    .map(Value::Object)
             }
             Value::Object(_) => {
                 // Already a config object, validate it
@@ -367,7 +367,7 @@ impl McpHandlers {
             config
                 .get("port")
                 .and_then(|v| v.as_u64())
-                .unwrap_or_else(|| match source_type {
+                .unwrap_or(match source_type {
                     "postgresql" | "postgres" => 5432,
                     "mysql" => 3306,
                     "clickhouse" => 8123,

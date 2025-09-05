@@ -146,7 +146,7 @@ mod tests {
             .filter_map(|entry| entry.ok())
             .filter(|entry| {
                 entry.path().extension()
-                    .map_or(false, |ext| ext == "log")
+                    .is_some_and(|ext| ext == "log")
             })
             .collect();
             

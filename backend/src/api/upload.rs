@@ -4,7 +4,7 @@ use crate::models::file_upload::{
 };
 use crate::utils::middleware::{get_current_client_id, is_current_user_root};
 use crate::utils::AppError;
-use crate::utils::AppState;
+use crate::utils::get_app_state;
 use chrono::Utc;
 use salvo::fs::NamedFile;
 use salvo::prelude::*;
@@ -29,7 +29,7 @@ pub async fn handle_file_upload(
     depot: &mut Depot,
     res: &mut Response,
 ) -> Result<(), AppError> {
-    let state = depot.obtain::<AppState>().unwrap();
+    let state = get_app_state(depot)?;
     let params: UploadParams = req
         .parse_queries()
         .map_err(|_| AppError::BadRequest("Missing client_id or project_id".to_string()))?;
@@ -255,7 +255,7 @@ pub async fn handle_update_file_description(
     depot: &mut Depot,
     res: &mut Response,
 ) -> Result<(), AppError> {
-    let state = depot.obtain::<AppState>().unwrap();
+    let state = get_app_state(depot)?;
 
     let file_id = req
         .param::<String>("file_id")
@@ -397,7 +397,7 @@ pub async fn handle_list_uploads(
     depot: &mut Depot,
     res: &mut Response,
 ) -> Result<(), AppError> {
-    let state = depot.obtain::<AppState>().unwrap();
+    let state = get_app_state(depot)?;
 
     // Get current user's client_id for filtering
     let current_client_id = get_current_client_id(depot)?;
@@ -457,7 +457,7 @@ pub async fn handle_delete_upload(
     depot: &mut Depot,
     res: &mut Response,
 ) -> Result<(), AppError> {
-    let state = depot.obtain::<AppState>().unwrap();
+    let state = get_app_state(depot)?;
 
     let file_id_str = req
         .param::<String>("id")

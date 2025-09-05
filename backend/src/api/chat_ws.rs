@@ -56,7 +56,7 @@ async fn save_message(
                     output = EXCLUDED.output,
                     execution_time_ms = EXCLUDED.execution_time_ms"
             )
-            .bind(&tool_usage.id)
+            .bind(tool_usage.id)
             .bind(&message.id)
             .bind(&tool_usage.tool_name)
             .bind(&tool_usage.tool_use_id)
@@ -218,7 +218,7 @@ pub async fn handle_chat_message_ws(
                             }
                         }
                     }
-                    full_prompt.push_str("\n");
+                    full_prompt.push('\n');
                     history_count += 1;
                 }
                 _ => {}
@@ -476,7 +476,7 @@ pub async fn handle_chat_message_ws(
                                     if let Some(content_array) =
                                         message_obj.get("content").and_then(|v| v.as_array())
                                     {
-                                        if let Some(first_content) = content_array.get(0) {
+                                        if let Some(first_content) = content_array.first() {
                                             if let Some(text) =
                                                 first_content.get("text").and_then(|v| v.as_str())
                                             {
@@ -669,7 +669,7 @@ pub async fn handle_chat_message_ws(
                 },
             )
             .await;
-            return Err(e.into());
+            return Err(e);
         }
     }
 

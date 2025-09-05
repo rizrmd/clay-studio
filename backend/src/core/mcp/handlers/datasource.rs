@@ -15,14 +15,14 @@ impl McpHandlers {
             // Extract required parameters
             let name = args.get("name")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| format!("Missing required parameter: name"))?;
+                .ok_or_else(|| "Missing required parameter: name".to_string())?;
             
             let source_type = args.get("source_type")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| format!("Missing required parameter: source_type"))?;
+                .ok_or_else(|| "Missing required parameter: source_type".to_string())?;
             
             let config = args.get("config")
-                .ok_or_else(|| format!("Missing required parameter: config"))?;
+                .ok_or_else(|| "Missing required parameter: config".to_string())?;
 
             // Parse and validate the connection config
             let parsed_config = self.parse_connection_config(config, source_type)?;
@@ -118,7 +118,7 @@ impl McpHandlers {
         self.execute_db_operation("remove_datasource", async {
             let datasource_id = args.get("datasource_id")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| format!("Missing required parameter: datasource_id"))?;
+                .ok_or_else(|| "Missing required parameter: datasource_id".to_string())?;
 
             // Check if datasource exists and belongs to this project
             let existing_count = sqlx::query_scalar::<_, i64>(
@@ -184,7 +184,7 @@ impl McpHandlers {
         self.execute_db_operation("datasource_update", async {
             let datasource_id = args.get("datasource_id")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| format!("Missing required parameter: datasource_id"))?;
+                .ok_or_else(|| "Missing required parameter: datasource_id".to_string())?;
 
             // Check if datasource exists and belongs to this project
             let existing = sqlx::query(
@@ -194,7 +194,7 @@ impl McpHandlers {
             .bind(&self.project_id)
             .fetch_optional(&self.db_pool)
             .await?
-            .ok_or_else(|| format!("Datasource not found"))?;
+            .ok_or_else(|| "Datasource not found".to_string())?;
 
             let mut name_update: Option<String> = None;
             let mut config_update: Option<String> = None;
@@ -296,7 +296,7 @@ impl McpHandlers {
             let datasource_id = args
                 .get("datasource_id")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| format!("Missing required parameter: datasource_id"))?;
+                .ok_or_else(|| "Missing required parameter: datasource_id".to_string())?;
 
             // Get connector
             let source = self.get_datasource_connector(datasource_id).await?;
@@ -342,7 +342,7 @@ impl McpHandlers {
         self.execute_db_operation("get_datasource_detail", async {
             let datasource_id = args.get("datasource_id")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| format!("Missing required parameter: datasource_id"))?;
+                .ok_or_else(|| "Missing required parameter: datasource_id".to_string())?;
 
             // Get datasource details
             let source = sqlx::query(
@@ -354,7 +354,7 @@ impl McpHandlers {
             .bind(&self.project_id)
             .fetch_optional(&self.db_pool)
             .await?
-            .ok_or_else(|| format!("Datasource not found"))?;
+            .ok_or_else(|| "Datasource not found".to_string())?;
 
             let id: String = source.get("id");
             let name: String = source.get("name");
@@ -425,12 +425,12 @@ impl McpHandlers {
             let datasource_id = args
                 .get("datasource_id")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| format!("Missing required parameter: datasource_id"))?;
+                .ok_or_else(|| "Missing required parameter: datasource_id".to_string())?;
 
             let query = args
                 .get("query")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| format!("Missing required parameter: query"))?;
+                .ok_or_else(|| "Missing required parameter: query".to_string())?;
 
             // Get limit parameter (default to 100, max 1000)
             let limit = args
@@ -476,7 +476,7 @@ impl McpHandlers {
             let datasource_id = args
                 .get("datasource_id")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| format!("Missing required parameter: datasource_id"))?;
+                .ok_or_else(|| "Missing required parameter: datasource_id".to_string())?;
 
             self.inspect_datasource_internal(datasource_id).await
         })
@@ -490,14 +490,13 @@ impl McpHandlers {
         // Get connector
         let source = self.get_datasource_connector(datasource_id).await.map_err(
             |e| -> Box<dyn std::error::Error + Send + Sync> {
-                Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.message))
+                Box::new(std::io::Error::other(e.message))
             },
         )?;
         let connector = create_connector(&source.source_type, &source.connection_config)
             .await
             .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
-                Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
+                Box::new(std::io::Error::other(
                     format!("{}", e),
                 ))
             })?;
@@ -505,8 +504,7 @@ impl McpHandlers {
         // Run inspection
         let analysis = connector.analyze_database().await.map_err(
             |e| -> Box<dyn std::error::Error + Send + Sync> {
-                Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
+                Box::new(std::io::Error::other(
                     format!("{}", e),
                 ))
             },

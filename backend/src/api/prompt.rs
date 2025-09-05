@@ -1,6 +1,6 @@
 use crate::core::claude::{ClaudeMessage, ClaudeSDK, QueryRequest};
 use crate::utils::AppError;
-use crate::utils::AppState;
+use crate::utils::get_app_state;
 use salvo::prelude::*;
 use salvo::sse::{self, SseEvent};
 use serde::{Deserialize, Serialize};
@@ -47,7 +47,7 @@ pub async fn handle_prompt_stream(
     depot: &mut Depot,
     res: &mut Response,
 ) -> Result<(), AppError> {
-    let state = depot.obtain::<AppState>().unwrap();
+    let state = get_app_state(depot)?;
     let prompt_request: PromptRequest = req
         .parse_json()
         .await

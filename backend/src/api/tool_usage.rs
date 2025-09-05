@@ -3,7 +3,7 @@ use sqlx::Row;
 
 use crate::{
     models::tool_usage::ToolUsage,
-    utils::{error::AppError, state::AppState},
+    utils::{get_app_state, error::AppError, state::AppState},
 };
 
 /// Get all tool usages for a message
@@ -13,8 +13,9 @@ pub async fn get_message_tool_usages(
     depot: &mut Depot,
     res: &mut Response,
 ) -> Result<(), AppError> {
-    let state = depot.obtain::<AppState>().unwrap();
-    let message_id = req.param::<String>("message_id").unwrap();
+    let state = get_app_state(depot)?;
+    let message_id = req.param::<String>("message_id")
+        .ok_or(AppError::BadRequest("Missing message_id parameter".to_string()))?;
     let rows = sqlx::query(
         r#"
         SELECT 
@@ -62,9 +63,11 @@ pub async fn get_tool_usage_by_name(
     depot: &mut Depot,
     res: &mut Response,
 ) -> Result<(), AppError> {
-    let state = depot.obtain::<AppState>().unwrap();
-    let message_id = req.param::<String>("message_id").unwrap();
-    let tool_name = req.param::<String>("tool_name").unwrap();
+    let state = get_app_state(depot)?;
+    let message_id = req.param::<String>("message_id")
+        .ok_or(AppError::BadRequest("Missing message_id parameter".to_string()))?;
+    let tool_name = req.param::<String>("tool_name")
+        .ok_or(AppError::BadRequest("Missing tool_name parameter".to_string()))?;
     let row = sqlx::query(
         r#"
         SELECT 
@@ -113,8 +116,9 @@ pub async fn get_tool_usage_by_id(
     depot: &mut Depot,
     res: &mut Response,
 ) -> Result<(), AppError> {
-    let state = depot.obtain::<AppState>().unwrap();
-    let tool_usage_id_str = req.param::<String>("tool_usage_id").unwrap();
+    let state = get_app_state(depot)?;
+    let tool_usage_id_str = req.param::<String>("tool_usage_id")
+        .ok_or(AppError::BadRequest("Missing tool_usage_id parameter".to_string()))?;
     
     tracing::info!("Fetching tool usage with ID: {}", tool_usage_id_str);
     
@@ -128,7 +132,7 @@ pub async fn get_tool_usage_by_id(
     let current_client_id = depot.get::<String>("current_client_id")
         .map_err(|_| AppError::Unauthorized("Client context required".to_string()))?;
     
-    let current_client_uuid = uuid::Uuid::parse_str(&current_client_id)
+    let current_client_uuid = uuid::Uuid::parse_str(current_client_id)
         .map_err(|_| AppError::InternalServerError("Invalid client ID in context".to_string()))?;
 
     // Query tool usage with client authorization

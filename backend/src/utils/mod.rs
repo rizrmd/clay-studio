@@ -13,4 +13,4 @@ pub mod state;
 
 pub use config::*;
 pub use error::*;
-pub use state::*;
+pub use state::{get_app_state, *};

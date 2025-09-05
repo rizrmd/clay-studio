@@ -1,7 +1,7 @@
 use salvo::prelude::*;
 use serde::Deserialize;
 use crate::models::*;
-use crate::utils::AppState;
+use crate::utils::{get_app_state, AppState};
 use crate::utils::AppError;
 use chrono::Utc;
 use uuid::Uuid;
@@ -21,7 +21,7 @@ pub async fn create_conversation_with_message(
     depot: &mut Depot,
     res: &mut Response,
 ) -> Result<(), AppError> {
-    let state = depot.obtain::<AppState>().unwrap();
+    let state = get_app_state(depot)?;
     let create_req: CreateConversationWithMessageRequest = req.parse_json().await
         .map_err(|_| AppError::BadRequest("Invalid request body".to_string()))?;
     
@@ -115,7 +115,7 @@ pub async fn delete_conversation_cascade(
     depot: &mut Depot,
     res: &mut Response,
 ) -> Result<(), AppError> {
-    let state = depot.obtain::<AppState>().unwrap();
+    let state = get_app_state(depot)?;
     let conversation_id = req.param::<String>("conversation_id")
         .ok_or(AppError::BadRequest("Missing conversation_id".to_string()))?;
     
@@ -188,7 +188,7 @@ pub async fn batch_update_conversations(
     depot: &mut Depot,
     res: &mut Response,
 ) -> Result<(), AppError> {
-    let state = depot.obtain::<AppState>().unwrap();
+    let state = get_app_state(depot)?;
     let batch_req: BatchUpdateRequest = req.parse_json().await
         .map_err(|_| AppError::BadRequest("Invalid request body".to_string()))?;
     

@@ -34,10 +34,10 @@ impl McpHandlers {
             "created_at": chrono::Utc::now().to_rfc3339(),
         });
 
-        Ok(serde_json::to_string(&interaction_spec).map_err(|e| JsonRpcError {
+        serde_json::to_string(&interaction_spec).map_err(|e| JsonRpcError {
             code: INTERNAL_ERROR,
             message: format!("Failed to serialize interaction response: {}", e),
             data: None,
-        })?)
+        })
     }
 }

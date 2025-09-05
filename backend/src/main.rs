@@ -24,7 +24,7 @@ use crate::utils::middleware::{
     auth::{admin_required, auth_required, root_required},
     client_scoped, inject_state,
 };
-use crate::utils::{AppState, Config};
+use crate::utils::{get_app_state, AppState, Config};
 
 /// Kill process using the specified port
 async fn kill_process_using_port(port: u16) -> Result<(), Box<dyn std::error::Error>> {
@@ -193,8 +193,8 @@ async fn ensure_global_bun_installation() -> Result<(), Box<dyn std::error::Erro
         .arg("curl -fsSL https://bun.sh/install | bash")
         .env_clear()
         .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin")
-        .env("HOME", clients_base_path.to_str().unwrap())
-        .env("BUN_INSTALL", bun_path.to_str().unwrap())
+        .env("HOME", clients_base_path.to_str().ok_or("Invalid clients base path")?)
+        .env("BUN_INSTALL", bun_path.to_str().ok_or("Invalid bun path")?)
         .output()?;
 
     if !output.status.success() {
@@ -442,7 +442,18 @@ async fn health_check(res: &mut Response) {
 
 #[handler]
 async fn database_health_check(depot: &mut Depot, res: &mut Response) {
-    let state = depot.obtain::<AppState>().unwrap();
+    let state = match get_app_state(depot) {
+        Ok(state) => state,
+        Err(_) => {
+            res.status_code(salvo::http::StatusCode::INTERNAL_SERVER_ERROR);
+            res.render(Json(serde_json::json!({
+                "status": "error",
+                "error": "Failed to get application state",
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            })));
+            return;
+        }
+    };
 
     match state.health_check().await {
         Ok(_) => {

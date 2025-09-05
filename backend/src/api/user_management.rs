@@ -439,7 +439,7 @@ pub async fn list_users_admin(depot: &mut Depot, res: &mut Response) -> Result<(
     let user_client_id = depot.get::<String>("current_user_client_id").map_err(|_| {
         AppError::InternalServerError("Failed to get client ID from depot".to_string())
     })?;
-    let client_id = Uuid::parse_str(&user_client_id)
+    let client_id = Uuid::parse_str(user_client_id)
         .map_err(|_| AppError::InternalServerError("Invalid client ID format".to_string()))?;
 
     let rows = sqlx::query(
@@ -504,7 +504,7 @@ pub async fn create_user_admin(
     let user_client_id = depot.get::<String>("current_user_client_id").map_err(|_| {
         AppError::InternalServerError("Failed to get client ID from depot".to_string())
     })?;
-    let client_id = Uuid::parse_str(&user_client_id)
+    let client_id = Uuid::parse_str(user_client_id)
         .map_err(|_| AppError::InternalServerError("Invalid client ID format".to_string()))?;
 
     let user_role = depot
@@ -604,7 +604,7 @@ pub async fn update_user_admin(
     let user_client_id = depot.get::<String>("current_user_client_id").map_err(|_| {
         AppError::InternalServerError("Failed to get client ID from depot".to_string())
     })?;
-    let client_id = Uuid::parse_str(&user_client_id)
+    let client_id = Uuid::parse_str(user_client_id)
         .map_err(|_| AppError::InternalServerError("Invalid client ID format".to_string()))?;
 
     let user_role = depot
@@ -614,7 +614,7 @@ pub async fn update_user_admin(
     let current_user_id = depot.get::<String>("current_user_id").map_err(|_| {
         AppError::InternalServerError("Failed to get user ID from depot".to_string())
     })?;
-    let current_user_uuid = Uuid::parse_str(&current_user_id)
+    let current_user_uuid = Uuid::parse_str(current_user_id)
         .map_err(|_| AppError::InternalServerError("Invalid user ID format".to_string()))?;
 
     // Verify the user being updated belongs to the same client
@@ -732,7 +732,7 @@ pub async fn delete_user_admin(
     let user_client_id = depot.get::<String>("current_user_client_id").map_err(|_| {
         AppError::InternalServerError("Failed to get client ID from depot".to_string())
     })?;
-    let client_id = Uuid::parse_str(&user_client_id)
+    let client_id = Uuid::parse_str(user_client_id)
         .map_err(|_| AppError::InternalServerError("Invalid client ID format".to_string()))?;
 
     let user_role = depot
@@ -742,7 +742,7 @@ pub async fn delete_user_admin(
     let current_user_id = depot.get::<String>("current_user_id").map_err(|_| {
         AppError::InternalServerError("Failed to get user ID from depot".to_string())
     })?;
-    let current_user_uuid = Uuid::parse_str(&current_user_id)
+    let current_user_uuid = Uuid::parse_str(current_user_id)
         .map_err(|_| AppError::InternalServerError("Invalid user ID format".to_string()))?;
 
     // Check if user exists and belongs to the same client

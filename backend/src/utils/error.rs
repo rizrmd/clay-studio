@@ -35,6 +35,9 @@ pub enum AppError {
 
     #[error("SQL error: {0}")]
     SqlxError(#[from] sqlx::Error),
+
+    #[error("HTTP status error: {0}")]
+    StatusError(#[from] salvo::http::StatusError),
 }
 
 impl AppError {
@@ -46,6 +49,7 @@ impl AppError {
             AppError::Forbidden(_) => StatusCode::FORBIDDEN,
             AppError::ServiceUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
             AppError::InternalServerError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            AppError::StatusError(status_error) => status_error.code,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }

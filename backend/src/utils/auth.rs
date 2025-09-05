@@ -236,7 +236,7 @@ pub fn get_current_client_id(depot: &Depot) -> Result<Uuid, AppError> {
         .get::<String>("current_client_id")
         .map_err(|_| AppError::Unauthorized("Client context not found".to_string()))?;
 
-    Uuid::parse_str(&client_id_str)
+    Uuid::parse_str(client_id_str)
         .map_err(|_| AppError::InternalServerError("Invalid client ID format".to_string()))
 }
 
