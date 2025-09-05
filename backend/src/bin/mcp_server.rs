@@ -78,6 +78,8 @@ fn main() {
     let mut project_id = String::from("default");
     let mut client_id = String::from("unknown");
     let mut server_type = String::from("data-analysis");
+    let mut use_http = false;
+    let mut port = 8000u16;
 
     // Simple argument parsing
     let mut i = 1;
@@ -119,6 +121,29 @@ fn main() {
                     std::process::exit(1);
                 }
             }
+            "--http" => {
+                use_http = true;
+                i += 1;
+            }
+            "--port" => {
+                if i + 1 < args.len() {
+                    port = args[i + 1].parse().unwrap_or_else(|_| {
+                        eprintln!(
+                            "[{}] [ERROR] Invalid port number: {}",
+                            chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+                            args[i + 1]
+                        );
+                        std::process::exit(1);
+                    });
+                    i += 2;
+                } else {
+                    eprintln!(
+                        "[{}] [ERROR] --port requires a value",
+                        chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
+                    );
+                    std::process::exit(1);
+                }
+            }
             "--help" | "-h" => {
                 print_help();
                 std::process::exit(0);
@@ -155,6 +180,10 @@ fn main() {
     eprintln!("  Project ID: {}", project_id);
     eprintln!("  Client ID: {}", client_id);
     eprintln!("  Server Type: {}", server_type);
+    eprintln!("  Transport: {}", if use_http { "HTTP/SSE" } else { "stdio" });
+    if use_http {
+        eprintln!("  Port: {}", port);
+    }
 
     // Check for required DATABASE_URL
     if std::env::var("DATABASE_URL").is_err() {
@@ -169,7 +198,11 @@ fn main() {
     // Run the MCP server
     // Note: We need to access the mcp module from the library
     // This will be compiled as part of the same crate
-    clay_studio_backend::core::mcp::run_with_type(project_id, client_id, server_type);
+    if use_http {
+        clay_studio_backend::core::mcp::run_with_http(project_id, client_id, server_type, port);
+    } else {
+        clay_studio_backend::core::mcp::run_with_type(project_id, client_id, server_type);
+    }
 }
 
 fn print_help() {
@@ -181,6 +214,8 @@ fn print_help() {
     eprintln!("  --project-id <ID>   Project ID to serve data for");
     eprintln!("  --client-id <ID>    Client ID for authentication");
     eprintln!("  --server-type <TYPE> Server type (data-analysis or interaction)");
+    eprintln!("  --http              Use HTTP/SSE transport instead of stdio");
+    eprintln!("  --port <PORT>       Port for HTTP transport (default: 8000)");
     eprintln!("  -h, --help          Show this help message");
     eprintln!();
     eprintln!("Environment variables:");

@@ -3,9 +3,12 @@ pub mod types;
 
 use chrono::Utc;
 use handlers::McpHandlers;
+use salvo::prelude::*;
 use sqlx::PgPool;
 use std::io::{self, BufRead, BufReader, Write};
+use std::sync::Arc;
 use tokio::runtime::Runtime;
+use tokio::sync::Mutex;
 use types::*;
 
 pub struct McpServer {
@@ -327,4 +330,198 @@ pub fn run_with_type(project_id: String, client_id: String, server_type: String)
             std::process::exit(1);
         }
     }
+}
+
+// Public function to run the MCP server with HTTP transport
+#[allow(dead_code)]
+pub fn run_with_http(project_id: String, client_id: String, server_type: String, port: u16) {
+    let runtime = Runtime::new().unwrap_or_else(|e| {
+        eprintln!(
+            "[{}] [FATAL] Failed to create Tokio runtime: {}",
+            Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+            e
+        );
+        std::process::exit(1);
+    });
+
+    runtime.block_on(async {
+        if let Err(e) = run_http_server(project_id, client_id, server_type, port).await {
+            eprintln!(
+                "[{}] [FATAL] HTTP MCP server failed: {}",
+                Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+                e
+            );
+            std::process::exit(1);
+        }
+    });
+}
+
+async fn run_http_server(
+    project_id: String,
+    client_id: String,
+    server_type: String,
+    port: u16,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Create database connection pool
+    let database_url = std::env::var("DATABASE_URL")
+        .map_err(|_| "DATABASE_URL environment variable not set")?;
+    
+    eprintln!(
+        "[{}] [INFO] Connecting to database...",
+        Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
+    );
+    let db_pool = PgPool::connect(&database_url).await?;
+    
+    eprintln!(
+        "[{}] [INFO] Connected to database successfully",
+        Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
+    );
+
+    let handlers = Arc::new(Mutex::new(McpHandlers {
+        project_id: project_id.clone(),
+        client_id: client_id.clone(),
+        server_type: server_type.clone(),
+        db_pool,
+    }));
+
+    let router = Router::new()
+        .push(Router::with_path("/mcp").post(handle_mcp_request))
+        .push(Router::with_path("/mcp/sse").get(handle_sse_connection))
+        .hoop(McpHandlerMiddleware { handlers: handlers.clone() })
+        .hoop(CorsMiddleware);
+
+    let acceptor = TcpListener::new(format!("0.0.0.0:{}", port)).bind().await;
+    
+    eprintln!(
+        "[{}] [INFO] MCP HTTP server listening on port {}",
+        Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+        port
+    );
+    
+    Server::new(acceptor).serve(router).await;
+    
+    Ok(())
+}
+
+struct McpHandlerMiddleware {
+    handlers: Arc<Mutex<McpHandlers>>,
+}
+
+#[async_trait::async_trait]
+impl Handler for McpHandlerMiddleware {
+    async fn handle(&self, req: &mut Request, depot: &mut Depot, res: &mut Response, ctrl: &mut FlowCtrl) {
+        depot.insert("mcp_handlers", self.handlers.clone());
+        ctrl.call_next(req, depot, res).await;
+    }
+}
+
+struct CorsMiddleware;
+
+#[async_trait::async_trait]
+impl Handler for CorsMiddleware {
+    async fn handle(&self, _req: &mut Request, _depot: &mut Depot, res: &mut Response, ctrl: &mut FlowCtrl) {
+        res.headers_mut().insert("Access-Control-Allow-Origin", "*".parse().unwrap());
+        res.headers_mut().insert("Access-Control-Allow-Methods", "POST, GET, OPTIONS".parse().unwrap());
+        res.headers_mut().insert("Access-Control-Allow-Headers", "Content-Type".parse().unwrap());
+        ctrl.call_next(_req, _depot, res).await;
+    }
+}
+
+#[handler]
+async fn handle_mcp_request(req: &mut Request, depot: &mut Depot, res: &mut Response) {
+    let handlers = depot.get::<Arc<Mutex<McpHandlers>>>("mcp_handlers").unwrap();
+    
+    // Parse JSON-RPC request
+    let request_body = match req.payload().await {
+        Ok(body) => body,
+        Err(e) => {
+            let error_response = JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id: None,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32700,
+                    message: format!("Failed to read request body: {}", e),
+                    data: None,
+                }),
+            };
+            res.render(Json(error_response));
+            return;
+        }
+    };
+
+    let request_text = String::from_utf8_lossy(&request_body);
+    let json_request: JsonRpcRequest = match serde_json::from_str(&request_text) {
+        Ok(req) => req,
+        Err(e) => {
+            let error_response = JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id: None,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32700,
+                    message: format!("Parse error: {}", e),
+                    data: None,
+                }),
+            };
+            res.render(Json(error_response));
+            return;
+        }
+    };
+
+    // Handle the request using the same logic as stdio
+    let handlers_guard = handlers.lock().await;
+    let result = match json_request.method.as_str() {
+        "initialize" => handlers_guard.handle_initialize(json_request.params).await,
+        "notifications/initialized" => {
+            eprintln!(
+                "[{}] [INFO] Client initialization complete - MCP server fully ready",
+                Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
+            );
+            Ok(serde_json::json!({}))
+        }
+        "resources/list" => handlers_guard.handle_resources_list(json_request.params).await,
+        "resources/read" => handlers_guard.handle_resources_read(json_request.params).await,
+        "tools/list" => handlers_guard.handle_tools_list(json_request.params).await,
+        "tools/call" => handlers_guard.handle_tools_call(json_request.params).await,
+        _ => Err(JsonRpcError {
+            code: METHOD_NOT_FOUND,
+            message: format!("Method not found: {}", json_request.method),
+            data: None,
+        }),
+    };
+
+    let response = match result {
+        Ok(value) => JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            id: json_request.id,
+            result: Some(value),
+            error: None,
+        },
+        Err(error) => JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            id: json_request.id,
+            result: None,
+            error: Some(error),
+        },
+    };
+
+    res.render(Json(response));
+}
+
+#[handler]
+async fn handle_sse_connection(_req: &mut Request, _depot: &mut Depot, res: &mut Response) {
+    use salvo::sse::{self as sse, SseEvent};
+    use futures_util::stream;
+    use std::convert::Infallible;
+    
+    let event_stream = stream::iter(vec![
+        Ok::<_, Infallible>(
+            SseEvent::default()
+                .text("MCP SSE connection established")
+                .name("connected")
+        )
+    ]);
+    
+    sse::stream(res, event_stream);
 }
