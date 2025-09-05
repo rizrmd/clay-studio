@@ -8,6 +8,7 @@ use uuid::Uuid;
 use super::types::{AskUserOption, ClaudeMessage, QueryRequest};
 use crate::utils::log_organizer::auto_organize_logs;
 use crate::utils::command_logger::{CommandLogger, CommandExecution};
+use crate::core::mcp::handlers::McpHandlers;
 
 #[derive(Debug, Clone)]
 pub struct ClaudeSDK {
@@ -21,36 +22,7 @@ pub struct ClaudeSDK {
 impl ClaudeSDK {
     /// Get all available MCP tools for allowed tools configuration
     fn get_available_mcp_tools() -> Vec<String> {
-        let mut tools = vec![
-            // Data analysis tools (always available)
-            "mcp__data-analysis__datasource_add".to_string(),
-            "mcp__data-analysis__datasource_list".to_string(),
-            "mcp__data-analysis__datasource_remove".to_string(),
-            "mcp__data-analysis__datasource_update".to_string(),
-            "mcp__data-analysis__datasource_test".to_string(),
-            "mcp__data-analysis__datasource_detail".to_string(),
-            "mcp__data-analysis__datasource_query".to_string(),
-            "mcp__data-analysis__datasource_inspect".to_string(),
-            "mcp__data-analysis__schema_get".to_string(),
-            "mcp__data-analysis__schema_search".to_string(),
-            "mcp__data-analysis__schema_stats".to_string(),
-        ];
-
-        // Add interaction tools (available on interaction server)
-        tools.extend(vec![
-            "mcp__interaction__ask_user".to_string(),
-            "mcp__interaction__export_excel".to_string(),
-            "mcp__interaction__show_table".to_string(),
-            "mcp__interaction__show_chart".to_string(),
-        ]);
-
-        // Add standard web tools
-        tools.extend(vec![
-            "WebSearch".to_string(),
-            "WebFetch".to_string(),
-        ]);
-
-        tools
+        McpHandlers::get_all_available_mcp_tools()
     }
 
     pub fn new(client_id: Uuid, oauth_token: Option<String>) -> Self {
