@@ -52,14 +52,29 @@ impl McpHandlers {
         tools
     }
 
-    pub async fn handle_initialize(&self, _params: Option<Value>) -> Result<Value, JsonRpcError> {
+    pub async fn handle_initialize(&self, params: Option<Value>) -> Result<Value, JsonRpcError> {
         eprintln!(
             "[{}] [INFO] Handling initialize request for project: {}",
             Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
             self.project_id
         );
+        
+        // Extract the protocol version from client request and echo it back
+        let client_protocol_version = params
+            .as_ref()
+            .and_then(|p| p.get("protocolVersion"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "2024-11-05".to_string());
+            
+        eprintln!(
+            "[{}] [INFO] Client requested protocol version: {}",
+            Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+            client_protocol_version
+        );
+        
         let result = InitializeResult {
-            protocol_version: "2025-06-18".to_string(),
+            protocol_version: client_protocol_version,
             server_info: ServerInfo {
                 name: "Clay Studio MCP Server".to_string(),
                 version: "1.0.0".to_string(),
