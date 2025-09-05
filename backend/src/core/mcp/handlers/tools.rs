@@ -2,6 +2,7 @@ use super::base::McpHandlers;
 use crate::core::mcp::types::*;
 use chrono::Utc;
 use serde_json::{json, Value};
+use sqlx::Row;
 use uuid;
 
 impl McpHandlers {
@@ -86,10 +87,11 @@ impl McpHandlers {
             },
             capabilities: Capabilities {
                 resources: Some(ResourcesCapability {
-                    list_changed: false,
+                    subscribe: false,  // We don't support subscriptions yet
+                    list_changed: false, // Our resource list is static
                 }),
                 tools: Some(ToolsCapability {
-                    list_changed: false,
+                    list_changed: false, // Our tool list is static
                 }),
             },
         };
@@ -111,12 +113,38 @@ impl McpHandlers {
             self.project_id
         );
 
-        let resources = vec![Resource {
+        let mut resources = vec![Resource {
             uri: format!("claude://project/{}/claude.md", self.project_id),
             name: "CLAUDE.md".to_string(),
             mime_type: "text/markdown".to_string(),
             description: Some("Project documentation and datasource information".to_string()),
         }];
+
+        // Add datasources as resources  
+        let datasources = sqlx::query(
+            "SELECT id, name, source_type, schema_info FROM data_sources WHERE project_id = $1 AND deleted_at IS NULL"
+        )
+        .bind(&self.project_id)
+        .fetch_all(&self.db_pool)
+        .await
+        .map_err(|e| JsonRpcError {
+            code: INTERNAL_ERROR,
+            message: format!("Database error: {}", e),
+            data: None,
+        })?;
+
+        for datasource in datasources {
+            let id: String = datasource.get("id");
+            let name: String = datasource.get("name");
+            let source_type: String = datasource.get("source_type");
+            
+            resources.push(Resource {
+                uri: format!("datasource://{}", id),
+                name: format!("{} ({})", name, source_type),
+                mime_type: "application/json".to_string(),
+                description: Some(format!("Datasource: {} - {}", name, source_type)),
+            });
+        }
 
         Ok(json!({
             "resources": resources
@@ -174,6 +202,50 @@ impl McpHandlers {
                         "uri": uri,
                         "mimeType": "text/markdown",
                         "text": content
+                    }
+                ]
+            }))
+        } else if uri.starts_with("datasource://") {
+            // Handle datasource resource request
+            let datasource_id = uri.strip_prefix("datasource://").unwrap_or("");
+            
+            // Get datasource information
+            let datasource = sqlx::query(
+                "SELECT id, name, source_type, config, schema_info FROM data_sources WHERE id = $1 AND project_id = $2 AND deleted_at IS NULL"
+            )
+            .bind(datasource_id)
+            .bind(&self.project_id)
+            .fetch_optional(&self.db_pool)
+            .await
+            .map_err(|e| JsonRpcError {
+                code: INTERNAL_ERROR,
+                message: format!("Database error: {}", e),
+                data: None,
+            })?
+            .ok_or_else(|| JsonRpcError {
+                code: INVALID_PARAMS,
+                message: format!("Datasource not found: {}", datasource_id),
+                data: None,
+            })?;
+
+            let name: String = datasource.get("name");
+            let source_type: String = datasource.get("source_type");
+            let schema_info: Option<String> = datasource.get("schema_info");
+            
+            // Return JSON content as text for MCP resource
+            let content = json!({
+                "id": datasource_id,
+                "name": name,
+                "type": source_type,
+                "schema": schema_info.and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+            });
+
+            Ok(json!({
+                "contents": [
+                    {
+                        "uri": uri,
+                        "mimeType": "application/json",
+                        "text": serde_json::to_string_pretty(&content).unwrap_or_default()
                     }
                 ]
             }))

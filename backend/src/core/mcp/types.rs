@@ -47,6 +47,8 @@ pub struct ServerInfo {
 
 #[derive(Debug, Serialize)]
 pub struct ResourcesCapability {
+    #[serde(rename = "subscribe")]
+    pub subscribe: bool,
     #[serde(rename = "listChanged")]
     pub list_changed: bool,
 }
