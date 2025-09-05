@@ -79,6 +79,21 @@ impl McpHandlers {
             Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
         );
         
+        // Get available tools to include in capabilities
+        let tools_list = self.handle_tools_list(None).await?;
+        let available_tools = tools_list.get("tools").and_then(|t| t.as_array()).map(|tools| {
+            tools.iter().filter_map(|tool| {
+                tool.get("name").and_then(|n| n.as_str()).map(|name| name.to_string())
+            }).collect::<Vec<String>>()
+        }).unwrap_or_default();
+        
+        eprintln!(
+            "[{}] [DEBUG] Advertising {} tools in capabilities: {:?}",
+            Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+            available_tools.len(),
+            available_tools
+        );
+
         let result = InitializeResult {
             protocol_version: client_protocol_version,
             server_info: ServerInfo {
@@ -265,7 +280,11 @@ impl McpHandlers {
             self.project_id
         );
 
-        let mut tools = vec![
+        let mut tools = Vec::new();
+
+        // Only add data analysis tools for data-analysis server type
+        if self.server_type == "data-analysis" {
+            tools.extend(vec![
             Tool {
                 name: "datasource_add".to_string(),
                 description: "Add a new datasource to the project with connection details"
@@ -493,7 +512,8 @@ impl McpHandlers {
                     "required": ["datasource_id"]
                 }),
             },
-        ];
+        ]);
+        }
 
         // Add interaction-specific tools for interaction server
         if self.server_type == "interaction" {
