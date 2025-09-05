@@ -19,6 +19,40 @@ pub struct ClaudeSDK {
 }
 
 impl ClaudeSDK {
+    /// Get all available MCP tools for allowed tools configuration
+    fn get_available_mcp_tools() -> Vec<String> {
+        let mut tools = vec![
+            // Data analysis tools (always available)
+            "mcp__data-analysis__datasource_add".to_string(),
+            "mcp__data-analysis__datasource_list".to_string(),
+            "mcp__data-analysis__datasource_remove".to_string(),
+            "mcp__data-analysis__datasource_update".to_string(),
+            "mcp__data-analysis__datasource_test".to_string(),
+            "mcp__data-analysis__datasource_detail".to_string(),
+            "mcp__data-analysis__datasource_query".to_string(),
+            "mcp__data-analysis__datasource_inspect".to_string(),
+            "mcp__data-analysis__schema_get".to_string(),
+            "mcp__data-analysis__schema_search".to_string(),
+            "mcp__data-analysis__schema_stats".to_string(),
+        ];
+
+        // Add interaction tools (available on interaction server)
+        tools.extend(vec![
+            "mcp__interaction__ask_user".to_string(),
+            "mcp__interaction__export_excel".to_string(),
+            "mcp__interaction__show_table".to_string(),
+            "mcp__interaction__show_chart".to_string(),
+        ]);
+
+        // Add standard web tools
+        tools.extend(vec![
+            "WebSearch".to_string(),
+            "WebFetch".to_string(),
+        ]);
+
+        tools
+    }
+
     pub fn new(client_id: Uuid, oauth_token: Option<String>) -> Self {
         let clients_base =
             std::env::var("CLIENTS_DIR").unwrap_or_else(|_| "../.clients".to_string());
@@ -227,7 +261,8 @@ impl ClaudeSDK {
         let claude_cli_path = self
             .client_dir
             .join("node_modules/@anthropic-ai/claude-code/cli.js");
-        let command_debug = format!("{} {} -p --verbose --allowedTools \"mcp__data-analysis__*,mcp__interaction__*,WebSearch,WebFetch\" --output-format stream-json [prompt]", bun_executable.display(), claude_cli_path.display());
+        let allowed_tools_debug = Self::get_available_mcp_tools().join(",");
+        let command_debug = format!("{} {} -p --verbose --allowedTools \"{}\" --output-format stream-json [prompt]", bun_executable.display(), claude_cli_path.display(), allowed_tools_debug);
         let command_debug_clone = command_debug.clone();
         let command_debug_clone2 = command_debug.clone();
         let command_debug_clone3 = command_debug.clone();
@@ -259,9 +294,10 @@ impl ClaudeSDK {
                 .arg("-") // Read from stdin
                 .arg("--verbose");
 
-            // Add allowed tools
+            // Add allowed tools dynamically
+            let allowed_tools = Self::get_available_mcp_tools().join(",");
             cmd_builder.arg("--allowedTools")
-                .arg("mcp__data-analysis__datasource_list,mcp__data-analysis__datasource_detail,mcp__data-analysis__datasource_add,mcp__data-analysis__datasource_remove,mcp__data-analysis__datasource_update,mcp__data-analysis__datasource_test,mcp__data-analysis__datasource_inspect,mcp__data-analysis__data_query,mcp__data-analysis__schema_stats,mcp__data-analysis__schema_search,mcp__data-analysis__schema_get,mcp__interaction__show_table,mcp__interaction__show_chart,WebSearch,WebFetch");
+                .arg(&allowed_tools);
 
             cmd_builder.arg("--output-format")
                 .arg("stream-json")
