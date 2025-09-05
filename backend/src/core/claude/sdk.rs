@@ -227,7 +227,7 @@ impl ClaudeSDK {
         let claude_cli_path = self
             .client_dir
             .join("node_modules/@anthropic-ai/claude-code/cli.js");
-        let command_debug = format!("{} {} -p --verbose --dangerously-skip-permissions --disallowedTools \"Bash\" --output-format stream-json [prompt]", bun_executable.display(), claude_cli_path.display());
+        let command_debug = format!("{} {} -p --verbose --allowedTools \"mcp__data-analysis__*,mcp__interaction__*,WebSearch,WebFetch\" --output-format stream-json [prompt]", bun_executable.display(), claude_cli_path.display());
         let command_debug_clone = command_debug.clone();
         let command_debug_clone2 = command_debug.clone();
         let command_debug_clone3 = command_debug.clone();
@@ -283,7 +283,7 @@ impl ClaudeSDK {
 
                 // Use a proper home directory for nobody user
                 let full_command = format!(
-                    "cd '{}' && HOME='/var/cache/nobody' XDG_CACHE_HOME='{}' CLAUDE_CODE_OAUTH_TOKEN='{}' echo '{}' | {} {}{} -p - --verbose --dangerously-skip-permissions --disallowedTools \"Bash\" --output-format stream-json",
+                    "cd '{}' && HOME='/var/cache/nobody' XDG_CACHE_HOME='{}' CLAUDE_CODE_OAUTH_TOKEN='{}' echo '{}' | {} {}{} -p - --verbose --allowedTools \"mcp__data-analysis__datasource_list,mcp__data-analysis__datasource_detail,mcp__data-analysis__datasource_add,mcp__data-analysis__datasource_remove,mcp__data-analysis__datasource_update,mcp__data-analysis__datasource_test,mcp__data-analysis__datasource_inspect,mcp__data-analysis__data_query,mcp__data-analysis__schema_stats,mcp__data-analysis__schema_search,mcp__data-analysis__schema_get,mcp__interaction__show_table,mcp__interaction__show_chart,WebSearch,WebFetch\" --output-format stream-json",
                     working_dir_clone.display(),
                     cache_dir.display(),
                     oauth_token,
@@ -325,16 +325,11 @@ impl ClaudeSDK {
                     .arg("-") // Read from stdin
                     .arg("--verbose");
 
-                // Only add --dangerously-skip-permissions if we're NOT root
-                // Claude CLI refuses to run with this flag when running as root
-                let is_root = unsafe { libc::getuid() } == 0;
-                if !is_root {
-                    cmd.arg("--dangerously-skip-permissions");
-                }
+                // Add allowed tools
+                cmd.arg("--allowedTools")
+                    .arg("mcp__data-analysis__datasource_list,mcp__data-analysis__datasource_detail,mcp__data-analysis__datasource_add,mcp__data-analysis__datasource_remove,mcp__data-analysis__datasource_update,mcp__data-analysis__datasource_test,mcp__data-analysis__datasource_inspect,mcp__data-analysis__data_query,mcp__data-analysis__schema_stats,mcp__data-analysis__schema_search,mcp__data-analysis__schema_get,mcp__interaction__show_table,mcp__interaction__show_chart,WebSearch,WebFetch");
 
-                cmd.arg("--disallowedTools")
-                    .arg("Bash")
-                    .arg("--output-format")
+                cmd.arg("--output-format")
                     .arg("stream-json")
                     .current_dir(&working_dir_clone)
                     .env("HOME", &working_dir_clone)
