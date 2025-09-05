@@ -47,12 +47,14 @@ pub struct ServerInfo {
 
 #[derive(Debug, Serialize)]
 pub struct ResourcesCapability {
-    // Add specific resources capabilities if needed
+    #[serde(rename = "listChanged")]
+    pub list_changed: bool,
 }
 
 #[derive(Debug, Serialize)]
 pub struct ToolsCapability {
-    // Add specific tools capabilities if needed
+    #[serde(rename = "listChanged")]
+    pub list_changed: bool,
 }
 
 #[derive(Debug, Serialize)]

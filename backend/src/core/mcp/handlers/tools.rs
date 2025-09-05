@@ -85,8 +85,12 @@ impl McpHandlers {
                 version: "1.0.0".to_string(),
             },
             capabilities: Capabilities {
-                resources: Some(ResourcesCapability {}),
-                tools: Some(ToolsCapability {}),
+                resources: Some(ResourcesCapability {
+                    list_changed: false,
+                }),
+                tools: Some(ToolsCapability {
+                    list_changed: false,
+                }),
             },
         };
 
