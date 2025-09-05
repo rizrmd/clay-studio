@@ -17,12 +17,13 @@ export default defineConfig({
         manualChunks(id) {
           // Handle node_modules
           if (id.includes('node_modules')) {
-            // React core
-            if (id.includes('react') && !id.includes('react-router')) {
-              return 'react-core';
-            }
+            // React router first (more specific)
             if (id.includes('react-router')) {
               return 'react-router';
+            }
+            // React core - keep react and react-dom together
+            if (id.includes('react')) {
+              return 'react';
             }
             
             // Charts

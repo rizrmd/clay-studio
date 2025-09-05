@@ -3,6 +3,7 @@ import { AskUser } from "./ask-user";
 // import { WebSocketService } from "@/lib/services/websocket-service";
 import { InteractiveTable } from "@/components/data-table/interactive-table";
 import { ChartDisplay } from "@/components/data-chart";
+import type { ChartType } from "@/components/data-chart/chart-types";
 
 // Stub implementation
 const WebSocketService = {
@@ -15,9 +16,11 @@ const WebSocketService = {
 
 interface InteractionSpec {
   interaction_id: string;
-  interaction_type: "buttons" | "checkbox" | "input" | "chart" | "table" | "markdown";
+  interaction_type: "buttons" | "checkbox" | "input" | "chart" | "table" | "show_chart" | "show_table" | "markdown";
   title: string;
   data: any;
+  headers?: string[];
+  chart_type?: string;
   options?: any;
   requires_response: boolean;
   created_at: string;
@@ -145,6 +148,90 @@ export function InteractionRenderer({
           data={interactionSpec.data}
           requiresResponse={interactionSpec.requires_response}
         />
+      );
+
+    case "show_table":
+      // Render interactive table using DataTable component for show_table interaction
+      const tableData = useMemo(() => {
+        const data = interactionSpec.data;
+        const headers = interactionSpec.headers;
+        
+        if (!Array.isArray(data) || data.length === 0) {
+          return { columns: [], rows: [] };
+        }
+
+        // If headers are provided, use them. Otherwise infer from first row
+        let columns;
+        if (headers && headers.length > 0) {
+          columns = headers.map((header, index) => ({
+            key: `col_${index}`,
+            label: header,
+            data_type: "string" as const,
+          }));
+        } else {
+          // Infer columns from first data row
+          const firstRow = data[0];
+          if (typeof firstRow === 'object' && firstRow !== null) {
+            columns = Object.keys(firstRow).map(key => ({
+              key,
+              label: key,
+              data_type: "string" as const,
+            }));
+          } else {
+            // Data is array of primitives, create generic columns
+            columns = Array.isArray(firstRow) 
+              ? firstRow.map((_, index) => ({
+                  key: `col_${index}`,
+                  label: `Column ${index + 1}`,
+                  data_type: "string" as const,
+                }))
+              : [{ key: 'value', label: 'Value', data_type: "string" as const }];
+          }
+        }
+
+        // Transform data rows
+        const rows = data.map((row) => {
+          if (typeof row === 'object' && row !== null && !Array.isArray(row)) {
+            // Row is already an object
+            return row;
+          } else if (Array.isArray(row)) {
+            // Convert array to object with column keys
+            const rowObj: any = {};
+            columns.forEach((col, index) => {
+              rowObj[col.key] = row[index];
+            });
+            return rowObj;
+          } else {
+            // Primitive value
+            return { [columns[0].key]: row };
+          }
+        });
+
+        return { columns, rows };
+      }, [interactionSpec.data, interactionSpec.headers]);
+
+      return (
+        <InteractiveTable
+          interactionId={interactionSpec.interaction_id}
+          title={interactionSpec.title}
+          data={tableData}
+          requiresResponse={interactionSpec.requires_response}
+        />
+      );
+
+    case "show_chart":
+      // Render interactive chart using ChartDisplay component for show_chart interaction
+      return (
+        <Suspense fallback={<div className="flex items-center justify-center h-64 text-muted-foreground">Loading chart...</div>}>
+          <ChartDisplay
+            interactionId={interactionSpec.interaction_id}
+            title={interactionSpec.title}
+            chartType={(interactionSpec.chart_type || "line") as ChartType}
+            data={interactionSpec.data}
+            options={interactionSpec.options}
+            requiresResponse={interactionSpec.requires_response}
+          />
+        </Suspense>
       );
 
     case "markdown":
