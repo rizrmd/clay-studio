@@ -238,105 +238,37 @@ impl ClaudeSDK {
         tokio::spawn(async move {
             // Take ownership of tx
             let tx = tx;
-            // In containerized environments, we don't need the su workaround
-            // The container itself provides isolation
-            let use_su_workaround = false;
+            
+            // Build Claude CLI command
+            let mut cmd_builder = TokioCommand::new(&bun_executable);
+            cmd_builder.arg(&claude_cli_path_clone);
 
-            tracing::info!("Containerized environment - su workaround disabled");
-
-            let mut cmd_builder = if use_su_workaround {
-                // Create a proper home directory for nobody user
-                let nobody_home = PathBuf::from("/var/cache/nobody");
-                let _ = std::fs::create_dir_all(&nobody_home);
-                let _ = std::process::Command::new("chown")
-                    .args(["nobody:nogroup", "/var/cache/nobody"])
-                    .output();
-
-                // First ensure /app/.clients and project directory are accessible to nobody user
-                let _ = std::process::Command::new("chown")
-                    .args(["-R", "nobody:nogroup", "/app/.clients"])
-                    .output();
-
-                // Also ensure the specific project directory is accessible
-                let _ = std::process::Command::new("chown")
-                    .args(["-R", "nobody:nogroup", &working_dir_clone.to_string_lossy()])
-                    .output();
-
-                // Build the full command as a string for su
-                let mcp_arg = if let Some(ref project_dir) = _project_dir {
-                    let mcp_config_path = project_dir.join(".claude/mcp_servers.json");
-                    if mcp_config_path.exists() {
-                        " --mcp-config .claude/mcp_servers.json".to_string()
-                    } else {
-                        String::new()
-                    }
-                } else {
-                    String::new()
-                };
-
-                // Create a cache directory for Claude CLI
-                let cache_dir = working_dir_clone.join(".cache");
-                let _ = std::fs::create_dir_all(&cache_dir);
-                let _ = std::process::Command::new("chown")
-                    .args(["-R", "nobody:nogroup", &cache_dir.to_string_lossy()])
-                    .output();
-
-                // Use a proper home directory for nobody user
-                let full_command = format!(
-                    "cd '{}' && HOME='/var/cache/nobody' XDG_CACHE_HOME='{}' CLAUDE_CODE_OAUTH_TOKEN='{}' echo '{}' | {} {}{} -p - --verbose --allowedTools \"mcp__data-analysis__datasource_list,mcp__data-analysis__datasource_detail,mcp__data-analysis__datasource_add,mcp__data-analysis__datasource_remove,mcp__data-analysis__datasource_update,mcp__data-analysis__datasource_test,mcp__data-analysis__datasource_inspect,mcp__data-analysis__data_query,mcp__data-analysis__schema_stats,mcp__data-analysis__schema_search,mcp__data-analysis__schema_get,mcp__interaction__show_table,mcp__interaction__show_chart,WebSearch,WebFetch\" --output-format stream-json",
-                    working_dir_clone.display(),
-                    cache_dir.display(),
-                    oauth_token,
-                    prompt.replace("'", "'\\''"),
-                    bun_executable.display(),
-                    claude_cli_path_clone.display(),
-                    mcp_arg
-                );
-
-                tracing::info!("Su command to execute: {}", full_command);
-
-                // Use su to run as nobody user
-                let mut su_cmd = TokioCommand::new("su");
-                su_cmd
-                    .arg("-s")
-                    .arg("/bin/sh")
-                    .arg("nobody")
-                    .arg("-c")
-                    .arg(&full_command);
-                su_cmd
-            } else {
-                // Normal execution path for non-root or development
-                let mut cmd = TokioCommand::new(&bun_executable);
-                cmd.arg(&claude_cli_path_clone);
-
-                // Add MCP config if we have a project directory - must come before --print
-                if let Some(ref project_dir) = _project_dir {
-                    let mcp_config_path = project_dir.join(".claude/mcp_servers.json");
-                    if mcp_config_path.exists() {
-                        cmd.arg("--mcp-config").arg(".claude/mcp_servers.json");
-                    }
+            // Add MCP config if we have a project directory
+            if let Some(ref project_dir) = _project_dir {
+                let mcp_config_path = project_dir.join(".claude/mcp_servers.json");
+                if mcp_config_path.exists() {
+                    cmd_builder.arg("--mcp-config").arg(".claude/mcp_servers.json");
                 }
+            }
 
-                // Create cache directory for non-su path as well
-                let cache_dir = working_dir_clone.join(".cache");
-                let _ = std::fs::create_dir_all(&cache_dir);
+            // Create cache directory
+            let cache_dir = working_dir_clone.join(".cache");
+            let _ = std::fs::create_dir_all(&cache_dir);
 
-                cmd.arg("-p")
-                    .arg("-") // Read from stdin
-                    .arg("--verbose");
+            cmd_builder.arg("-p")
+                .arg("-") // Read from stdin
+                .arg("--verbose");
 
-                // Add allowed tools
-                cmd.arg("--allowedTools")
-                    .arg("mcp__data-analysis__datasource_list,mcp__data-analysis__datasource_detail,mcp__data-analysis__datasource_add,mcp__data-analysis__datasource_remove,mcp__data-analysis__datasource_update,mcp__data-analysis__datasource_test,mcp__data-analysis__datasource_inspect,mcp__data-analysis__data_query,mcp__data-analysis__schema_stats,mcp__data-analysis__schema_search,mcp__data-analysis__schema_get,mcp__interaction__show_table,mcp__interaction__show_chart,WebSearch,WebFetch");
+            // Add allowed tools
+            cmd_builder.arg("--allowedTools")
+                .arg("mcp__data-analysis__datasource_list,mcp__data-analysis__datasource_detail,mcp__data-analysis__datasource_add,mcp__data-analysis__datasource_remove,mcp__data-analysis__datasource_update,mcp__data-analysis__datasource_test,mcp__data-analysis__datasource_inspect,mcp__data-analysis__data_query,mcp__data-analysis__schema_stats,mcp__data-analysis__schema_search,mcp__data-analysis__schema_get,mcp__interaction__show_table,mcp__interaction__show_chart,WebSearch,WebFetch");
 
-                cmd.arg("--output-format")
-                    .arg("stream-json")
-                    .current_dir(&working_dir_clone)
-                    .env("HOME", &working_dir_clone)
-                    .env("XDG_CACHE_HOME", &cache_dir)
-                    .env("CLAUDE_CODE_OAUTH_TOKEN", oauth_token);
-                cmd
-            };
+            cmd_builder.arg("--output-format")
+                .arg("stream-json")
+                .current_dir(&working_dir_clone)
+                .env("HOME", &working_dir_clone)
+                .env("XDG_CACHE_HOME", &cache_dir)
+                .env("CLAUDE_CODE_OAUTH_TOKEN", oauth_token);
 
             // Set stdio for both paths
             cmd_builder
@@ -384,24 +316,22 @@ impl ClaudeSDK {
                 }
             };
 
-            // Write prompt to stdin (only for non-su path, su path uses echo in the command)
-            if !use_su_workaround {
-                if let Some(mut stdin) = cmd.stdin.take() {
-                    use tokio::io::AsyncWriteExt;
-                    let stdin_start = std::time::Instant::now();
-                    if let Err(e) = stdin.write_all(prompt.as_bytes()).await {
-                        tracing::error!("Failed to write prompt to stdin: {}", e);
-                        let _ = tx
-                            .send(ClaudeMessage::Error {
-                                error: format!("Failed to write prompt to stdin: {}", e),
-                            })
-                            .await;
-                        return;
-                    }
-                    tracing::info!("Prompt written to stdin in {:?}", stdin_start.elapsed());
-                    // Close stdin to signal EOF
-                    drop(stdin);
+            // Write prompt to stdin
+            if let Some(mut stdin) = cmd.stdin.take() {
+                use tokio::io::AsyncWriteExt;
+                let stdin_start = std::time::Instant::now();
+                if let Err(e) = stdin.write_all(prompt.as_bytes()).await {
+                    tracing::error!("Failed to write prompt to stdin: {}", e);
+                    let _ = tx
+                        .send(ClaudeMessage::Error {
+                            error: format!("Failed to write prompt to stdin: {}", e),
+                        })
+                        .await;
+                    return;
                 }
+                tracing::info!("Prompt written to stdin in {:?}", stdin_start.elapsed());
+                // Close stdin to signal EOF
+                drop(stdin);
             }
 
             // Also capture stderr for debugging
