@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 use super::types::{AskUserOption, ClaudeMessage, QueryRequest};
 use crate::utils::log_organizer::auto_organize_logs;
+use crate::utils::command_logger::{CommandLogger, CommandExecution};
 
 #[derive(Debug, Clone)]
 pub struct ClaudeSDK {
@@ -350,6 +351,16 @@ impl ClaudeSDK {
 
             tracing::debug!("Executing Claude CLI command: {:?}", cmd_builder);
 
+            // Log command execution start
+            let command_execution = CommandExecution::new(
+                client_id,
+                cmd_builder.as_std().get_program().to_string_lossy().to_string(),
+                cmd_builder.as_std().get_args().map(|arg| arg.to_string_lossy().to_string()).collect(),
+                working_dir_clone.clone(),
+                std::env::var("HOME").map(std::path::PathBuf::from).unwrap_or_else(|_| working_dir_clone.clone()),
+            );
+            CommandLogger::log_command_start(&command_execution);
+
             let spawn_start = std::time::Instant::now();
             let mut cmd = match cmd_builder.spawn() {
                 Ok(child) => {
@@ -361,6 +372,14 @@ impl ClaudeSDK {
                     tracing::error!("Command was: {}", command_debug);
                     tracing::error!("Working directory: {:?}", working_dir_clone);
                     tracing::error!("Bun executable: {:?}", bun_executable);
+                    
+                    // Log spawn failure
+                    CommandLogger::log_command_error(
+                        &command_execution,
+                        &format!("Failed to spawn process: {}", e),
+                        spawn_start.elapsed()
+                    );
+                    
                     let _ = tx
                         .send(ClaudeMessage::Error {
                             error: format!("Failed to spawn Claude CLI: {}", e),
@@ -809,27 +828,50 @@ impl ClaudeSDK {
                 });
             }
 
+            let total_duration = spawn_start.elapsed();
+            
             match cmd.wait().await {
                 Ok(status) if !status.success() => {
                     tracing::error!("Claude CLI exited with non-zero status: {}", status);
                     tracing::error!("Command was: {}", command_debug_clone3);
+                    
+                    // Log command failure
+                    CommandLogger::log_command_end(
+                        &command_execution,
+                        status.code(),
+                        total_duration
+                    );
+                    
                     let _ = tx
                         .send(ClaudeMessage::Error {
                             error: format!("Process exited with status: {}", status),
                         })
                         .await;
                 }
+                Ok(status) => {
+                    // Log successful command completion
+                    CommandLogger::log_command_end(
+                        &command_execution,
+                        status.code(),
+                        total_duration
+                    );
+                }
                 Err(e) => {
                     tracing::error!("Error waiting for Claude CLI process: {}", e);
                     tracing::error!("Command was: {}", command_debug_clone3);
+                    
+                    // Log command error
+                    CommandLogger::log_command_error(
+                        &command_execution,
+                        &format!("Process error: {}", e),
+                        total_duration
+                    );
+                    
                     let _ = tx
                         .send(ClaudeMessage::Error {
                             error: format!("Process error: {}", e),
                         })
                         .await;
-                }
-                Ok(status) => {
-                    tracing::debug!("Claude CLI exited successfully with status: {}", status);
                 }
             }
 

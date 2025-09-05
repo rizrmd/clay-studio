@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod claude_md_template;
+pub mod command_logger;
 pub mod config;
 pub mod datasource;
 pub mod db;
