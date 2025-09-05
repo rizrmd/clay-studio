@@ -235,7 +235,7 @@ impl McpServer {
                     // This is a notification from the client that initialization is complete
                     // We just acknowledge it and return an empty result
                     eprintln!(
-                        "[{}] [INFO] Client initialization complete",
+                        "[{}] [INFO] Client initialization complete - MCP server fully ready",
                         Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
                     );
                     Ok(serde_json::json!({}))
