@@ -185,27 +185,27 @@ jobs:
           docker push ghcr.io/${{ env.IMAGE_NAME }}:main
         fi
     
-    - name: Trigger Coolify Deployment
-      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-      env:
-        COOLIFY_API_TOKEN: ${{ secrets.COOLIFY_API_TOKEN }}
-      run: |
-        echo "Triggering Coolify deployment..."
-        response=$(curl -X GET \
-          -H "Authorization: Bearer ${COOLIFY_API_TOKEN}" \
-          -w "\n%{http_code}" \
-          "https://cf.avolut.com/api/v1/deploy?uuid=k080sksw0g0o0wgkw4440084&force=false")
+    # - name: Trigger Coolify Deployment
+    #   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    #   env:
+    #     COOLIFY_API_TOKEN: ${{ secrets.COOLIFY_API_TOKEN }}
+    #   run: |
+    #     echo "Triggering Coolify deployment..."
+    #     response=$(curl -X GET \
+    #       -H "Authorization: Bearer ${COOLIFY_API_TOKEN}" \
+    #       -w "\n%{http_code}" \
+    #       "https://cf.avolut.com/api/v1/deploy?uuid=k080sksw0g0o0wgkw4440084&force=false")
         
-        http_code=$(echo "$response" | tail -n 1)
-        body=$(echo "$response" | head -n -1)
+    #     http_code=$(echo "$response" | tail -n 1)
+    #     body=$(echo "$response" | head -n -1)
         
-        echo "Response body: $body"
-        echo "HTTP status code: $http_code"
+    #     echo "Response body: $body"
+    #     echo "HTTP status code: $http_code"
         
-        if [ "$http_code" -eq 200 ] || [ "$http_code" -eq 202 ]; then
-          echo "✅ Deployment triggered successfully"
-        else
-          echo "❌ Failed to trigger deployment (HTTP $http_code)"
-          echo "Response: $body"
-          exit 1
-        fi
+    #     if [ "$http_code" -eq 200 ] || [ "$http_code" -eq 202 ]; then
+    #       echo "✅ Deployment triggered successfully"
+    #     else
+    #       echo "❌ Failed to trigger deployment (HTTP $http_code)"
+    #       echo "Response: $body"
+    #       exit 1
+    #     fi
