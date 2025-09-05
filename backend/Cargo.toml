@@ -40,7 +40,7 @@ anyhow = "1"
 lazy_static = "1.4"
 futures-util = "0.3"
 thiserror = "2"
-reqwest = { version = "0.12", features = ["stream"] }
+reqwest = { version = "0.12", features = ["stream", "json"] }
 bcrypt = "0.15"
 salvo-session = "0.78"
 async-session = "3"

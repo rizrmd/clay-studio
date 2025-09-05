@@ -1,14 +1,24 @@
 use serde_json::json;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::collections::{HashMap, HashSet};
 use tokio::process::Command as TokioCommand;
 use tokio::sync::{mpsc, Mutex};
 use uuid::Uuid;
+use std::sync::LazyLock;
 
 use super::types::{AskUserOption, ClaudeMessage, QueryRequest};
 use crate::utils::log_organizer::auto_organize_logs;
 use crate::utils::command_logger::{CommandLogger, CommandExecution};
 use crate::core::mcp::handlers::McpHandlers;
+
+// Global port allocation registry
+static MCP_PORT_REGISTRY: LazyLock<std::sync::RwLock<HashMap<String, (u16, u16)>>> = 
+    LazyLock::new(|| std::sync::RwLock::new(HashMap::new()));
+
+// Global process tracking registry
+static MCP_PROCESS_REGISTRY: LazyLock<std::sync::RwLock<HashMap<String, bool>>> = 
+    LazyLock::new(|| std::sync::RwLock::new(HashMap::new()));
 
 #[derive(Debug, Clone)]
 pub struct ClaudeSDK {
@@ -51,11 +61,11 @@ impl ClaudeSDK {
         }
 
         self.project_dir = Some(project_dir);
-        self.ensure_mcp_config(project_id);
+        // Note: MCP config setup is now async and called during query
         self
     }
 
-    fn ensure_mcp_config(&self, project_id: &str) {
+    async fn ensure_mcp_config(&self, project_id: &str) {
         // Only create MCP config in the project directory
         if let Some(ref project_dir) = self.project_dir {
             let claude_dir = project_dir.join(".claude");
@@ -106,41 +116,74 @@ impl ClaudeSDK {
                 }
             };
 
-            // Create MCP servers configuration - pass DATABASE_URL as environment variable
-            let database_url = std::env::var("DATABASE_URL").unwrap_or_default();
+            // Create MCP servers configuration using HTTP transport with dynamic ports
+            let (data_analysis_port, interaction_port) = Self::allocate_mcp_ports(project_id, &self.client_id);
+            
             let mcp_servers = json!({
                 "mcpServers": {
                     "data-analysis": {
-                        "type": "stdio",
-                        "command": mcp_server_path.to_string_lossy(),
-                        "args": [
-                            "--project-id", project_id,
-                            "--client-id", self.client_id.to_string()
-                        ],
-                        "env": {
-                            "DATABASE_URL": database_url
-                        }
+                        "type": "http", 
+                        "url": format!("http://localhost:{}/mcp", data_analysis_port)
                     },
                     "interaction": {
-                        "type": "stdio",
-                        "command": mcp_server_path.to_string_lossy(),
-                        "args": [
-                            "--project-id", project_id,
-                            "--client-id", self.client_id.to_string(),
-                            "--server-type", "interaction"
-                        ],
-                        "env": {
-                            "DATABASE_URL": database_url
-                        }
+                        "type": "http",
+                        "url": format!("http://localhost:{}/mcp", interaction_port)
                     }
                 }
             });
 
-            // Write the MCP servers configuration
-            let _ = std::fs::write(
-                &mcp_servers_file,
-                serde_json::to_string_pretty(&mcp_servers).unwrap_or_default(),
-            );
+            // Start the MCP servers and wait for them to be ready
+            let servers_ready = Self::ensure_mcp_servers_running_and_ready(
+                project_id, 
+                &self.client_id, 
+                data_analysis_port, 
+                interaction_port, 
+                &mcp_server_path
+            ).await;
+
+            if servers_ready {
+                // Only write the configuration if servers are actually ready
+                let _ = std::fs::write(
+                    &mcp_servers_file,
+                    serde_json::to_string_pretty(&mcp_servers).unwrap_or_default(),
+                );
+                tracing::info!("✅ MCP servers ready and configuration written for project {}", project_id);
+            } else {
+                tracing::error!("❌ MCP servers failed to start for project {}, not writing config", project_id);
+                // Fall back to stdio if HTTP servers fail
+                let fallback_mcp_servers = json!({
+                    "mcpServers": {
+                        "data-analysis": {
+                            "type": "stdio",
+                            "command": mcp_server_path.to_string_lossy(),
+                            "args": [
+                                "--project-id", project_id,
+                                "--client-id", self.client_id.to_string()
+                            ],
+                            "env": {
+                                "DATABASE_URL": std::env::var("DATABASE_URL").unwrap_or_default()
+                            }
+                        },
+                        "interaction": {
+                            "type": "stdio", 
+                            "command": mcp_server_path.to_string_lossy(),
+                            "args": [
+                                "--project-id", project_id,
+                                "--client-id", self.client_id.to_string(),
+                                "--server-type", "interaction"
+                            ],
+                            "env": {
+                                "DATABASE_URL": std::env::var("DATABASE_URL").unwrap_or_default()
+                            }
+                        }
+                    }
+                });
+                let _ = std::fs::write(
+                    &mcp_servers_file,
+                    serde_json::to_string_pretty(&fallback_mcp_servers).unwrap_or_default(),
+                );
+                tracing::warn!("⚠️ Fell back to stdio transport for project {}", project_id);
+            }
         }
     }
 
@@ -207,6 +250,14 @@ impl ClaudeSDK {
 
         // Ensure all requirements are met before proceeding
         self.ensure_requirements_met(&tx_ensure).await?;
+
+        // Ensure MCP configuration is set up
+        if let Some(ref project_dir) = self.project_dir {
+            let project_id = project_dir.file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("unknown");
+            self.ensure_mcp_config(project_id).await;
+        }
 
         let oauth_token = self
             .oauth_token
@@ -843,5 +894,287 @@ impl ClaudeSDK {
     pub async fn get_oauth_token(&self) -> Option<String> {
         let guard = self.oauth_token.lock().await;
         guard.clone()
+    }
+
+    /// Allocate ports for MCP servers for a specific project/client
+    fn allocate_mcp_ports(project_id: &str, client_id: &Uuid) -> (u16, u16) {
+        let key = format!("{}-{}", client_id, project_id);
+        
+        // Check if ports are already allocated for this project
+        {
+            let registry = MCP_PORT_REGISTRY.read().unwrap();
+            if let Some(&(data_port, interaction_port)) = registry.get(&key) {
+                return (data_port, interaction_port);
+            }
+        }
+        
+        // Allocate new ports
+        let mut registry = MCP_PORT_REGISTRY.write().unwrap();
+        
+        // Double-check in case another thread allocated while we were waiting for write lock
+        if let Some(&(data_port, interaction_port)) = registry.get(&key) {
+            return (data_port, interaction_port);
+        }
+        
+        // Find available ports starting from 8001
+        let mut base_port = 8001u16;
+        let allocated_ports: HashSet<u16> = registry
+            .values()
+            .flat_map(|&(p1, p2)| [p1, p2])
+            .collect();
+            
+        // Find first available pair of consecutive ports
+        while allocated_ports.contains(&base_port) || allocated_ports.contains(&(base_port + 1)) {
+            base_port += 2;
+        }
+        
+        let data_port = base_port;
+        let interaction_port = base_port + 1;
+        
+        registry.insert(key, (data_port, interaction_port));
+        
+        tracing::info!("Allocated ports for project {}: data-analysis={}, interaction={}", 
+                      project_id, data_port, interaction_port);
+        
+        (data_port, interaction_port)
+    }
+    
+    /// Ensure MCP servers are running and ready for the specified project/client
+    async fn ensure_mcp_servers_running_and_ready(
+        project_id: &str, 
+        client_id: &Uuid, 
+        data_port: u16, 
+        interaction_port: u16,
+        mcp_server_path: &PathBuf
+    ) -> bool {
+        // Start the servers
+        Self::start_mcp_servers(project_id, client_id, data_port, interaction_port, mcp_server_path).await;
+        
+        // Wait for servers to be ready
+        Self::wait_for_mcp_servers_ready(data_port, interaction_port).await
+    }
+
+    /// Start MCP server processes  
+    async fn start_mcp_servers(
+        project_id: &str, 
+        client_id: &Uuid, 
+        data_port: u16, 
+        interaction_port: u16,
+        mcp_server_path: &PathBuf
+    ) {
+        let key = format!("{}-{}", client_id, project_id);
+        
+        // Check if we've already marked this project as having running servers
+        let is_marked_running = {
+            let process_registry = MCP_PROCESS_REGISTRY.read().unwrap();
+            process_registry.get(&key).copied().unwrap_or(false)
+        };
+        
+        if is_marked_running {
+            // Double-check they're actually ready (servers might have crashed)
+            if Self::check_mcp_server_ready(data_port).await && Self::check_mcp_server_ready(interaction_port).await {
+                tracing::debug!("✅ MCP servers already running for project {} (cached)", project_id);
+                return;
+            } else {
+                tracing::warn!("⚠️ Cached servers for project {} not responding, restarting...", project_id);
+            }
+        }
+        use std::process::{Command, Stdio};
+        use std::fs::File;
+        
+        let database_url = match std::env::var("DATABASE_URL") {
+            Ok(url) => url,
+            Err(_) => {
+                tracing::error!("DATABASE_URL not set, cannot start MCP servers");
+                return;
+            }
+        };
+        
+        // Check if servers are already running and ready
+        if Self::check_mcp_server_ready(data_port).await && Self::check_mcp_server_ready(interaction_port).await {
+            tracing::debug!("✅ MCP servers already running and ready on ports {} and {}", data_port, interaction_port);
+            return;
+        }
+        
+        // Check if ports are occupied but servers not ready (stale processes)
+        if Self::is_port_in_use(data_port).await || Self::is_port_in_use(interaction_port).await {
+            tracing::warn!("⚠️ Ports {} or {} are in use but MCP servers not ready - may need cleanup", data_port, interaction_port);
+        }
+        
+        tracing::info!("Starting MCP servers for project {} on ports {} and {}", 
+                      project_id, data_port, interaction_port);
+
+        // Create project-specific log directory
+        let clients_base = std::env::var("CLIENTS_DIR").unwrap_or_else(|_| ".clients".to_string());
+        let log_dir = std::path::PathBuf::from(&clients_base)
+            .join(client_id.to_string())
+            .join(project_id)
+            .join(".mcp_logs");
+        
+        if let Err(e) = std::fs::create_dir_all(&log_dir) {
+            tracing::error!("Failed to create MCP log directory {:?}: {}", log_dir, e);
+        }
+
+        // Start data-analysis MCP server with project-specific logging
+        if !Self::is_port_in_use(data_port).await {
+            let log_file_path = log_dir.join(format!("data-analysis-{}.log", data_port));
+            let log_file = File::create(&log_file_path).ok();
+
+            let mut cmd = Command::new(mcp_server_path);
+            cmd.args(&[
+                "--project-id", project_id,
+                "--client-id", &client_id.to_string(),
+                "--server-type", "data-analysis",
+                "--http",
+                "--port", &data_port.to_string()
+            ])
+            .env("DATABASE_URL", &database_url)
+            .stdin(Stdio::null());
+
+            // Redirect stdout and stderr to project log file
+            if let Some(file) = log_file {
+                cmd.stdout(Stdio::from(file.try_clone().unwrap()))
+                   .stderr(Stdio::from(file));
+            } else {
+                cmd.stdout(Stdio::null())
+                   .stderr(Stdio::null());
+            }
+
+            match cmd.spawn() {
+                Ok(_) => {
+                    tracing::info!("✅ Started data-analysis MCP server on port {} (logs: {:?})", 
+                                  data_port, log_file_path);
+                }
+                Err(e) => {
+                    tracing::error!("❌ Failed to start data-analysis MCP server: {}", e);
+                    return; // Don't continue if data-analysis server failed
+                }
+            }
+        }
+        
+        // Start interaction MCP server with project-specific logging
+        if !Self::is_port_in_use(interaction_port).await {
+            let log_file_path = log_dir.join(format!("interaction-{}.log", interaction_port));
+            let log_file = File::create(&log_file_path).ok();
+
+            let mut cmd = Command::new(mcp_server_path);
+            cmd.args(&[
+                "--project-id", project_id,
+                "--client-id", &client_id.to_string(),
+                "--server-type", "interaction", 
+                "--http",
+                "--port", &interaction_port.to_string()
+            ])
+            .env("DATABASE_URL", &database_url)
+            .stdin(Stdio::null());
+
+            // Redirect stdout and stderr to project log file
+            if let Some(file) = log_file {
+                cmd.stdout(Stdio::from(file.try_clone().unwrap()))
+                   .stderr(Stdio::from(file));
+            } else {
+                cmd.stdout(Stdio::null())
+                   .stderr(Stdio::null());
+            }
+
+            match cmd.spawn() {
+                Ok(_) => {
+                    tracing::info!("✅ Started interaction MCP server on port {} (logs: {:?})", 
+                                  interaction_port, log_file_path);
+                    
+                    // Mark this project as having running servers
+                    let mut process_registry = MCP_PROCESS_REGISTRY.write().unwrap();
+                    process_registry.insert(key.clone(), true);
+                    tracing::debug!("📝 Marked project {} as having active MCP servers", project_id);
+                }
+                Err(e) => tracing::error!("❌ Failed to start interaction MCP server: {}", e),
+            }
+        } else {
+            // If we couldn't start interaction server, mark as having active servers anyway
+            // since data-analysis server is running
+            let mut process_registry = MCP_PROCESS_REGISTRY.write().unwrap(); 
+            process_registry.insert(key, true);
+        }
+    }
+
+    /// Wait for MCP servers to be ready to accept connections
+    async fn wait_for_mcp_servers_ready(data_port: u16, interaction_port: u16) -> bool {
+        const MAX_RETRIES: u32 = 30; // 30 seconds max wait
+        const RETRY_DELAY_MS: u64 = 1000; // 1 second between retries
+        
+        tracing::info!("⏳ Waiting for MCP servers to be ready on ports {} and {}...", data_port, interaction_port);
+        
+        for attempt in 1..=MAX_RETRIES {
+            // Check if both servers are responding to HTTP requests
+            let data_ready = Self::check_mcp_server_ready(data_port).await;
+            let interaction_ready = Self::check_mcp_server_ready(interaction_port).await;
+            
+            if data_ready && interaction_ready {
+                tracing::info!("✅ Both MCP servers ready after {} seconds", attempt);
+                return true;
+            }
+            
+            if attempt % 5 == 0 {
+                tracing::info!("⏳ Still waiting for MCP servers... (attempt {}/{})", attempt, MAX_RETRIES);
+                tracing::debug!("  data-analysis ({}): {}", data_port, if data_ready { "✅ ready" } else { "❌ not ready" });
+                tracing::debug!("  interaction ({}): {}", interaction_port, if interaction_ready { "✅ ready" } else { "❌ not ready" });
+            }
+            
+            tokio::time::sleep(tokio::time::Duration::from_millis(RETRY_DELAY_MS)).await;
+        }
+        
+        tracing::error!("❌ MCP servers did not become ready within {} seconds", MAX_RETRIES);
+        false
+    }
+
+    /// Check if a specific MCP server is ready by making a test HTTP request
+    async fn check_mcp_server_ready(port: u16) -> bool {
+        use tokio::time::{timeout, Duration};
+        
+        // Try to make a simple HTTP request to the server
+        let client = match reqwest::Client::builder()
+            .timeout(Duration::from_secs(2))
+            .build() 
+        {
+            Ok(client) => client,
+            Err(_) => return false,
+        };
+        
+        let url = format!("http://localhost:{}/mcp", port);
+        
+        // Send a simple initialize request to test if server is responding
+        let test_request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 0,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {"roots": {}},
+                "clientInfo": {"name": "readiness-check", "version": "1.0.0"}
+            }
+        });
+        
+        let request_future = client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .json(&test_request)
+            .send();
+            
+        match timeout(Duration::from_secs(2), request_future).await {
+            Ok(Ok(response)) => {
+                response.status().is_success()
+            }
+            _ => false,
+        }
+    }
+    
+    /// Check if a port is already in use
+    async fn is_port_in_use(port: u16) -> bool {
+        use tokio::net::TcpListener;
+        
+        match TcpListener::bind(format!("127.0.0.1:{}", port)).await {
+            Ok(_) => false, // Port is available
+            Err(_) => true,  // Port is in use
+        }
     }
 }

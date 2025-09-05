@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "data-analysis": {
+      "type": "http",
+      "url": "http://localhost:8001/mcp"
+    },
+    "interaction": {
+      "type": "http",
+      "url": "http://localhost:8002/mcp"
+    }
+  }
+}

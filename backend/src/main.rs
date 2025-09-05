@@ -214,6 +214,7 @@ async fn ensure_global_bun_installation() -> Result<(), Box<dyn std::error::Erro
     Ok(())
 }
 
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv().ok();
@@ -257,6 +258,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Ensure global Bun installation is available for all clients
     ensure_global_bun_installation().await?;
+
+    // Note: MCP servers are now started per-project dynamically
 
     // Session configuration
     let default_secret = "clay-studio-secret-key-change-in-production-this-is-64-bytes-long";
