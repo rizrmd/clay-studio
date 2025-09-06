@@ -16,7 +16,7 @@ use std::time::Duration;
 use tokio::signal;
 
 use crate::api::{
-    admin, auth, client_management, clients, conversations_forget, projects, prompt, tool_usage,
+    admin, auth, client_management, clients, conversations_forget, datasources, projects, prompt, tool_usage,
     upload, user_management, websocket,
 };
 use crate::core::sessions::PostgresSessionStore;
@@ -386,6 +386,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .post(projects::refresh_claude_md),
         )
         .push(Router::with_path("/projects/{project_id}").delete(projects::delete_project))
+        // Datasources routes
+        .push(Router::with_path("/projects").push(datasources::datasource_routes()))
         // Conversation routes - more specific paths first
         .push(
             Router::with_path("/conversations/{conversation_id}/forget-after")

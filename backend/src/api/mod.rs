@@ -5,6 +5,7 @@ pub mod client_management;
 pub mod clients;
 pub mod conversations;
 pub mod conversations_forget;
+pub mod datasources;
 pub mod debug;
 pub mod projects;
 pub mod prompt;
