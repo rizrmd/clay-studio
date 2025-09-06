@@ -5,17 +5,33 @@ import { cn } from "@/lib/utils";
 interface TextareaProps extends React.ComponentProps<"textarea"> {
   onEnterSubmit?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   placeholderSecondary?: string;
+  onUpArrowPressed?: () => void;
+  onDownArrowPressed?: () => void;
 }
 
 const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
   (
-    { className, onEnterSubmit, onKeyDown, placeholderSecondary, ...props },
+    { className, onEnterSubmit, onKeyDown, placeholderSecondary, onUpArrowPressed, onDownArrowPressed, ...props },
     ref
   ) => {
     const [hasContent, setHasContent] = React.useState(!!props.value || !!props.defaultValue);
     
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key === "Enter") {
+      const target = e.target as HTMLTextAreaElement;
+      
+      if (e.key === "ArrowUp" && onUpArrowPressed) {
+        // Handle up arrow if cursor is at the beginning or if we're already in history mode
+        if (target.selectionStart === 0 && target.selectionEnd === 0) {
+          e.preventDefault();
+          onUpArrowPressed();
+        }
+      } else if (e.key === "ArrowDown" && onDownArrowPressed) {
+        // Handle down arrow if cursor is at the beginning (for history navigation)
+        if (target.selectionStart === 0 && target.selectionEnd === 0) {
+          e.preventDefault();
+          onDownArrowPressed();
+        }
+      } else if (e.key === "Enter") {
         if (e.altKey || e.ctrlKey || e.metaKey) {
           // Alt/Ctrl/Cmd+Enter: Insert new line manually
           e.preventDefault();

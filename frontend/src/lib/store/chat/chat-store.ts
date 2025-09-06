@@ -5,7 +5,7 @@ interface ToolState {
   tool: string;
   toolUsageId: string;
   startTime: number;
-  status: 'active' | 'completed' | 'error';
+  status: "active" | "completed" | "error";
   executionTime?: number;
   completedAt?: number;
 }
@@ -20,6 +20,7 @@ interface StreamingState {
 export const chatStore = proxy({
   project_id: "" as PROJECT_ID,
   conversation_id: "" as CONVERSATION_ID,
+  pendingFirstChat: "",
   list: [] as CONVERSATION_ID[],
   map: {} as Record<CONVERSATION_ID, Conversation>,
   errors: {} as Record<CONVERSATION_ID, string>,

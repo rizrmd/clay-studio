@@ -1,4 +1,4 @@
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState } from "react";
 import { useSnapshot } from "valtio";
 
 import { Send, Paperclip } from "lucide-react";
@@ -77,6 +77,11 @@ export function ChatInput({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputSnapshot = useSnapshot(inputStore, { sync: true });
+  const chatSnapshot = useSnapshot(chatStore, { sync: true });
+  
+  // State for message history navigation
+  const [messageHistoryIndex, setMessageHistoryIndex] = useState(-1);
+  const [originalInput, setOriginalInput] = useState("");
 
   const activeConversationId = chatStore.conversation_id || "new";
   const { uploadFiles, cancelUpload, generatePreview } = useFileUpload(
@@ -224,6 +229,79 @@ export function ChatInput({
     multimodalInputActions.setLocalInput(activeConversationId, "");
     inputActions.clearSelectedFiles();
     onExternalFilesChange?.([]);
+    
+    // Reset message history navigation
+    setMessageHistoryIndex(-1);
+    setOriginalInput("");
+  };
+
+  const getUserMessages = () => {
+    const currentConversationId = chatSnapshot.conversation_id || conversationId;
+    if (!currentConversationId || currentConversationId === "new") {
+      return [];
+    }
+
+    const conversation = chatSnapshot.map[currentConversationId];
+    if (!conversation || !conversation.messages) {
+      return [];
+    }
+
+    return conversation.messages
+      .filter(msg => msg.role === "user")
+      .reverse(); // Most recent first
+  };
+
+  const handleUpArrowPressed = () => {
+    const userMessages = getUserMessages();
+    if (userMessages.length === 0) return;
+
+    // Store original input when starting navigation
+    if (messageHistoryIndex === -1) {
+      setOriginalInput(input);
+    }
+
+    const nextIndex = Math.min(messageHistoryIndex + 1, userMessages.length - 1);
+    setMessageHistoryIndex(nextIndex);
+    
+    const selectedMessage = userMessages[nextIndex].content;
+    setInput(selectedMessage);
+    multimodalInputActions.setLocalInput(activeConversationId, selectedMessage);
+
+    // Move caret to the beginning
+    setTimeout(() => {
+      if (textareaRef.current) {
+        textareaRef.current.setSelectionRange(0, 0);
+        textareaRef.current.focus();
+      }
+    }, 0);
+  };
+
+  const handleDownArrowPressed = () => {
+    if (messageHistoryIndex === -1) return;
+
+    const userMessages = getUserMessages();
+    
+    if (messageHistoryIndex === 0) {
+      // Go back to original input
+      setMessageHistoryIndex(-1);
+      setInput(originalInput);
+      multimodalInputActions.setLocalInput(activeConversationId, originalInput);
+    } else {
+      const nextIndex = messageHistoryIndex - 1;
+      setMessageHistoryIndex(nextIndex);
+      
+      const selectedMessage = userMessages[nextIndex].content;
+      setInput(selectedMessage);
+      multimodalInputActions.setLocalInput(activeConversationId, selectedMessage);
+    }
+
+    // Move caret to the beginning
+    setTimeout(() => {
+      if (textareaRef.current) {
+        textareaRef.current.setSelectionRange(0, 0);
+        textareaRef.current.focus();
+      }
+    }, 0);
   };
 
   // Only show connecting message for real conversations that aren't subscribed
@@ -382,8 +460,15 @@ export function ChatInput({
             activeConversationId,
             e.target.value
           );
+          // Reset history navigation when user starts typing
+          if (messageHistoryIndex !== -1) {
+            setMessageHistoryIndex(-1);
+            setOriginalInput("");
+          }
         }}
         onEnterSubmit={(e) => handleFormSubmit(e as any)}
+        onUpArrowPressed={handleUpArrowPressed}
+        onDownArrowPressed={handleDownArrowPressed}
         placeholder={
           isLoading
             ? "Continue typing"
@@ -398,7 +483,7 @@ export function ChatInput({
             ? "while the ai is thinking..."
             : inputSnapshot.isDragging || inputSnapshot.isUploading
             ? undefined
-            : "Enter to send, Shift+Enter for new line"
+            : "Enter to send, Shift+Enter for new line, ↑↓ to navigate history"
         }
         className={cn(
           "min-h-[60px] max-h-[200px] resize-none pr-12 bg-background"

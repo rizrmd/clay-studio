@@ -34,15 +34,7 @@ export const MessageList = () => {
         {currentMessages.map((message, index) => {
           if (message.content === "") return null;
           const isLastMessage = index === currentMessages.length - 1;
-          // DEBUG: Log last message detection
-          if (isLastMessage) {
-            console.log("🔧 Last message detected:", { 
-              messageId: message.id, 
-              role: message.role,
-              index, 
-              totalMessages: currentMessages.length 
-            });
-          }
+      
           return (
             <MessageItem
               key={message.id || index}

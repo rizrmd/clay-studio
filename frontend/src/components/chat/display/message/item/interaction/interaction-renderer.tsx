@@ -3,10 +3,13 @@ import { AskUser } from "./ask-user";
 // import { WebSocketService } from "@/lib/services/websocket-service";
 import { InteractiveTable } from "@/components/data-table/interactive-table";
 import type { ChartType } from "@/components/data-chart/chart-types";
+import { parseMcpToolResult } from "../../../tool/tool-call-utils";
 
 // Lazy load ChartDisplay only when needed
-const ChartDisplay = lazy(() => 
-  import("@/components/data-chart").then(module => ({ default: module.ChartDisplay }))
+const ChartDisplay = lazy(() =>
+  import("@/components/data-chart").then((module) => ({
+    default: module.ChartDisplay,
+  }))
 );
 
 // Stub implementation
@@ -20,7 +23,15 @@ const WebSocketService = {
 
 interface InteractionSpec {
   interaction_id: string;
-  interaction_type: "buttons" | "checkbox" | "input" | "chart" | "table" | "show_chart" | "show_table" | "markdown";
+  interaction_type:
+    | "buttons"
+    | "checkbox"
+    | "input"
+    | "chart"
+    | "table"
+    | "show_chart"
+    | "show_table"
+    | "markdown";
   title: string;
   data: any;
   headers?: string[];
@@ -63,27 +74,48 @@ export function InteractionRenderer({
         return actualOutput as InteractionSpec;
       }
 
-      // If it's an object with a 'text' property, use that
-      if (typeof actualOutput === "object" && actualOutput.text) {
-        actualOutput = actualOutput.text;
+      // Handle raw MCP interaction parameter formats
+      if (typeof actualOutput === "object") {
+        // show_table format: {data: {columns: [...], rows: [...]}, title: "..."}
+        if (actualOutput.data && 
+            actualOutput.data.columns && 
+            actualOutput.data.rows &&
+            Array.isArray(actualOutput.data.columns) &&
+            Array.isArray(actualOutput.data.rows)) {
+          return {
+            interaction_type: "show_table",
+            title: actualOutput.title || "Data Table",
+            data: actualOutput.data,
+            interaction_id: `table-${Date.now()}`,
+            requires_response: false,
+            created_at: new Date().toISOString(),
+          } as InteractionSpec;
+        }
+        
+        // show_chart format: {data: {categories: [...], series: [...]}, chart_type: "...", title: "..."}
+        if (actualOutput.data && 
+            actualOutput.chart_type &&
+            (actualOutput.data.categories || actualOutput.data.series)) {
+          return {
+            interaction_type: "show_chart",
+            title: actualOutput.title || "Chart",
+            chart_type: actualOutput.chart_type,
+            data: actualOutput.data,
+            interaction_id: `chart-${Date.now()}`,
+            requires_response: false,
+            created_at: new Date().toISOString(),
+          } as InteractionSpec;
+        }
+
+        // If it's an object with a 'text' property, use that
+        if (actualOutput.text) {
+          actualOutput = actualOutput.text;
+        }
       }
 
       // If it's a string, try to extract JSON from it
       if (typeof actualOutput === "string") {
-        // Look for JSON block in the output
-        const jsonMatch = actualOutput.match(/```json\n([\s\S]*?)\n```/);
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[1]);
-          if (parsed.interaction_type) {
-            return parsed as InteractionSpec;
-          }
-        }
-
-        // Try parsing the whole string as JSON
-        const parsed = JSON.parse(actualOutput);
-        if (parsed.interaction_type) {
-          return parsed as InteractionSpec;
-        }
+        return parseMcpToolResult(actualOutput) as InteractionSpec;
       }
     } catch (error) {
       console.error("Failed to parse interaction spec:", error);
@@ -114,7 +146,10 @@ export function InteractionRenderer({
           onSubmit={(response) => {
             // Send response via WebSocket
             const wsService = WebSocketService.getInstance();
-            wsService.sendAskUserResponse(interactionSpec.interaction_id, response);
+            wsService.sendAskUserResponse(
+              interactionSpec.interaction_id,
+              response
+            );
 
             // Also call the provided callback if any
             if (onAskUserSubmit) {
@@ -131,7 +166,13 @@ export function InteractionRenderer({
     case "chart":
       // Render interactive chart using ChartDisplay component with lazy loading
       return (
-        <Suspense fallback={<div className="flex items-center justify-center h-64 text-muted-foreground">Loading chart...</div>}>
+        <Suspense
+          fallback={
+            <div className="flex items-center justify-center h-64 text-muted-foreground">
+              Loading chart...
+            </div>
+          }
+        >
           <ChartDisplay
             interactionId={interactionSpec.interaction_id}
             title={interactionSpec.title}
@@ -159,7 +200,23 @@ export function InteractionRenderer({
       const tableData = useMemo(() => {
         const data = interactionSpec.data;
         const headers = interactionSpec.headers;
-        
+
+        // Handle the case where data is already an object with columns and rows
+        if (data && typeof data === "object" && data.columns && data.rows) {
+          // Data is already in the expected format: {columns: [...], rows: [...]}
+          const columns = data.columns.map((col: any, index: number) => ({
+            key: col.key || col.id || `col_${index}`,
+            label: col.label || col.name || col.header || `Column ${index + 1}`,
+            data_type: col.data_type || col.type || "string" as const,
+            width: col.width || 150,
+            sortable: col.sortable !== false,
+            filterable: col.filterable !== false,
+          }));
+
+          return { columns, rows: data.rows || [] };
+        }
+
+        // Legacy handling for array data
         if (!Array.isArray(data) || data.length === 0) {
           return { columns: [], rows: [] };
         }
@@ -171,31 +228,49 @@ export function InteractionRenderer({
             key: `col_${index}`,
             label: header,
             data_type: "string" as const,
+            width: 150,
+            sortable: true,
+            filterable: true,
           }));
         } else {
           // Infer columns from first data row
           const firstRow = data[0];
-          if (typeof firstRow === 'object' && firstRow !== null) {
-            columns = Object.keys(firstRow).map(key => ({
+          if (typeof firstRow === "object" && firstRow !== null) {
+            columns = Object.keys(firstRow).map((key) => ({
               key,
               label: key,
               data_type: "string" as const,
+              width: 150,
+              sortable: true,
+              filterable: true,
             }));
           } else {
             // Data is array of primitives, create generic columns
-            columns = Array.isArray(firstRow) 
+            columns = Array.isArray(firstRow)
               ? firstRow.map((_, index) => ({
                   key: `col_${index}`,
                   label: `Column ${index + 1}`,
                   data_type: "string" as const,
+                  width: 150,
+                  sortable: true,
+                  filterable: true,
                 }))
-              : [{ key: 'value', label: 'Value', data_type: "string" as const }];
+              : [
+                  {
+                    key: "value",
+                    label: "Value",
+                    data_type: "string" as const,
+                    width: 150,
+                    sortable: true,
+                    filterable: true,
+                  },
+                ];
           }
         }
 
         // Transform data rows
         const rows = data.map((row) => {
-          if (typeof row === 'object' && row !== null && !Array.isArray(row)) {
+          if (typeof row === "object" && row !== null && !Array.isArray(row)) {
             // Row is already an object
             return row;
           } else if (Array.isArray(row)) {
@@ -226,7 +301,13 @@ export function InteractionRenderer({
     case "show_chart":
       // Render interactive chart using ChartDisplay component for show_chart interaction
       return (
-        <Suspense fallback={<div className="flex items-center justify-center h-64 text-muted-foreground">Loading chart...</div>}>
+        <Suspense
+          fallback={
+            <div className="flex items-center justify-center h-64 text-muted-foreground">
+              Loading chart...
+            </div>
+          }
+        >
           <ChartDisplay
             interactionId={interactionSpec.interaction_id}
             title={interactionSpec.title}
@@ -242,7 +323,9 @@ export function InteractionRenderer({
       // For now, just show the markdown content
       return (
         <div className="border rounded-lg p-4 bg-gray-50/50">
-          <h3 className="font-medium text-sm mb-2">📝 {interactionSpec.title}</h3>
+          <h3 className="font-medium text-sm mb-2">
+            📝 {interactionSpec.title}
+          </h3>
           <div className="prose prose-sm max-w-none">
             {interactionSpec.data.content}
           </div>
@@ -259,7 +342,6 @@ export function hasInteraction(toolOutput: any): boolean {
   if (!toolOutput) {
     return false;
   }
-
 
   // If it's an array, check the first element
   if (Array.isArray(toolOutput) && toolOutput.length > 0) {
@@ -280,6 +362,25 @@ export function hasInteraction(toolOutput: any): boolean {
 
     if (typeof actualOutput === "object" && actualOutput.interaction_type) {
       return true;
+    }
+
+    // Check for MCP interaction parameter formats (raw data from show_table, show_chart, etc.)
+    if (typeof actualOutput === "object") {
+      // show_table format: {data: {columns: [...], rows: [...]}, title: "..."}
+      if (actualOutput.data && 
+          actualOutput.data.columns && 
+          actualOutput.data.rows &&
+          Array.isArray(actualOutput.data.columns) &&
+          Array.isArray(actualOutput.data.rows)) {
+        return true;
+      }
+      
+      // show_chart format: {data: {categories: [...], series: [...]}, chart_type: "...", title: "..."}
+      if (actualOutput.data && 
+          actualOutput.chart_type &&
+          (actualOutput.data.categories || actualOutput.data.series)) {
+        return true;
+      }
     }
 
     if (typeof actualOutput === "string") {

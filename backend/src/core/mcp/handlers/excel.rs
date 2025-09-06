@@ -32,46 +32,93 @@ impl McpHandlers {
 
         // Validate sheets structure
         if sheets.is_empty() {
-            return Err(JsonRpcError {
-                code: INVALID_PARAMS,
-                message: "At least one sheet must be provided".to_string(),
-                data: None,
+            let error_response = json!({
+                "status": "error",
+                "error": "Invalid parameter format for export_excel",
+                "message": "At least one sheet must be provided",
+                "correct_format_example": {
+                    "filename": "report",
+                    "sheets": [
+                        {
+                            "name": "Sheet1",
+                            "data": [
+                                ["Header1", "Header2", "Header3"],
+                                ["Value1", "Value2", "Value3"],
+                                ["Value4", "Value5", "Value6"]
+                            ],
+                            "headers": ["Header1", "Header2", "Header3"]
+                        }
+                    ],
+                    "options": {
+                        "auto_filter": true,
+                        "freeze_panes": {"row": 1, "col": 0},
+                        "column_widths": {"0": 15, "1": 20, "2": 25}
+                    }
+                }
             });
+            return Ok(serde_json::to_string(&error_response).unwrap());
         }
 
         // Validate each sheet
         for (i, sheet) in sheets.iter().enumerate() {
             if !sheet.is_object() {
-                return Err(JsonRpcError {
-                    code: INVALID_PARAMS,
-                    message: format!("Sheet {} must be an object", i),
-                    data: None,
+                let error_response = json!({
+                    "status": "error",
+                    "error": "Invalid sheet structure",
+                    "message": format!("Sheet {} must be an object", i),
+                    "correct_format_example": {
+                        "name": "Sheet Name",
+                        "data": [
+                            ["Header1", "Header2"],
+                            ["Value1", "Value2"]
+                        ],
+                        "headers": ["Header1", "Header2"]
+                    }
                 });
+                return Ok(serde_json::to_string(&error_response).unwrap());
             }
 
             let sheet_obj = sheet.as_object().unwrap();
             if !sheet_obj.contains_key("name") || !sheet_obj.contains_key("data") {
-                return Err(JsonRpcError {
-                    code: INVALID_PARAMS,
-                    message: format!("Sheet {} must have 'name' and 'data' fields", i),
-                    data: None,
+                let error_response = json!({
+                    "status": "error",
+                    "error": "Missing required sheet fields",
+                    "message": format!("Sheet {} must have 'name' and 'data' fields", i),
+                    "correct_format_example": {
+                        "name": "My Data Sheet",
+                        "data": [
+                            ["ID", "Name", "Email"],
+                            ["1", "John Doe", "john@example.com"],
+                            ["2", "Jane Smith", "jane@example.com"]
+                        ],
+                        "headers": ["ID", "Name", "Email"]
+                    }
                 });
+                return Ok(serde_json::to_string(&error_response).unwrap());
             }
 
             if !sheet_obj["data"].is_array() {
-                return Err(JsonRpcError {
-                    code: INVALID_PARAMS,
-                    message: format!("Sheet {} 'data' field must be an array of rows", i),
-                    data: None,
+                let error_response = json!({
+                    "status": "error",
+                    "error": "Invalid data field type",
+                    "message": format!("Sheet {} 'data' field must be an array of rows", i),
+                    "correct_format_example": {
+                        "name": "Data Sheet",
+                        "data": [
+                            ["Column 1", "Column 2", "Column 3"],
+                            ["Row 1 Col 1", "Row 1 Col 2", "Row 1 Col 3"],
+                            ["Row 2 Col 1", "Row 2 Col 2", "Row 2 Col 3"]
+                        ]
+                    }
                 });
+                return Ok(serde_json::to_string(&error_response).unwrap());
             }
         }
 
         // Extract optional parameters
         let options = arguments.get("options");
 
-        // Create Excel export interaction response
-        let interaction_id = uuid::Uuid::new_v4().to_string();
+        // Create Excel export response
         let export_id = uuid::Uuid::new_v4().to_string();
 
         // Create directory structure for Excel exports following existing pattern
@@ -299,35 +346,31 @@ impl McpHandlers {
         // Get file size
         let file_size = fs::metadata(&file_path).await.map(|m| m.len()).unwrap_or(0);
 
-        // Build the interaction spec with download URL
+        // Build success response with download URL
         let download_url = format!(
             "/api/files/excel/{}/{}/{}",
             self.client_id, self.project_id, export_id
         );
-        let interaction_spec = json!({
-            "interaction_id": interaction_id,
-            "interaction_type": "excel_export",
-            "filename": filename,
+        let response = json!({
+            "status": "success",
+            "message": "Excel file created successfully",
             "export_id": export_id,
             "download_url": download_url,
-            "file_path": relative_path,
+            "filename": format!("{}.xlsx", filename),
             "file_size": file_size,
-            "sheets": sheets,
-            "options": options.unwrap_or(&json!({
-                "auto_filter": true,
-                "freeze_panes": null,
-                "column_widths": {}
-            })),
-            "status": "completed",
-            "requires_response": false,
-            "created_at": chrono::Utc::now().to_rfc3339(),
+            "sheets_count": sheets.len(),
+            "file_info": {
+                "relative_path": relative_path,
+                "options": options.unwrap_or(&json!({
+                    "auto_filter": true,
+                    "freeze_panes": null,
+                    "column_widths": {}
+                })),
+                "created_at": chrono::Utc::now().to_rfc3339()
+            }
         });
 
-        serde_json::to_string(&interaction_spec).map_err(|e| JsonRpcError {
-            code: INTERNAL_ERROR,
-            message: format!("Failed to serialize Excel export response: {}", e),
-            data: None,
-        })
+        Ok(serde_json::to_string(&response).unwrap())
     }
 
     pub async fn cleanup_old_excel_files(

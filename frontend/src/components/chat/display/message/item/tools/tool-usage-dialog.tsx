@@ -9,9 +9,10 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Code2, Clock, FileText, Play } from "lucide-react";
+import { Code2, Clock, FileText, Play, Copy, Check } from "lucide-react";
 import { api } from "@/lib/utils/api";
-import { InteractionRenderer, hasInteraction } from "@/components/chat/display/interaction/interaction-renderer";
+import { Button } from "@/components/ui/button";
+import { parseMcpToolResult } from "../../../tool/tool-call-utils";
 
 interface ToolUsageDetails {
   id: string;
@@ -37,19 +38,17 @@ export function ToolUsageDialog({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
+  const [parametersCopied, setParametersCopied] = useState(false);
+  const [outputCopied, setOutputCopied] = useState(false);
 
   const fetchToolUsageDetails = async () => {
     if (toolUsage) return; // Already loaded
 
-    console.log("Fetching tool usage details for ID:", toolUsageId);
     setIsLoading(true);
     setError(null);
 
     try {
-      console.log("Making API call to:", `/tool-usages/${toolUsageId}`);
       const response = await api.get(`/tool-usages/${toolUsageId}`);
-      console.log("Full API response:", response);
-      console.log("Tool usage data:", response);
       setToolUsage(response);
     } catch (err) {
       console.error("Failed to fetch tool usage details:", err);
@@ -75,23 +74,6 @@ export function ToolUsageDialog({
     }
   };
 
-  const parseMcpToolResult = (text: string): any => {
-    try {
-      if (text.includes("[Resource from interaction at mcp://tool-result/")) {
-        const match = text.match(
-          /\[Resource from interaction at mcp:\/\/tool-result\/[^\]]+\]\s*(.+)/s
-        );
-        if (match && match[1]) {
-          const jsonText = match[1].trim();
-          return JSON.parse(jsonText);
-        }
-      }
-      return null;
-    } catch {
-      return null;
-    }
-  };
-
   const formatOutput = (output: any): string => {
     if (!output) return "null";
 
@@ -105,6 +87,7 @@ export function ToolUsageDialog({
         firstItem.type === "text"
       ) {
         const parsedMcp = parseMcpToolResult(firstItem.text);
+
         if (parsedMcp) {
           return JSON.stringify(parsedMcp, null, 2);
         }
@@ -117,6 +100,21 @@ export function ToolUsageDialog({
   const formatJson = (obj: any) => {
     if (!obj) return "null";
     return JSON.stringify(obj, null, 2);
+  };
+
+  const copyToClipboard = async (text: string, type: 'parameters' | 'output') => {
+    try {
+      await navigator.clipboard.writeText(text);
+      if (type === 'parameters') {
+        setParametersCopied(true);
+        setTimeout(() => setParametersCopied(false), 2000);
+      } else {
+        setOutputCopied(true);
+        setTimeout(() => setOutputCopied(false), 2000);
+      }
+    } catch (err) {
+      console.error('Failed to copy to clipboard:', err);
+    }
   };
 
   return (
@@ -160,22 +158,26 @@ export function ToolUsageDialog({
               )}
             </div>
 
-            {/* Interactive Content */}
-            {hasInteraction(toolUsage.output) && (
-              <div className="space-y-2">
-                <h3 className="font-semibold text-sm">Interactive Content</h3>
-                <div className="border rounded-lg p-4 bg-muted/30">
-                  <InteractionRenderer toolOutput={toolUsage.output} />
-                </div>
-              </div>
-            )}
-
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 flex-1">
               {/* Parameters */}
               <div className="space-y-2 flex flex-col">
-                <div className="flex items-center gap-2">
-                  <FileText className="h-4 w-4" />
-                  <h3 className="font-semibold">Parameters</h3>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <FileText className="h-4 w-4" />
+                    <h3 className="font-semibold">Parameters</h3>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => copyToClipboard(formatJson(toolUsage.parameters), 'parameters')}
+                    className="h-8 px-2"
+                  >
+                    {parametersCopied ? (
+                      <Check className="h-3 w-3" />
+                    ) : (
+                      <Copy className="h-3 w-3" />
+                    )}
+                  </Button>
                 </div>
                 <div className="border  relative overflow-auto flex-1 bg-muted/30 rounded-lg">
                   <pre className="p-4 absolute inset-0 text-xs font-mono whitespace-pre-wrap">
@@ -186,9 +188,23 @@ export function ToolUsageDialog({
 
               {/* Output */}
               <div className="space-y-2 flex flex-col">
-                <div className="flex items-center gap-2">
-                  <FileText className="h-4 w-4" />
-                  <h3 className="font-semibold">Output</h3>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <FileText className="h-4 w-4" />
+                    <h3 className="font-semibold">Output</h3>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => copyToClipboard(formatOutput(toolUsage.output), 'output')}
+                    className="h-8 px-2"
+                  >
+                    {outputCopied ? (
+                      <Check className="h-3 w-3" />
+                    ) : (
+                      <Copy className="h-3 w-3" />
+                    )}
+                  </Button>
                 </div>
                 <div className="border relative overflow-auto flex-1 bg-muted/30 rounded-lg ">
                   <pre className="p-4 absolute inset-0 text-xs font-mono whitespace-pre-wrap">

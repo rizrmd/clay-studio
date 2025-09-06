@@ -1,15 +1,12 @@
 import { Button } from "@/components/ui/button";
 import { useChat } from "@/lib/hooks/use-chat";
-import { wsService } from "@/lib/services/ws-service";
 import {
   inputActions,
   multimodalInputActions,
 } from "@/lib/store/chat/input-store";
-import { messageUIActions } from "@/lib/store/chat/message-ui-store";
 import { uiStore } from "@/lib/store/chat/ui-store";
 import type { Message } from "@/lib/types/chat";
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { useSnapshot } from "valtio";
 import { WelcomeScreen } from "../display";
 import { MultimodalInput } from "../input";
@@ -17,12 +14,10 @@ import { MultimodalInput } from "../input";
 export function NewChat() {
   const uiSnapshot = useSnapshot(uiStore);
   const projectId = uiSnapshot.currentProject;
-  const navigate = useNavigate();
-  const { sendMessage, createConversation, conversationId } = useChat();
+  const { createConversation, conversationId } = useChat();
 
   // Local state for new chat messages and creation status
   const [messages, setMessages] = useState<Message[]>([]);
-  const [pendingMessage, setPendingMessage] = useState<string>("");
   const [waitingForSubscription, setWaitingForSubscription] = useState(false);
 
   // Use input state from the store
@@ -31,47 +26,11 @@ export function NewChat() {
 
   // Handle conversation creation and subscription flow
   useEffect(() => {
-    if (
-      conversationId &&
-      conversationId !== "new" &&
-      pendingMessage &&
-      !waitingForSubscription
-    ) {
+    if (conversationId && conversationId !== "new" && !waitingForSubscription) {
       // Wait for subscription to be confirmed before sending message
       setWaitingForSubscription(true);
     }
-  }, [conversationId, pendingMessage, waitingForSubscription]);
-
-  // Listen for subscription confirmation
-  useEffect(() => {
-    if (!waitingForSubscription) return;
-
-    const handleSubscribed = (message: any) => {
-      console.log(message);
-      if (message.conversation_id === conversationId && pendingMessage) {
-        // Now we can safely send the message
-        sendMessage(pendingMessage);
-        setPendingMessage("");
-        setWaitingForSubscription(false);
-
-        messageUIActions.setPreviousConversationId(conversationId);
-
-        // Navigate to the new conversation
-        navigate(`/p/${projectId}/c/${conversationId}`, {
-          replace: true,
-        });
-      }
-    };
-
-    wsService.once("subscribed", handleSubscribed);
-  }, [
-    waitingForSubscription,
-    conversationId,
-    pendingMessage,
-    sendMessage,
-    navigate,
-    projectId,
-  ]);
+  }, [conversationId, waitingForSubscription]);
 
   const handleSubmit = async (
     e: React.FormEvent,
@@ -110,14 +69,7 @@ export function NewChat() {
     inputActions.clearSelectedFiles();
     multimodalInputActions.setLocalInput("new", "");
 
-    // Store the message to send after conversation is created
-    setPendingMessage(message);
-
-    // Create new conversation with title from first part of message
-    const conversationTitle =
-      message.slice(0, 50).trim() + (message.length > 50 ? "..." : "");
-
-    createConversation(conversationTitle);
+    createConversation(message);
   };
 
   return (

@@ -6,7 +6,7 @@ use chrono::Utc;
 use sqlx::{PgPool, Row};
 
 use crate::api::websocket::{
-    broadcast_activity_to_project, broadcast_to_subscribers, ServerMessage,
+    broadcast_activity_to_project, broadcast_to_subscribers, WebSocketServerMessage as ServerMessage,
 };
 use uuid;
 
@@ -44,9 +44,21 @@ async fn save_message(
     .await
     .map_err(|e| AppError::InternalServerError(format!("Failed to save message: {}", e)))?;
 
-    // Save tool usages if present
+    // Save tool usages if present (including failed MCP interactions for tracking)
     if let Some(tool_usages) = &message.tool_usages {
         for tool_usage in tool_usages {
+            // Always save tool usage for tracking purposes, including failed MCP interactions
+            
+            // Determine final parameters and output
+            let (final_parameters, final_output) = if tool_usage.tool_name.starts_with("mcp__interaction__") {
+                // For MCP interaction tools, preserve original output to track success/failure status
+                // Keep original parameters as they contain the attempted interaction data
+                (tool_usage.parameters.clone(), tool_usage.output.clone())
+            } else {
+                // Non-MCP interaction tools, keep original
+                (tool_usage.parameters.clone(), tool_usage.output.clone())
+            };
+
             sqlx::query(
                 "INSERT INTO tool_usages (id, message_id, tool_name, tool_use_id, parameters, output, execution_time_ms, created_at)
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -60,8 +72,8 @@ async fn save_message(
             .bind(&message.id)
             .bind(&tool_usage.tool_name)
             .bind(&tool_usage.tool_use_id)
-            .bind(&tool_usage.parameters)
-            .bind(&tool_usage.output)
+            .bind(&final_parameters)
+            .bind(&final_output)
             .bind(tool_usage.execution_time_ms)
                         .bind(
                 tool_usage.created_at.as_ref()
@@ -257,6 +269,7 @@ pub async fn handle_chat_message_ws(
                 partial_content: String::new(),
                 active_tools: Vec::new(),
                 progress_events: Vec::new(),
+                completed_tool_usages: Vec::new(),
             },
         );
     }
@@ -454,7 +467,15 @@ pub async fn handle_chat_message_ws(
                                 execution_time_ms: Some(execution_time as i64),
                                 created_at: None,
                             };
-                            tool_usages.push(tool_usage);
+                            tool_usages.push(tool_usage.clone());
+                            
+                            // Store completed tool usage in streaming state for immediate access
+                            {
+                                let mut streams = active_claude_streams.write().await;
+                                if let Some(stream_state) = streams.get_mut(&conversation_id_clone) {
+                                    stream_state.completed_tool_usages.push(tool_usage);
+                                }
+                            }
                         }
                     }
 
@@ -573,15 +594,19 @@ pub async fn handle_chat_message_ws(
                             // Create filtered tool usages for cache
                             let filtered_tool_usages: Vec<crate::models::tool_usage::ToolUsage> = tool_usages
                                 .iter()
-                                .map(|tu| crate::models::tool_usage::ToolUsage {
-                                    id: tu.id,
-                                    message_id: tu.message_id.clone(),
-                                    tool_name: tu.tool_name.clone(),
-                                    tool_use_id: tu.tool_use_id.clone(),
-                                    parameters: None, // Exclude parameters from conversation messages
-                                    output: None, // Exclude output from conversation messages
-                                    execution_time_ms: tu.execution_time_ms,
-                                    created_at: tu.created_at.clone(),
+                                .map(|tu| {
+                                    // Don't filter MCP interaction tools - they need their output for rendering
+                                    let is_mcp_interaction = tu.tool_name.starts_with("mcp__interaction__");
+                                    crate::models::tool_usage::ToolUsage {
+                                        id: tu.id,
+                                        message_id: tu.message_id.clone(),
+                                        tool_name: tu.tool_name.clone(),
+                                        tool_use_id: tu.tool_use_id.clone(),
+                                        parameters: if is_mcp_interaction { tu.parameters.clone() } else { None },
+                                        output: if is_mcp_interaction { tu.output.clone() } else { None },
+                                        execution_time_ms: tu.execution_time_ms,
+                                        created_at: tu.created_at.clone(),
+                                    }
                                 })
                                 .collect();
                             Some(filtered_tool_usages)
@@ -637,15 +662,19 @@ pub async fn handle_chat_message_ws(
                         // Create filtered tool usages (exclude parameters and output for API response)
                         let filtered_tool_usages: Vec<crate::models::tool_usage::ToolUsage> = tool_usages
                             .iter()
-                            .map(|tu| crate::models::tool_usage::ToolUsage {
-                                id: tu.id,
-                                message_id: tu.message_id.clone(),
-                                tool_name: tu.tool_name.clone(),
-                                tool_use_id: tu.tool_use_id.clone(),
-                                parameters: None, // Exclude parameters from conversation messages
-                                output: None, // Exclude output from conversation messages
-                                execution_time_ms: tu.execution_time_ms,
-                                created_at: tu.created_at.clone(),
+                            .map(|tu| {
+                                // Don't filter MCP interaction tools - they need their output for rendering
+                                let is_mcp_interaction = tu.tool_name.starts_with("mcp__interaction__");
+                                crate::models::tool_usage::ToolUsage {
+                                    id: tu.id,
+                                    message_id: tu.message_id.clone(),
+                                    tool_name: tu.tool_name.clone(),
+                                    tool_use_id: tu.tool_use_id.clone(),
+                                    parameters: if is_mcp_interaction { tu.parameters.clone() } else { None },
+                                    output: if is_mcp_interaction { tu.output.clone() } else { None },
+                                    execution_time_ms: tu.execution_time_ms,
+                                    created_at: tu.created_at.clone(),
+                                }
                             })
                             .collect();
                         Some(filtered_tool_usages)
@@ -673,16 +702,19 @@ pub async fn handle_chat_message_ws(
         }
     }
 
-    // Clear progress events from active streams (keep the state for reference)
+    // Clear progress events and completed tool usages from active streams (keep the state for reference)
     {
         let mut streams = active_claude_streams.write().await;
         if let Some(stream_state) = streams.get_mut(&conversation_id_clone) {
             let event_count = stream_state.progress_events.len();
-            // Clear progress events as the message is complete and they're no longer needed
+            let tool_usage_count = stream_state.completed_tool_usages.len();
+            // Clear progress events and tool usages as the message is complete and they're now in database
             stream_state.progress_events.clear();
+            stream_state.completed_tool_usages.clear();
             tracing::info!(
-                "Cleared {} progress events for completed message in conversation {}",
+                "Cleared {} progress events and {} tool usages for completed message in conversation {}",
                 event_count,
+                tool_usage_count,
                 conversation_id_clone
             );
         }

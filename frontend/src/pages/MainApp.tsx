@@ -11,6 +11,11 @@ const NewChat = lazy(() =>
     default: m.NewChat,
   }))
 );
+const DatasourcesMain = lazy(() =>
+  import("@/components/datasources/datasources-main").then((m) => ({
+    default: m.DatasourcesMain,
+  }))
+);
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useSnapshot } from "valtio";
 import { uiStore, uiActions } from "@/lib/store/chat/ui-store";
@@ -33,6 +38,8 @@ export function MainApp() {
 
   // Check if we're on the new conversation route
   const isNewRoute = location.pathname.endsWith("/new");
+  // Check if we're on the datasources route
+  const isDatasourcesRoute = location.pathname.includes("/datasources");
 
   // Enable debug logging hooks
   useLoggerDebug();
@@ -50,9 +57,9 @@ export function MainApp() {
   }, [projectId, conversationId, location.state]);
 
   // Handle redirection when visiting /p/:projectId without conversation ID
-  // Don't redirect if we're on the /new route
+  // Don't redirect if we're on the /new route or datasources route
   useEffect(() => {
-    if (projectId && !conversationId && !isNewRoute) {
+    if (projectId && !conversationId && !isNewRoute && !isDatasourcesRoute) {
       // Try to get the last conversation from localStorage
       const lastConversationKey = `last_conversation_${projectId}`;
       const lastConversationId = localStorage.getItem(lastConversationKey);
@@ -65,7 +72,7 @@ export function MainApp() {
         createNewConversationAndRedirect();
       }
     }
-  }, [projectId, conversationId, navigate]);
+  }, [projectId, conversationId, navigate, isDatasourcesRoute]);
 
   useEffect(() => {
     if (projectId && projectId !== chat.projectId) {
@@ -160,7 +167,13 @@ export function MainApp() {
         />
       </Suspense>
       <div className="flex flex-1 flex-col min-w-0">
-        {isNewRoute ? (
+        {isDatasourcesRoute ? (
+          <Suspense
+            fallback={<div className="flex-1 animate-pulse bg-gray-50" />}
+          >
+            <DatasourcesMain projectId={projectId!} />
+          </Suspense>
+        ) : isNewRoute ? (
           <Suspense
             fallback={<div className="flex-1 animate-pulse bg-gray-50" />}
           >

@@ -1,4 +1,4 @@
-use crate::api::websocket::WS_CONNECTIONS;
+use crate::api::websocket::handlers::subscription::WS_CONNECTIONS;
 use salvo::prelude::*;
 use serde_json::json;
 

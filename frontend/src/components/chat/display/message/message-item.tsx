@@ -1,18 +1,24 @@
-import * as React from "react";
+import { useMemo } from "react";
 import { Message } from "../types";
-import {
-  ChatCompleted,
-  ChatCompletedProps,
-} from "@/components/chat/display/message/item/chat-completed";
-import { ChatProgress } from "@/components/chat/display/message/item/chat-progress";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { FilePreview } from "@/components/ui/file-preview";
+import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
+import { ChatToolUsage } from "@/components/chat/display/message/item/tools/chat-tool-usage";
+import {
+  chatBubbleVariants,
+  type Animation,
+} from "@/components/chat/display/message/item/chat-bubble-variants";
+import { type ToolInvocation } from "@/components/chat/display/message/item/types";
+import { dataUrlToUint8Array } from "@/components/chat/display/message/item/utils";
+import {
+  InteractionRenderer,
+  hasInteraction,
+} from "@/components/chat/display/message/item/interaction/interaction-renderer";
 
 export interface MessageItemProps {
   message: Message;
   showTimeStamp?: boolean;
-  actions?: React.ReactNode;
-  animation?: "none" | "scale" | "slide" | "fade";
+  animation?: Animation;
   className?: string;
   activeTools?: readonly {
     tool: string;
@@ -25,86 +31,108 @@ export interface MessageItemProps {
 export function MessageItem({
   message,
   showTimeStamp = false,
-  actions,
   animation = "scale",
   className,
   activeTools = [],
   isLastMessage = false,
 }: MessageItemProps) {
-  // DEBUG: Log props (only for last message with tools)
-  if (isLastMessage && activeTools.length > 0) {
-    console.log("🔧 MessageItem props:", {
-      messageId: message.id,
-      isLastMessage,
-      activeTools: activeTools?.length || 0,
-    });
-  }
-
-  // Convert our Message type to ChatCompleted's expected format
-  const chatMessage: ChatCompletedProps = {
-    id: message.id,
-    role: message.role,
-    content: message.content,
-    createdAt: message.createdAt ? new Date(message.createdAt) : undefined,
-    showTimeStamp,
-    animation,
-    actions: (
-      <div className="flex items-center gap-2">
-        {message.processing_time_ms && (
-          <Badge variant="secondary" className="text-xs">
-            {(message.processing_time_ms / 1000).toFixed(1)}s
-          </Badge>
-        )}
-        {actions}
-      </div>
-    ),
-    // Convert our file attachments to the expected format if they exist
-    experimental_attachments: message.file_attachments?.map((attachment) => ({
+  // Convert file attachments to the expected format
+  const experimental_attachments = message.file_attachments?.map(
+    (attachment) => ({
       name: attachment.original_name,
       contentType: attachment.mime_type || "application/octet-stream",
-      url: attachment.file_path, // This might need adjustment based on how files are served
-    })),
-    // Convert tool usages to tool invocations if they exist
-    toolInvocations: [
-      // Completed tool usages
-      ...(message.tool_usages?.map((usage) => ({
+      url: attachment.file_path,
+    })
+  );
+
+  // Convert tool usages to tool invocations
+  const toolInvocations: ToolInvocation[] = [
+    // Completed tool usages
+    ...(message.tool_usages?.map((usage) => {
+      // For MCP interaction tools, use parameters as the result for interaction rendering
+      const isMcpInteraction = usage.tool_name.startsWith('mcp__interaction__');
+      
+      return {
         state: "result" as const,
         id: usage.id,
         toolName: usage.tool_name,
-        result: usage.output || {},
-      })) || []),
-      // Active/in-progress tools (show on the last assistant message during streaming)
-      ...(message.role === "assistant" && 
-          isLastMessage && 
-          activeTools.length > 0
-        ? activeTools.map((tool: any) => 
-            tool.status === 'completed' 
-              ? {
-                  state: "result" as const,
-                  id: tool.toolUsageId,
-                  toolName: tool.tool,
-                  result: { 
-                    __completed: true,
-                    executionTime: tool.executionTime 
-                  },
-                }
-              : {
-                  state: "call" as const,
-                  id: tool.toolUsageId,
-                  toolName: tool.tool,
-                  args: tool.args || {},
-                }
-          )
-        : []),
-    ],
-  };
+        result: isMcpInteraction ? (usage.parameters || {}) : (usage.output || {}),
+        // Keep original data accessible
+        originalOutput: usage.output,
+        originalParameters: usage.parameters,
+      };
+    }) || []),
+    // Active/in-progress tools (show on the last assistant message during streaming)
+    ...(message.role === "assistant" && isLastMessage && activeTools.length > 0
+      ? activeTools.map((tool: any) =>
+          tool.status === "completed"
+            ? {
+                state: "result" as const,
+                id: tool.toolUsageId,
+                toolName: tool.tool,
+                result: {
+                  __completed: true,
+                  executionTime: tool.executionTime,
+                },
+              }
+            : {
+                state: "call" as const,
+                id: tool.toolUsageId,
+                toolName: tool.tool,
+                args: tool.args || {},
+              }
+        )
+      : []),
+  ];
 
-  // Check if there are any in-progress tool invocations
-  const progressInvocations = chatMessage.toolInvocations?.filter(
+  const files = useMemo(() => {
+    return experimental_attachments?.map((attachment) => {
+      const dataArray = dataUrlToUint8Array(attachment.url);
+      const file = new File([dataArray], attachment.name ?? "Unknown", {
+        type: attachment.contentType,
+      });
+      return file;
+    });
+  }, [experimental_attachments]);
+
+  const isUser = message.role === "user";
+  const createdAt = message.createdAt ? new Date(message.createdAt) : undefined;
+  const formattedTime = createdAt?.toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  const completedToolInvocations = toolInvocations?.filter(
     (invocation) =>
-      invocation.state === "partial-call" ||
-      invocation.state === "call" ||
-      (invocation.state === "result" && invocation.result.__cancelled === true)
+      invocation.state === "result" && !invocation.result.__cancelled && invocation.toolName !== 'TodoWrite'
+  );
+
+  const renderMessage = (className?: string) => (
+    <div className={cn("flex flex-col", isUser ? "items-end" : "items-start")}>
+      {files ? (
+        <div className="mb-1 flex flex-wrap gap-2">
+          {files.map((file, index) => {
+            return <FilePreview file={file} key={index} />;
+          })}
+        </div>
+      ) : null}
+
+      <div className={className}>
+        <MarkdownRenderer>{message.content}</MarkdownRenderer>
+      </div>
+
+      {showTimeStamp && createdAt ? (
+        <time
+          dateTime={createdAt.toISOString()}
+          className={cn(
+            "mt-1 block px-1 text-xs opacity-50",
+            animation !== "none" && "duration-500 animate-in fade-in-0"
+          )}
+        >
+          {formattedTime}
+        </time>
+      ) : null}
+    </div>
   );
 
   return (
@@ -114,10 +142,48 @@ export function MessageItem({
         className
       )}
     >
-      {progressInvocations && progressInvocations.length > 0 && (
-        <ChatProgress toolInvocations={progressInvocations} />
+      {isUser ? (
+        renderMessage(cn(chatBubbleVariants({ isUser, animation })))
+      ) : (
+        <div
+          className={cn(
+            chatBubbleVariants({ isUser, animation }),
+            "flex flex-col items-start gap-2 flex-wrap "
+          )}
+        >
+          {renderMessage()}
+          {/* Render interactions from tool outputs */}
+          {completedToolInvocations?.map((invocation) => {
+            if (invocation.state === "result") {
+              // For MCP interaction tools, the raw parameters contain the interaction data
+              // For other tools, check result (backward compatibility)  
+              const isMcpInteraction = invocation.toolName?.startsWith('mcp__interaction__');
+              const interactionData = isMcpInteraction 
+                ? invocation.result // This now contains the original parameters
+                : invocation.result;
+              
+              if (hasInteraction(interactionData)) {
+                console.log('Rendering interaction for tool:', invocation.toolName, 'with data:', interactionData);
+                return (
+                  <InteractionRenderer
+                    key={`interaction-${invocation.id}`}
+                    toolOutput={interactionData}
+                  />
+                );
+              } else if (isMcpInteraction) {
+                console.log('MCP interaction tool but no interaction detected:', invocation.toolName, 'data:', interactionData);
+              }
+            }
+            return null;
+          })}
+          <ChatToolUsage
+            toolInvocations={completedToolInvocations}
+            className={
+              "bg-white border border-transparent hover:border-slate-200 transition-all"
+            }
+          />
+        </div>
       )}
-      <ChatCompleted {...chatMessage} />
     </div>
   );
 }

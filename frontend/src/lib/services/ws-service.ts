@@ -553,26 +553,6 @@ class WebSocketService extends EventEmitter {
     return stream ? !stream.isComplete : false;
   }
 
-  // DEBUG: Test tool events (temporary)
-  testToolEvents(conversationId: string): void {
-    console.log("🔧 Testing tool events for conversation:", conversationId);
-    
-    // Simulate tool_use event
-    this.emit("tool_started", { 
-      tool: "test_tool", 
-      toolUsageId: "test_id_123", 
-      conversationId 
-    });
-    
-    // Simulate tool_complete after 3 seconds
-    setTimeout(() => {
-      this.emit("tool_completed", {
-        tool: "test_tool",
-        toolUsageId: "test_id_123", 
-        conversationId
-      });
-    }, 3000);
-  }
 }
 
 export const wsService = WebSocketService.getInstance();

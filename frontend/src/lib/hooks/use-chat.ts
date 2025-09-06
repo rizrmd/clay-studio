@@ -7,6 +7,7 @@ import { sidebarActions } from "../store/chat/sidebar-store";
 import type { CONVERSATION_ID, Message, PROJECT_ID } from "../types/chat";
 import type { ServerMessage } from "../types/ws";
 import { stream } from "./chat-streaming";
+import { messageUIActions } from "../store/chat/message-ui-store";
 
 export const useChat = () => {
   const snap = useSnapshot(chatStore);
@@ -78,8 +79,16 @@ export const useChat = () => {
       if (!chatStore.list.includes(message.conversation.id)) {
         chatStore.list.push(message.conversation.id);
       }
-      // Optionally switch to the new conversation
+      // Switch to the new conversation
       chatStore.conversation_id = message.conversation.id;
+      messageUIActions.setPreviousConversationId("new");
+
+      if (chatStore.pendingFirstChat) {
+        sendMessage(chatStore.pendingFirstChat);
+        chatStore.pendingFirstChat = "";
+      }
+
+      navigate(`/p/${chatStore.project_id}/c/${message.conversation.id}`);
     };
 
     const handleConversationDetails = (
@@ -172,12 +181,22 @@ export const useChat = () => {
     });
 
     // Tool event listeners
-    const handleToolStarted = (message: { tool: string; toolUsageId: string; conversationId: string }) => {
+    const handleToolStarted = (message: {
+      tool: string;
+      toolUsageId: string;
+      conversationId: string;
+    }) => {
       console.log("🔧 Tool started:", message);
-      console.log("🔧 Current streaming state before:", JSON.stringify(chatStore.streaming, null, 2));
-      
+      console.log(
+        "🔧 Current streaming state before:",
+        JSON.stringify(chatStore.streaming, null, 2)
+      );
+
       if (!chatStore.streaming[message.conversationId]) {
-        console.log("🔧 Creating new streaming state for:", message.conversationId);
+        console.log(
+          "🔧 Creating new streaming state for:",
+          message.conversationId
+        );
         chatStore.streaming[message.conversationId] = {
           messageId: "",
           partialContent: "",
@@ -185,32 +204,44 @@ export const useChat = () => {
           isComplete: false,
         };
       }
-      
-      const activeTools = chatStore.streaming[message.conversationId].activeTools;
-      if (!activeTools.find(t => t.toolUsageId === message.toolUsageId)) {
+
+      const activeTools =
+        chatStore.streaming[message.conversationId].activeTools;
+      if (!activeTools.find((t) => t.toolUsageId === message.toolUsageId)) {
         console.log("🔧 Adding tool to activeTools:", message.tool);
         activeTools.push({
           tool: message.tool,
           toolUsageId: message.toolUsageId,
           startTime: Date.now(),
-          status: 'active',
+          status: "active",
         });
         console.log("🔧 ActiveTools after push:", activeTools);
       } else {
         console.log("🔧 Tool already exists in activeTools");
       }
-      
-      console.log("🔧 Final streaming state:", JSON.stringify(chatStore.streaming[message.conversationId], null, 2));
+
+      console.log(
+        "🔧 Final streaming state:",
+        JSON.stringify(chatStore.streaming[message.conversationId], null, 2)
+      );
     };
 
-    const handleToolCompleted = (message: { tool: string; toolUsageId: string; executionTimeMs?: number; conversationId: string }) => {
+    const handleToolCompleted = (message: {
+      tool: string;
+      toolUsageId: string;
+      executionTimeMs?: number;
+      conversationId: string;
+    }) => {
       console.log("🔧 Tool completed:", message);
       if (chatStore.streaming[message.conversationId]) {
-        const activeTools = chatStore.streaming[message.conversationId].activeTools;
-        const toolIndex = activeTools.findIndex(t => t.toolUsageId === message.toolUsageId);
+        const activeTools =
+          chatStore.streaming[message.conversationId].activeTools;
+        const toolIndex = activeTools.findIndex(
+          (t) => t.toolUsageId === message.toolUsageId
+        );
         if (toolIndex !== -1) {
           // Mark tool as completed instead of removing it
-          activeTools[toolIndex].status = 'completed';
+          activeTools[toolIndex].status = "completed";
           activeTools[toolIndex].completedAt = Date.now();
           if (message.executionTimeMs) {
             activeTools[toolIndex].executionTime = message.executionTimeMs;
@@ -305,9 +336,12 @@ export const useChat = () => {
 
   // Conversation management methods
   const createConversation = useCallback(
-    (title?: string) => {
+    (message: string) => {
       if (snap.project_id) {
-        wsService.createConversation(snap.project_id, title);
+        chatStore.pendingFirstChat = message;
+        const conversationTitle =
+          message.slice(0, 50).trim() + (message.length > 50 ? "..." : "");
+        wsService.createConversation(snap.project_id, conversationTitle);
       }
     },
     [snap.project_id]
@@ -349,14 +383,10 @@ export const useChat = () => {
       : [];
 
   // Helper to get active tools for current conversation
-  const currentActiveTools = snap.conversation_id && snap.streaming[snap.conversation_id]
-    ? snap.streaming[snap.conversation_id].activeTools || []
-    : [];
-    
-  // DEBUG: Log active tools (only when there are tools)
-  if (currentActiveTools.length > 0) {
-    console.log("🔧 Current active tools:", currentActiveTools);
-  }
+  const currentActiveTools =
+    snap.conversation_id && snap.streaming[snap.conversation_id]
+      ? snap.streaming[snap.conversation_id].activeTools || []
+      : [];
 
   return {
     // Current state
@@ -394,13 +424,6 @@ export const useChat = () => {
 
     setConversationId(id: CONVERSATION_ID) {
       chatStore.conversation_id = id;
-    },
-
-    // DEBUG: Test tool events
-    testToolEvents() {
-      if (snap.conversation_id) {
-        wsService.testToolEvents(snap.conversation_id);
-      }
     },
   };
 };

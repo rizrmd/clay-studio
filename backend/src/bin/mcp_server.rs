@@ -173,14 +173,6 @@ fn main() {
         }
     }
 
-    eprintln!(
-        "[{}] [INFO] Configuration:",
-        chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
-    );
-    eprintln!("  Project ID: {}", project_id);
-    eprintln!("  Client ID: {}", client_id);
-    eprintln!("  Server Type: {}", server_type);
-    eprintln!("  Transport: {}", if use_http { "HTTP/SSE" } else { "stdio" });
     if use_http {
         eprintln!("  Port: {}", port);
     }

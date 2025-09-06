@@ -37,17 +37,7 @@ impl McpServer {
         let database_url = std::env::var("DATABASE_URL")
             .map_err(|_| "DATABASE_URL environment variable not set")?;
 
-        // Create database connection pool
-        eprintln!(
-            "[{}] [INFO] Connecting to database...",
-            Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
-        );
         let db_pool = runtime.block_on(async { PgPool::connect(&database_url).await })?;
-
-        eprintln!(
-            "[{}] [INFO] Connected to database successfully",
-            Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
-        );
 
         let handlers = McpHandlers {
             project_id: project_id.clone(),
@@ -71,14 +61,7 @@ impl McpServer {
         client_id: String,
         server_type: String,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let start_time = Utc::now();
-        eprintln!(
-            "[{}] [INFO] MCP Server ({}) starting for project: {}, client: {}",
-            start_time.format("%Y-%m-%d %H:%M:%S UTC"),
-            server_type,
-            project_id,
-            client_id
-        );
+        let _start_time = Utc::now();
 
         let runtime = Runtime::new()?;
 
@@ -86,17 +69,7 @@ impl McpServer {
         let database_url = std::env::var("DATABASE_URL")
             .map_err(|_| "DATABASE_URL environment variable not set")?;
 
-        // Create database connection pool
-        eprintln!(
-            "[{}] [INFO] Connecting to database...",
-            Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
-        );
         let db_pool = runtime.block_on(async { PgPool::connect(&database_url).await })?;
-
-        eprintln!(
-            "[{}] [INFO] Connected to database successfully",
-            Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
-        );
 
         let handlers = McpHandlers {
             project_id: project_id.clone(),

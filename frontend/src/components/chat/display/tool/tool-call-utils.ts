@@ -11,6 +11,32 @@ import {
   Table,
 } from "lucide-react";
 
+export const parseMcpToolResult = (text: string): any => {
+  try {
+    if (text.includes("[Resource from data-analysis at mcp://tool-result/")) {
+      const match = text.match(
+        /\[Resource from data-analysis at mcp:\/\/tool-result\/[^\]]+\]\s*(.+)/s
+      );
+      if (match && match[1]) {
+        const jsonText = match[1].trim();
+        return JSON.parse(jsonText);
+      }
+    }
+    if (text.includes("[Resource from interaction at mcp://tool-result/")) {
+      const match = text.match(
+        /\[Resource from interaction at mcp:\/\/tool-result\/[^\]]+\]\s*(.+)/s
+      );
+      if (match && match[1]) {
+        const jsonText = match[1].trim();
+        return JSON.parse(jsonText);
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+};
+
 // Function to parse MCP tool names and convert to friendly display names
 export function parseMcpToolName(toolName: string): {
   friendlyName: string;
@@ -80,7 +106,7 @@ export function parseMcpToolName(toolName: string): {
           icon: FileSearch,
           color: "text-purple-600 bg-purple-50 border-purple-200",
         },
-        
+
         // Data operations
         data_query: {
           name: "Query Data",
@@ -103,7 +129,7 @@ export function parseMcpToolName(toolName: string): {
           icon: FileSearch,
           color: "text-cyan-600 bg-cyan-50 border-cyan-200",
         },
-        
+
         // Schema operations
         schema_stats: {
           name: "Schema Statistics",
@@ -126,7 +152,7 @@ export function parseMcpToolName(toolName: string): {
           icon: Database,
           color: "text-orange-600 bg-orange-50 border-orange-200",
         },
-        
+
         // Interaction tools
         ask_user: {
           name: "Interactive Element",

@@ -109,11 +109,11 @@ impl ClaudeSDK {
             let mcp_servers = json!({
                 "mcpServers": {
                     "data-analysis": {
-                        "type": "sse",
+                        "type": "http",
                         "url": format!("http://localhost:7670/data-analysis/{}/{}", self.client_id, project_id)
                     },
                     "interaction": {
-                        "type": "sse",
+                        "type": "http",
                         "url": format!("http://localhost:7670/interaction/{}/{}", self.client_id, project_id)
                     }
                 }
@@ -262,6 +262,10 @@ impl ClaudeSDK {
             let allowed_tools = Self::get_available_mcp_tools().join(",");
             cmd_builder.arg("--allowedTools")
                 .arg(&allowed_tools);
+
+            // Add disallowed tools
+            cmd_builder.arg("--disallowedTools")
+                .arg("Bash,Glob,LS");
 
             cmd_builder.arg("--output-format")
                 .arg("stream-json")
@@ -480,38 +484,32 @@ impl ClaudeSDK {
                                                                         .get("name")
                                                                         .and_then(|n| n.as_str())
                                                                     {
-                                                                        // Skip TodoWrite - it's not a real tool, just task tracking
-                                                                        if name != "TodoWrite" {
-                                                                            let tool_use_id = block
-                                                                                .get("id")
-                                                                                .and_then(|id| {
-                                                                                    id.as_str()
-                                                                                })
-                                                                                .map(|s| {
-                                                                                    s.to_string()
-                                                                                });
-                                                                            let args = block
-                                                                                .get("input")
-                                                                                .or_else(|| {
-                                                                                    block.get(
-                                                                                        "arguments",
-                                                                                    )
-                                                                                })
-                                                                                .cloned()
-                                                                                .unwrap_or(json!(
-                                                                                    {}
-                                                                                ));
+                                                                        let tool_use_id = block
+                                                                            .get("id")
+                                                                            .and_then(|id| {
+                                                                                id.as_str()
+                                                                            })
+                                                                            .map(|s| {
+                                                                                s.to_string()
+                                                                            });
+                                                                        let args = block
+                                                                            .get("input")
+                                                                            .or_else(|| {
+                                                                                block.get(
+                                                                                    "arguments",
+                                                                                )
+                                                                            })
+                                                                            .cloned()
+                                                                            .unwrap_or(json!(
+                                                                                {}
+                                                                            ));
 
-                                                                            tracing::info!("Detected tool usage: {} with id: {:?}", name, tool_use_id);
-                                                                            let _ = tx_clone.send(ClaudeMessage::ToolUse {
-                                                                        tool: name.to_string(),
-                                                                        args,
-                                                                        tool_use_id,
-                                                                    }).await;
-                                                                        } else {
-                                                                            // TodoWrite is handled separately - just log it
-                                                                            tracing::info!("Detected TodoWrite update (not counted as tool use)");
-                                                                        }
+                                                                        tracing::info!("Detected tool usage: {} with id: {:?}", name, tool_use_id);
+                                                                        let _ = tx_clone.send(ClaudeMessage::ToolUse {
+                                                                    tool: name.to_string(),
+                                                                    args,
+                                                                    tool_use_id,
+                                                                }).await;
                                                                     }
                                                                 }
                                                             }

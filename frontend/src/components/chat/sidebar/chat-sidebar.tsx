@@ -3,6 +3,8 @@ import { sidebarActions, sidebarStore } from "@/lib/store/chat/sidebar-store";
 import { cn } from "@/lib/utils";
 import { useCallback } from "react";
 import { useSnapshot } from "valtio";
+import { useNavigate } from "react-router-dom";
+import { Database } from "lucide-react";
 import { ConversationSidebarFooter } from "./components/footer";
 import { ConversationSidebarHeader } from "./components/header";
 import { ConversationList } from "./components/list";
@@ -24,6 +26,7 @@ export function ConversationSidebar({
 }: ConversationSidebarProps) {
   const sidebarSnapshot = useSnapshot(sidebarStore);
   const { deleteConversation, bulkDeleteConversations } = useChat();
+  const navigate = useNavigate();
 
   const handleConversationClick = (conversationId: string) => {
     sidebarActions.setMobileMenuOpen(false);
@@ -56,6 +59,13 @@ export function ConversationSidebar({
 
   const handleProfile = () => {
     // Implementation for profile
+  };
+
+  const handleDatasourcesClick = () => {
+    if (projectId) {
+      navigate(`/p/${projectId}/datasources`);
+    }
+    sidebarActions.setMobileMenuOpen(false);
   };
 
   return (
@@ -99,6 +109,31 @@ export function ConversationSidebar({
               onRenameConversation={openRenameDialog}
               onDeleteConversation={handleDeleteConversation}
             />
+          </div>
+        )}
+
+        {/* Datasources button */}
+        {(!isCollapsed || sidebarSnapshot.isMobileMenuOpen) && (
+          <div className="border-t">
+            <button
+              onClick={handleDatasourcesClick}
+              className="w-full p-2 px-5 hover:bg-accent rounded-none flex items-center gap-2"
+            >
+              <Database className="h-4 w-4" />
+              <span className="text-sm">Datasources</span>
+            </button>
+          </div>
+        )}
+
+        {/* For collapsed state - datasources icon only */}
+        {isCollapsed && !sidebarSnapshot.isMobileMenuOpen && (
+          <div className="border-t">
+            <button
+              onClick={handleDatasourcesClick}
+              className="h-8 w-8 p-0 hover:bg-accent rounded-md flex items-center justify-center"
+            >
+              <Database className="h-4 w-4" />
+            </button>
           </div>
         )}
 

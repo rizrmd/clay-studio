@@ -12,9 +12,9 @@ export { SuggestionCards } from "./ui/suggestion-cards";
 export { WelcomeScreen } from "./ui/welcome-screen";
 
 // Interaction components
-export { AskUser } from "./interaction/ask-user";
-export { InteractionRenderer } from "./interaction/interaction-renderer";
-export { TodoList } from "./interaction/todo-list";
+export { AskUser } from "./message/item/interaction/ask-user";
+export { InteractionRenderer } from "./message/item/interaction/interaction-renderer";
+export { TodoList } from "./message/item/interaction/todo-list";
 
 // Types and utilities
 export * from "./utils";

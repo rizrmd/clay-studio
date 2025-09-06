@@ -3,7 +3,6 @@ use crate::core::mcp::types::*;
 use chrono::Utc;
 use serde_json::{json, Value};
 use sqlx::Row;
-use uuid;
 
 impl McpHandlers {
     /// Get all available MCP tool names for Claude CLI allowed tools configuration
@@ -534,7 +533,8 @@ impl McpHandlers {
                                 "description": "Optional list of predefined response options"
                             }
                         },
-                        "required": ["question"]
+                        "required": ["question"],
+                        "additionalProperties": false
                     }),
                 },
                 Tool {
@@ -610,14 +610,32 @@ impl McpHandlers {
                         "type": "object",
                         "properties": {
                             "data": {
-                                "type": "array",
-                                "items": {"type": "array"},
-                                "description": "2D array of table data"
-                            },
-                            "headers": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                                "description": "Column headers"
+                                "type": "object",
+                                "properties": {
+                                    "columns": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "key": {"type": "string"},
+                                                "label": {"type": "string"},
+                                                "data_type": {"type": "string"},
+                                                "filterable": {"type": "boolean"},
+                                                "sortable": {"type": "boolean"},
+                                                "currency": {"type": "string"}
+                                            },
+                                            "required": ["key", "label", "data_type"]
+                                        },
+                                        "description": "Array of column definitions"
+                                    },
+                                    "rows": {
+                                        "type": "array",
+                                        "items": {"type": "object"},
+                                        "description": "Array of row objects"
+                                    }
+                                },
+                                "required": ["columns", "rows"],
+                                "description": "Object with columns and rows structure"
                             },
                             "title": {
                                 "type": "string",
@@ -634,12 +652,35 @@ impl McpHandlers {
                         "type": "object",
                         "properties": {
                             "data": {
-                                "type": "array",
-                                "description": "Chart data"
+                                "type": "object",
+                                "properties": {
+                                    "categories": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                        "description": "Array of category labels for the x-axis"
+                                    },
+                                    "series": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "name": {"type": "string"},
+                                                "data": {
+                                                    "type": "array",
+                                                    "items": {"type": "number"}
+                                                }
+                                            },
+                                            "required": ["name", "data"]
+                                        },
+                                        "description": "Array of data series with name and values"
+                                    }
+                                },
+                                "required": ["categories", "series"],
+                                "description": "Chart data with categories and series"
                             },
                             "chart_type": {
                                 "type": "string",
-                                "enum": ["line", "bar", "pie", "scatter"],
+                                "enum": ["line", "bar", "pie", "scatter", "area", "column", "donut", "radar", "gauge"],
                                 "description": "Type of chart to display"
                             },
                             "title": {
@@ -647,7 +688,8 @@ impl McpHandlers {
                                 "description": "Chart title"
                             }
                         },
-                        "required": ["data", "chart_type"]
+                        "required": ["data", "chart_type"],
+                        "additionalProperties": false
                     }),
                 },
             ]);
@@ -675,11 +717,30 @@ impl McpHandlers {
                     data: None,
                 })?;
 
+        eprintln!(
+            "[{}] [DEBUG] Raw params keys: {:?}",
+            Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+            params.as_object().map(|o| o.keys().collect::<Vec<_>>()).unwrap_or_default()
+        );
+        
         let default_args = serde_json::Map::new();
         let arguments = params
             .get("arguments")
             .and_then(|v| v.as_object())
             .unwrap_or(&default_args);
+            
+        eprintln!(
+            "[{}] [DEBUG] Arguments keys: {:?}",
+            Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+            arguments.keys().collect::<Vec<_>>()
+        );
+
+        // If arguments is empty, try to use params directly (for Claude compatibility)
+        let final_arguments = if arguments.is_empty() && params.as_object().is_some() {
+            params.as_object().unwrap()
+        } else {
+            arguments
+        };
 
         eprintln!(
             "[{}] [INFO] Handling tools/call request for tool: {} in project: {}",
@@ -687,28 +748,35 @@ impl McpHandlers {
             tool_name,
             self.project_id
         );
+        
+        eprintln!(
+            "[{}] [DEBUG] Arguments empty: {}, final_arguments keys: {:?}",
+            Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+            arguments.is_empty(),
+            final_arguments.keys().collect::<Vec<_>>()
+        );
 
         let result = match tool_name {
             // Datasource Tools
-            "datasource_add" => self.add_datasource(arguments).await,
-            "datasource_list" => self.list_datasources(arguments).await,
-            "datasource_remove" => self.remove_datasource(arguments).await,
-            "datasource_update" => self.datasource_update(arguments).await,
-            "connection_test" => self.test_connection(arguments).await,
-            "datasource_detail" => self.get_datasource_detail(arguments).await,
-            "datasource_query" => self.query_datasource(arguments).await,
-            "datasource_inspect" => self.inspect_datasource(arguments).await,
+            "datasource_add" => self.add_datasource(final_arguments).await,
+            "datasource_list" => self.list_datasources(final_arguments).await,
+            "datasource_remove" => self.remove_datasource(final_arguments).await,
+            "datasource_update" => self.datasource_update(final_arguments).await,
+            "connection_test" => self.test_connection(final_arguments).await,
+            "datasource_detail" => self.get_datasource_detail(final_arguments).await,
+            "datasource_query" => self.query_datasource(final_arguments).await,
+            "datasource_inspect" => self.inspect_datasource(final_arguments).await,
 
             // Schema Tools
-            "schema_get" => self.get_schema(arguments).await,
-            "schema_search" => self.search_schema(arguments).await,
-            "schema_related" => self.get_related_schema(arguments).await,
-            "schema_stats" => self.get_schema_stats(arguments).await,
+            "schema_get" => self.get_schema(final_arguments).await,
+            "schema_search" => self.search_schema(final_arguments).await,
+            "schema_related" => self.get_related_schema(final_arguments).await,
+            "schema_stats" => self.get_schema_stats(final_arguments).await,
 
             // Interaction Tools (only available on interaction server)
             "ask_user" => {
                 if self.server_type == "interaction" {
-                    self.handle_ask_user(arguments).await
+                    self.handle_ask_user(final_arguments).await
                 } else {
                     Err(JsonRpcError {
                         code: -32601,
@@ -722,7 +790,7 @@ impl McpHandlers {
             // Export Tools
             "export_excel" => {
                 if self.server_type == "interaction" {
-                    self.handle_export_excel(arguments).await
+                    self.handle_export_excel(final_arguments).await
                 } else {
                     Err(JsonRpcError {
                         code: -32601,
@@ -736,7 +804,7 @@ impl McpHandlers {
             // Show Table Tool
             "show_table" => {
                 if self.server_type == "interaction" {
-                    self.handle_show_table(arguments).await
+                    self.handle_show_table(final_arguments).await
                 } else {
                     Err(JsonRpcError {
                         code: -32601,
@@ -749,7 +817,7 @@ impl McpHandlers {
             // Show Chart Tool
             "show_chart" => {
                 if self.server_type == "interaction" {
-                    self.handle_show_chart(arguments).await
+                    self.handle_show_chart(final_arguments).await
                 } else {
                     Err(JsonRpcError {
                         code: -32601,
@@ -803,132 +871,478 @@ impl McpHandlers {
         &self,
         arguments: &serde_json::Map<String, Value>,
     ) -> Result<String, JsonRpcError> {
-        let data = arguments
-            .get("data")
-            .and_then(|v| v.as_array())
-            .ok_or_else(|| JsonRpcError {
-                code: INVALID_PARAMS,
-                message: "Missing data parameter".to_string(),
-                data: None,
-            })?;
-
-        let headers = arguments
-            .get("headers")
-            .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>());
-
+        eprintln!(
+            "[{}] [DEBUG] handle_show_table called with keys: {:?}",
+            Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+            arguments.keys().collect::<Vec<_>>()
+        );
         let title = arguments
             .get("title")
             .and_then(|v| v.as_str())
             .unwrap_or("Data Table");
 
-        // Validate data structure
-        if data.is_empty() {
-            return Err(JsonRpcError {
-                code: INVALID_PARAMS,
-                message: "Data array cannot be empty".to_string(),
-                data: None,
+        // Check if data parameter exists
+        let data_param = arguments.get("data");
+        eprintln!(
+            "[{}] [DEBUG] data_param check: exists={}, value={:?}",
+            Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+            data_param.is_some(),
+            data_param
+        );
+        if data_param.is_none() {
+            let response = json!({
+                "status": "error",
+                "error": "Invalid parameter format for show_table",
+                "message": "Missing required 'data' parameter",
+                "correct_format_example": {
+                    "data": {
+                        "columns": [
+                            {"key": "id", "label": "ID", "data_type": "string", "sortable": true},
+                            {"key": "name", "label": "Name", "data_type": "string", "filterable": true},
+                            {"key": "email", "label": "Email", "data_type": "string", "filterable": true}
+                        ],
+                        "rows": [
+                            {"id": "1", "name": "John Doe", "email": "john@example.com"},
+                            {"id": "2", "name": "Jane Smith", "email": "jane@example.com"}
+                        ],
+                        "config": {
+                            "features": {
+                                "sort": true,
+                                "filter": true,
+                                "pivot": true,
+                                "columnVisibility": true,
+                                "export": false
+                            },
+                            "initialState": {
+                                "sorting": [{"column": "name", "direction": "asc"}]
+                            }
+                        }
+                    },
+                    "title": "User Table"
+                }
             });
+            return Ok(serde_json::to_string(&response).unwrap());
         }
 
-        // Create interaction response
-        let interaction_id = uuid::Uuid::new_v4().to_string();
-        let interaction_spec = json!({
-            "interaction_id": interaction_id,
-            "interaction_type": "show_table",
-            "title": title,
-            "data": data,
-            "headers": headers,
-            "status": "completed",
-            "requires_response": false,
-            "created_at": chrono::Utc::now().to_rfc3339(),
-            "features": {
-                "sortable": true,
-                "filterable": true,
-                "exportable": true,
-                "searchable": true
+        // Check if data is in old 2D array format (incorrect)
+        if let Some(_data_array) = data_param.and_then(|v| v.as_array()) {
+            let response = json!({
+                "status": "error",
+                "error": "Invalid parameter format for show_table",
+                "message": "Expected 'data' to be an object with 'columns' and 'rows' structure, not a 2D array",
+                "received_format": "2D array format (deprecated)",
+                "correct_format_example": {
+                    "data": {
+                        "columns": [
+                            {"key": "id", "label": "ID", "data_type": "string", "sortable": true, "filterable": true},
+                            {"key": "name", "label": "Name", "data_type": "string", "sortable": true, "filterable": true},
+                            {"key": "biography", "label": "Biography", "data_type": "string", "filterable": true},
+                            {"key": "phone", "label": "Phone", "data_type": "string", "filterable": true},
+                            {"key": "slug", "label": "Slug", "data_type": "string", "sortable": true},
+                            {"key": "coins", "label": "Coins", "data_type": "number", "sortable": true},
+                            {"key": "is_pioneer", "label": "Is Pioneer", "data_type": "boolean", "filterable": true},
+                            {"key": "is_checkmark", "label": "Is Checkmark", "data_type": "boolean", "filterable": true}
+                        ],
+                        "rows": [
+                            {
+                                "id": "1",
+                                "name": "Afif Auliya Nurani",
+                                "biography": "Penulis buku self-help dan pengembangan diri",
+                                "phone": "+6281234567892",
+                                "slug": "afif-auliya-nurani",
+                                "coins": 0,
+                                "is_pioneer": false,
+                                "is_checkmark": false
+                            },
+                            {
+                                "id": "2",
+                                "name": "Ainia",
+                                "biography": "Halo, nama saya Ainia. Kalian bisa panggil aku Ain. Di sini aku akan menyuguhkan sebuah karya romansa hangat, haru dan dramatis yang mungkin kalian suka, jangan lupa baca ya🥰😍",
+                                "phone": null,
+                                "slug": "ainia",
+                                "coins": 0,
+                                "is_pioneer": true,
+                                "is_checkmark": false
+                            }
+                        ],
+                        "config": {
+                            "features": {
+                                "sort": true,
+                                "filter": true,
+                                "pivot": true,
+                                "columnVisibility": true,
+                                "export": false
+                            },
+                            "initialState": {
+                                "sorting": [{"column": "name", "direction": "asc"}]
+                            }
+                        }
+                    },
+                    "title": "All Authors"
+                }
+            });
+            return Ok(serde_json::to_string(&response).unwrap());
+        }
+
+        // Check if data is an object with columns and rows structure (correct format)
+        if let Some(data_obj) = data_param.and_then(|v| v.as_object()) {
+            // Validate columns field
+            if let Some(columns) = data_obj.get("columns").and_then(|v| v.as_array()) {
+                // Validate each column has required fields
+                for (i, col) in columns.iter().enumerate() {
+                    if let Some(col_obj) = col.as_object() {
+                        if !col_obj.contains_key("key") || !col_obj.contains_key("label") || !col_obj.contains_key("data_type") {
+                            let response = json!({
+                                "status": "error",
+                                "error": "Invalid column structure",
+                                "message": format!("Column {} must have 'key', 'label', and 'data_type' fields", i),
+                                "correct_format_example": {
+                                    "key": "column_name",
+                                    "label": "Display Name",
+                                    "data_type": "string",
+                                    "sortable": true,
+                                    "filterable": true
+                                }
+                            });
+                            return Ok(serde_json::to_string(&response).unwrap());
+                        }
+                    } else {
+                        let response = json!({
+                            "status": "error",
+                            "error": "Invalid column structure",
+                            "message": format!("Column {} must be an object", i),
+                            "correct_format_example": {
+                                "key": "column_name",
+                                "label": "Display Name", 
+                                "data_type": "string",
+                                "sortable": true,
+                                "filterable": true
+                            }
+                        });
+                        return Ok(serde_json::to_string(&response).unwrap());
+                    }
+                }
+
+                // Validate rows field
+                if let Some(rows) = data_obj.get("rows").and_then(|v| v.as_array()) {
+                    if !rows.is_empty() {
+                        // Check if first row is an object with keys matching columns
+                        if let Some(first_row) = rows[0].as_object() {
+                            // Extract column keys for validation
+                            let column_keys: Vec<String> = columns
+                                .iter()
+                                .filter_map(|col| col.get("key").and_then(|k| k.as_str()).map(|s| s.to_string()))
+                                .collect();
+
+                            // Check if row has all required keys
+                            for key in &column_keys {
+                                if !first_row.contains_key(key) {
+                                    let response = json!({
+                                        "status": "error",
+                                        "error": "Row data mismatch",
+                                        "message": format!("Row is missing key '{}' defined in columns", key),
+                                        "expected_keys": column_keys
+                                    });
+                                    return Ok(serde_json::to_string(&response).unwrap());
+                                }
+                            }
+
+                            // Parameters are valid! Return simple success response to Claude
+                            let response = json!({
+                                "status": "success",
+                                "message": "Parameters valid. Table created successfully.",
+                                "table_info": {
+                                    "title": title,
+                                    "columns_count": columns.len(),
+                                    "rows_count": rows.len()
+                                }
+                            });
+                            return Ok(serde_json::to_string(&response).unwrap());
+                        } else {
+                            let response = json!({
+                                "status": "error",
+                                "error": "Invalid row structure",
+                                "message": "Rows must be objects with keys matching column definitions",
+                                "correct_format_example": {
+                                    "rows": [
+                                        {"id": "1", "name": "John", "email": "john@example.com"},
+                                        {"id": "2", "name": "Jane", "email": "jane@example.com"}
+                                    ]
+                                }
+                            });
+                            return Ok(serde_json::to_string(&response).unwrap());
+                        }
+                    } else {
+                        let response = json!({
+                            "status": "error",
+                            "error": "Empty rows array",
+                            "message": "Rows array cannot be empty"
+                        });
+                        return Ok(serde_json::to_string(&response).unwrap());
+                    }
+                } else {
+                    let response = json!({
+                        "status": "error",
+                        "error": "Missing rows field",
+                        "message": "Data object must contain a 'rows' array field"
+                    });
+                    return Ok(serde_json::to_string(&response).unwrap());
+                }
+            } else {
+                let response = json!({
+                    "status": "error",
+                    "error": "Missing columns field",
+                    "message": "Data object must contain a 'columns' array field"
+                });
+                return Ok(serde_json::to_string(&response).unwrap());
             }
+        }
+
+        // If we reach here, data is neither array nor object
+        let response = json!({
+            "status": "error",
+            "error": "Invalid data type",
+            "message": "Data parameter must be an object with 'columns' and 'rows' structure"
         });
-
-
-        serde_json::to_string(&interaction_spec).map_err(|e| JsonRpcError {
-            code: INTERNAL_ERROR,
-            message: format!("Failed to serialize response: {}", e),
-            data: None,
-        })
+        Ok(serde_json::to_string(&response).unwrap())
     }
 
     pub async fn handle_show_chart(
         &self,
         arguments: &serde_json::Map<String, Value>,
     ) -> Result<String, JsonRpcError> {
-        let data = arguments
-            .get("data")
-            .and_then(|v| v.as_array())
-            .ok_or_else(|| JsonRpcError {
-                code: INVALID_PARAMS,
-                message: "Missing data parameter".to_string(),
-                data: None,
-            })?;
-
-        let chart_type = arguments
-            .get("chart_type")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| JsonRpcError {
-                code: INVALID_PARAMS,
-                message: "Missing chart_type parameter".to_string(),
-                data: None,
-            })?;
-
         let title = arguments
             .get("title")
             .and_then(|v| v.as_str())
             .unwrap_or("Chart");
 
+        // Check for required chart_type parameter
+        let chart_type = match arguments.get("chart_type").and_then(|v| v.as_str()) {
+            Some(ct) => ct,
+            None => {
+                let response = json!({
+                    "status": "error",
+                    "error": "Invalid parameter format for show_chart",
+                    "message": "Missing required 'chart_type' parameter",
+                    "correct_format_example": {
+                        "data": {
+                            "categories": ["Product A", "Product B", "Product C"],
+                            "series": [
+                                {"name": "Q1 Sales", "data": [15000, 23000, 18000]},
+                                {"name": "Q2 Sales", "data": [18000, 25000, 21000]}
+                            ]
+                        },
+                        "chart_type": "bar",
+                        "title": "Sales by Product"
+                    }
+                });
+                return Ok(serde_json::to_string(&response).unwrap());
+            }
+        };
+
         // Validate chart type
         let valid_chart_types = ["line", "bar", "pie", "scatter", "area", "radar", "gauge", "map", "sankey", "treemap"];
         if !valid_chart_types.contains(&chart_type) {
-            return Err(JsonRpcError {
-                code: INVALID_PARAMS,
-                message: format!("Invalid chart_type. Supported types: {}", valid_chart_types.join(", ")),
-                data: None,
+            let response = json!({
+                "status": "error",
+                "error": "Invalid chart_type",
+                "message": format!("Unsupported chart type '{}'. Must be one of: {}", chart_type, valid_chart_types.join(", ")),
+                "supported_types": valid_chart_types,
+                "correct_format_example": {
+                    "chart_type": "bar",
+                    "data": {
+                        "categories": ["Category 1", "Category 2"],
+                        "series": [
+                            {"name": "Series 1", "data": [10, 20]}
+                        ]
+                    },
+                    "title": "Sample Chart"
+                }
             });
+            return Ok(serde_json::to_string(&response).unwrap());
         }
 
-        // Validate data structure
-        if data.is_empty() {
-            return Err(JsonRpcError {
-                code: INVALID_PARAMS,
-                message: "Data array cannot be empty".to_string(),
-                data: None,
+        // Check for required data parameter
+        let data_param = arguments.get("data");
+        if data_param.is_none() {
+            let response = json!({
+                "status": "error",
+                "error": "Invalid parameter format for show_chart",
+                "message": "Missing required 'data' parameter",
+                "correct_format_example": {
+                    "data": {
+                        "categories": ["iPhone 15", "MacBook Pro", "iPad Air", "AirPods Pro"],
+                        "series": [
+                            {"name": "Q1 Sales", "data": [45000, 38000, 22000, 15000]},
+                            {"name": "Q2 Sales", "data": [52000, 41000, 28000, 18000]}
+                        ]
+                    },
+                    "chart_type": chart_type,
+                    "title": title
+                }
             });
+            return Ok(serde_json::to_string(&response).unwrap());
         }
 
-        // Create interaction response
-        let interaction_id = uuid::Uuid::new_v4().to_string();
-        let interaction_spec = json!({
-            "interaction_id": interaction_id,
-            "interaction_type": "show_chart",
-            "title": title,
-            "chart_type": chart_type,
-            "data": data,
-            "status": "completed",
-            "requires_response": false,
-            "created_at": chrono::Utc::now().to_rfc3339(),
-            "options": arguments.get("options").unwrap_or(&json!({})),
-            "features": {
-                "interactive": true,
-                "zoomable": true,
-                "exportable": true,
-                "responsive": true
+        // Validate data structure based on chart type
+        if let Some(data_obj) = data_param.and_then(|v| v.as_object()) {
+            match chart_type {
+                "pie" => {
+                    // For pie charts, expect series with name-value pairs
+                    if let Some(series) = data_obj.get("series").and_then(|v| v.as_array()) {
+                        if !series.is_empty() {
+                            if let Some(first_series) = series[0].as_object() {
+                                if let Some(data_array) = first_series.get("data").and_then(|v| v.as_array()) {
+                                    // Check if data uses name-value objects (correct) or just values (incorrect)
+                                    if !data_array.is_empty() && !data_array[0].is_object() {
+                                        let response = json!({
+                                            "status": "error",
+                                            "error": "Invalid pie chart data format",
+                                            "message": "Pie chart data must use name-value objects, not just values",
+                                            "received_format": "Array of values (incorrect)",
+                                            "correct_format_example": {
+                                                "data": {
+                                                    "series": [{
+                                                        "name": "Market Share",
+                                                        "data": [
+                                                            {"name": "North America", "value": 35},
+                                                            {"name": "Europe", "value": 28},
+                                                            {"name": "Asia Pacific", "value": 25},
+                                                            {"name": "Latin America", "value": 12}
+                                                        ]
+                                                    }]
+                                                },
+                                                "chart_type": "pie",
+                                                "title": "Market Share Distribution"
+                                            }
+                                        });
+                                        return Ok(serde_json::to_string(&response).unwrap());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "line" | "bar" | "area" => {
+                    // For line/bar/area charts, expect categories and series
+                    if !data_obj.contains_key("categories") || !data_obj.contains_key("series") {
+                        let response = json!({
+                            "status": "error",
+                            "error": "Invalid chart data format",
+                            "message": format!("{} chart must have 'categories' and 'series' fields", chart_type),
+                            "correct_format_example": {
+                                "data": {
+                                    "categories": ["Jan 2024", "Feb 2024", "Mar 2024", "Apr 2024", "May 2024"],
+                                    "series": [
+                                        {"name": "Revenue", "data": [120000, 135000, 142000, 158000, 165000]},
+                                        {"name": "Target", "data": [115000, 130000, 145000, 160000, 175000]}
+                                    ]
+                                },
+                                "chart_type": chart_type,
+                                "title": "Revenue Trend"
+                            }
+                        });
+                        return Ok(serde_json::to_string(&response).unwrap());
+                    }
+
+                    // Check for meaningful labels in categories (not generic indices)
+                    if let Some(categories) = data_obj.get("categories").and_then(|v| v.as_array()) {
+                        if !categories.is_empty() {
+                            // Check if categories use generic indices like "0", "1", "2"
+                            if categories.iter().any(|cat| {
+                                if let Some(cat_str) = cat.as_str() {
+                                    cat_str.chars().all(|c| c.is_ascii_digit()) || 
+                                    cat_str.starts_with("Item ") || 
+                                    cat_str.starts_with("Category ")
+                                } else {
+                                    false
+                                }
+                            }) {
+                                let response = json!({
+                                    "status": "error", 
+                                    "error": "Invalid chart labels",
+                                    "message": "Chart categories should use meaningful labels from your actual data, not generic indices like '0', '1', '2' or 'Item 1', 'Item 2'",
+                                    "received_categories": categories,
+                                    "correct_format_example": {
+                                        "data": {
+                                            "categories": ["iPhone 15", "MacBook Pro", "iPad Air", "AirPods Pro"],
+                                            "series": [
+                                                {"name": "Q1 Sales", "data": [45000, 38000, 22000, 15000]},
+                                                {"name": "Q2 Sales", "data": [52000, 41000, 28000, 18000]}
+                                            ]
+                                        },
+                                        "chart_type": chart_type,
+                                        "title": "Monthly Sales by Product"
+                                    }
+                                });
+                                return Ok(serde_json::to_string(&response).unwrap());
+                            }
+                        }
+                    }
+                },
+                _ => {
+                    // For other chart types, basic validation
+                    if !data_obj.contains_key("series") {
+                        let response = json!({
+                            "status": "error",
+                            "error": "Invalid chart data format",
+                            "message": format!("{} chart must have 'series' field", chart_type),
+                            "correct_format_example": {
+                                "data": {
+                                    "series": [
+                                        {"name": "Series 1", "data": [10, 20, 30]}
+                                    ]
+                                },
+                                "chart_type": chart_type,
+                                "title": title
+                            }
+                        });
+                        return Ok(serde_json::to_string(&response).unwrap());
+                    }
+                }
             }
-        });
 
-
-        serde_json::to_string(&interaction_spec).map_err(|e| JsonRpcError {
-            code: INTERNAL_ERROR,
-            message: format!("Failed to serialize response: {}", e),
-            data: None,
-        })
+            // Parameters are valid! Return simple success response to Claude
+            let response = json!({
+                "status": "success",
+                "message": "Parameters valid. Chart created successfully.",
+                "chart_info": {
+                    "title": title,
+                    "chart_type": chart_type,
+                    "has_categories": data_obj.contains_key("categories"),
+                    "series_count": data_obj.get("series")
+                        .and_then(|s| s.as_array())
+                        .map(|arr| arr.len())
+                        .unwrap_or(0)
+                }
+            });
+            return Ok(serde_json::to_string(&response).unwrap());
+        } else if let Some(_data_array) = data_param.and_then(|v| v.as_array()) {
+            // Data is an array instead of object - this is incorrect
+            let response = json!({
+                "status": "error",
+                "error": "Invalid data format",
+                "message": "Chart data must be an object with proper structure, not a plain array",
+                "received_format": "Array (incorrect)",
+                "correct_format_example": {
+                    "data": {
+                        "categories": ["Product A", "Product B", "Product C"],
+                        "series": [
+                            {"name": "Sales", "data": [100, 200, 150]}
+                        ]
+                    },
+                    "chart_type": chart_type,
+                    "title": title
+                }
+            });
+            return Ok(serde_json::to_string(&response).unwrap());
+        } else {
+            let response = json!({
+                "status": "error",
+                "error": "Invalid data type",
+                "message": "Data parameter must be an object with proper chart structure"
+            });
+            return Ok(serde_json::to_string(&response).unwrap());
+        }
     }
 }

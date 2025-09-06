@@ -19,7 +19,7 @@ export const stream = {
   progress(msg: ServerMessage & { type: "progress" }) {
     const conversation = chatStore.map[msg.conversation_id];
     if (conversation && conversation.messages.length > 0) {
-      console.log(msg);
+      console.log(JSON.stringify(msg, null, 2));
       const lastMessage =
         conversation.messages[conversation.messages.length - 1];
       if (lastMessage && lastMessage.role === "assistant") {

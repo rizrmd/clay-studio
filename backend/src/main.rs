@@ -167,19 +167,27 @@ async fn start_mcp_server() -> Result<(), Box<dyn std::error::Error>> {
     
     // Get MCP server path - look for the built binary
     let mcp_server_path = {
-        let release_path = std::env::current_dir()
-            .map(|p| p.join("target/release/mcp_server"))
-            .unwrap_or_else(|_| std::path::PathBuf::from("target/release/mcp_server"));
-        let debug_path = std::env::current_dir()
-            .map(|p| p.join("target/debug/mcp_server"))
-            .unwrap_or_else(|_| std::path::PathBuf::from("target/debug/mcp_server"));
-
-        if release_path.exists() {
-            release_path.canonicalize().unwrap_or(release_path)
-        } else if debug_path.exists() {
+        let current_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        
+        // Development paths (target directory)
+        let release_path = current_dir.join("target/release/mcp_server");
+        let debug_path = current_dir.join("target/debug/mcp_server");
+        
+        // Production path (same directory as main binary or /app)
+        let production_path = current_dir.join("mcp_server");
+        let app_path = std::path::PathBuf::from("/app/mcp_server");
+        
+        // Check paths in order: debug (dev), production (same dir), /app (container), release (dev fallback)
+        if debug_path.exists() {
             debug_path.canonicalize().unwrap_or(debug_path)
+        } else if production_path.exists() {
+            production_path.canonicalize().unwrap_or(production_path)
+        } else if app_path.exists() {
+            app_path.canonicalize().unwrap_or(app_path)
+        } else if release_path.exists() {
+            release_path.canonicalize().unwrap_or(release_path)
         } else {
-            return Err("MCP server binary not found. Run 'cargo build --bin mcp_server' first.".into());
+            return Err("MCP server binary not found. Expected locations: target/debug/mcp_server, ./mcp_server, /app/mcp_server, or target/release/mcp_server".into());
         }
     };
 
@@ -439,20 +447,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Static file serving for frontend
     let static_path = std::env::var("STATIC_FILES_PATH")
         .unwrap_or_else(|_| "/Users/riz/Developer/clay-studio/frontend/dist".to_string());
-
-    tracing::info!("Static files path: {}", static_path);
-    tracing::info!(
-        "STATIC_FILES_PATH env var: {:?}",
-        std::env::var("STATIC_FILES_PATH")
-    );
-
-    // List files in static directory for debugging
-    if let Ok(entries) = std::fs::read_dir(&static_path) {
-        tracing::info!("Files in static directory:");
-        for entry in entries.flatten() {
-            tracing::info!("  - {:?}", entry.path());
-        }
-    }
 
     // Configure static service for assets (no fallback)
     let assets_service = StaticDir::new(&static_path)

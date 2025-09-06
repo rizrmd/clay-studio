@@ -656,7 +656,7 @@ export const DataTable = React.forwardRef<any, DataTableProps>(({
         className
       )}
     >
-      <table className="w-full">
+      <table className="w-full" style={{ tableLayout: 'fixed' }}>
         <thead className="sticky top-0 bg-background z-30">
           {table.getHeaderGroups().map((headerGroup) => (
             <tr
@@ -734,6 +734,7 @@ export const DataTable = React.forwardRef<any, DataTableProps>(({
                     )}
                     style={{ 
                       width: header.getSize(),
+                      minWidth: header.getSize(),
                       ...(isPivotColumn && {
                         left: pivotIndex === 0 ? 0 : `${stickyOffset}px`
                       })
@@ -878,6 +879,7 @@ export const DataTable = React.forwardRef<any, DataTableProps>(({
                         )}
                         style={{ 
                           width: cell.column.getSize(),
+                          minWidth: cell.column.getSize(),
                           ...(isPivotCol && {
                             left: pivotIdx === 0 ? 0 : `${cellStickyOffset}px`
                           })
@@ -1060,6 +1062,7 @@ export const DataTable = React.forwardRef<any, DataTableProps>(({
                       )}
                       style={{ 
                         width: cell.column.getSize(),
+                        minWidth: cell.column.getSize(),
                         ...(isPivotCol && pivotMode && {
                           left: pivotIdx === 0 ? 0 : `${cellStickyOffset}px`
                         })
@@ -1108,6 +1111,7 @@ export const DataTable = React.forwardRef<any, DataTableProps>(({
                     )}
                     style={{ 
                       width: column.getSize(),
+                      minWidth: column.getSize(),
                       ...(isPivotCol && {
                         left: pivotIdx === 0 ? 0 : `${cellStickyOffset}px`
                       })

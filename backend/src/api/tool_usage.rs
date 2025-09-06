@@ -179,7 +179,76 @@ pub async fn get_tool_usage_by_id(
             res.render(Json(tool_usage));
             Ok(())
         }
-        None => Err(AppError::NotFound("Tool usage not found".to_string())),
+        None => {
+            // If not found in database, check active streaming states
+            let streams = state.active_claude_streams.read().await;
+            
+            tracing::info!(
+                "Tool usage {} not found in database, checking {} active streams", 
+                tool_usage_id, 
+                streams.len()
+            );
+            
+            // Debug: Log all tool usage IDs in active streams
+            for (conv_id, stream_state) in streams.iter() {
+                tracing::info!(
+                    "Conversation {}: {} completed tool usages: {:?}", 
+                    conv_id,
+                    stream_state.completed_tool_usages.len(),
+                    stream_state.completed_tool_usages.iter().map(|tu| tu.id).collect::<Vec<_>>()
+                );
+            }
+            
+            // Search through all active streams for the tool usage  
+            for (conversation_id, stream_state) in streams.iter() {
+                if let Some(tool_usage) = stream_state.completed_tool_usages
+                    .iter()
+                    .find(|tu| tu.id == tool_usage_id) 
+                {
+                    tracing::info!("Found tool usage {} in memory for conversation {}, verifying ownership", tool_usage_id, conversation_id);
+                    
+                    // For in-progress messages, check conversation ownership instead of message ownership
+                    // since the message might not be saved to database yet
+                    let conversation_row = sqlx::query(
+                        r#"
+                        SELECT p.client_id
+                        FROM conversations c
+                        JOIN projects p ON c.project_id = p.id
+                        WHERE c.id = $1
+                        "#,
+                    )
+                    .bind(conversation_id)
+                    .fetch_optional(&state.db_pool)
+                    .await
+                    .map_err(|e| {
+                        tracing::error!("Database error when checking conversation ownership: {}", e);
+                        AppError::InternalServerError(format!("Database error: {}", e))
+                    })?;
+                    
+                    tracing::info!(
+                        "Conversation ownership check for conversation_id {}: found = {}", 
+                        conversation_id,
+                        conversation_row.is_some()
+                    );
+                    
+                    if let Some(conversation_row) = conversation_row {
+                        let conversation_client_id: uuid::Uuid = conversation_row.get("client_id");
+                        tracing::info!("Current client: {}, Conversation client: {}", current_client_uuid, conversation_client_id);
+                        if conversation_client_id == current_client_uuid {
+                            tracing::info!("Authorization successful, returning tool usage");
+                            res.render(Json(tool_usage.clone()));
+                            return Ok(());
+                        } else {
+                            tracing::warn!("Client authorization failed - different client owns this conversation");
+                        }
+                    } else {
+                        tracing::warn!("Conversation not found in database");
+                    }
+                }
+            }
+            
+            Err(AppError::NotFound("Tool usage not found".to_string()))
+        }
     }
 }
 
