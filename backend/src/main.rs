@@ -387,7 +387,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .push(Router::with_path("/projects/{project_id}").delete(projects::delete_project))
         // Datasources routes
-        .push(Router::with_path("/projects").push(datasources::datasource_routes()))
+        .push(datasources::datasource_routes())
         // Conversation routes - more specific paths first
         .push(
             Router::with_path("/conversations/{conversation_id}/forget-after")

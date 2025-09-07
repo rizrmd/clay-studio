@@ -31,6 +31,8 @@ pub struct DatasourceResponse {
     pub updated_at: String,
     pub project_id: String,
     pub schema_info: Option<Value>,
+    pub connection_status: Option<String>,
+    pub connection_error: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -69,7 +71,7 @@ pub async fn list_datasources(
     // Get datasources for the project
     let rows = sqlx::query(
         r#"
-        SELECT id, name, source_type, config, created_at, updated_at, project_id, schema_info
+        SELECT id, name, source_type, connection_config as config, created_at, updated_at, project_id, schema_info, last_tested_at
         FROM data_sources 
         WHERE project_id = $1 AND deleted_at IS NULL
         ORDER BY created_at DESC
@@ -83,20 +85,28 @@ pub async fn list_datasources(
     let datasources: Vec<DatasourceResponse> = rows
         .into_iter()
         .map(|row| {
-            let config_str: String = row.get("config");
-            let schema_info_str: Option<String> = row.get("schema_info");
+            let config_json: Value = row.get("config");
+            let schema_info_json: Option<Value> = row.get("schema_info");
+            let last_tested_at: Option<chrono::DateTime<Utc>> = row.get("last_tested_at");
+            
+            // Determine connection status based on last_tested_at
+            let connection_status = if last_tested_at.is_some() {
+                Some("connected".to_string()) // If it was tested before, assume connected
+            } else {
+                Some("unknown".to_string()) // Never tested
+            };
             
             DatasourceResponse {
                 id: row.get("id"),
                 name: row.get("name"),
                 source_type: row.get("source_type"),
-                config: serde_json::from_str(&config_str).unwrap_or(Value::String(config_str)),
+                config: config_json,
                 created_at: row.get::<chrono::DateTime<Utc>, _>("created_at").to_rfc3339(),
                 updated_at: row.get::<chrono::DateTime<Utc>, _>("updated_at").to_rfc3339(),
                 project_id: row.get("project_id"),
-                schema_info: schema_info_str
-                    .and_then(|s| serde_json::from_str(&s).ok())
-                    .unwrap_or(None),
+                schema_info: schema_info_json,
+                connection_status,
+                connection_error: None, // TODO: Store connection errors in database
             }
         })
         .collect();
@@ -134,10 +144,12 @@ pub async fn create_datasource(
         return Err(AppError::NotFound("Project not found".to_string()));
     }
 
-    // Validate source_type
+    // Normalize and validate source_type
+    let normalized_source_type = normalize_database_type(&request_data.source_type);
+    
     let valid_types = ["postgresql", "mysql", "clickhouse", "sqlite", "oracle", "sqlserver"];
-    if !valid_types.contains(&request_data.source_type.as_str()) {
-        return Err(AppError::BadRequest(format!("Invalid source_type. Must be one of: {}", valid_types.join(", "))));
+    if !valid_types.contains(&normalized_source_type.as_str()) {
+        return Err(AppError::BadRequest(format!("Invalid source_type '{}'. Must be one of: {}. Common variations are automatically normalized (e.g., 'postgres' → 'postgresql', 'MSSQL' → 'sqlserver')", request_data.source_type, valid_types.join(", "))));
     }
 
     let datasource_id = Uuid::new_v4().to_string();
@@ -148,13 +160,13 @@ pub async fn create_datasource(
     let now = Utc::now();
     sqlx::query(
         r#"
-        INSERT INTO data_sources (id, name, source_type, config, project_id, created_at, updated_at)
+        INSERT INTO data_sources (id, name, source_type, connection_config, project_id, created_at, updated_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
         "#
     )
     .bind(&datasource_id)
     .bind(&request_data.name)
-    .bind(&request_data.source_type)
+    .bind(&normalized_source_type)
     .bind(&config_json)
     .bind(&project_id)
     .bind(&now)
@@ -167,12 +179,14 @@ pub async fn create_datasource(
     let created_datasource = DatasourceResponse {
         id: datasource_id,
         name: request_data.name,
-        source_type: request_data.source_type,
+        source_type: normalized_source_type,
         config: request_data.config,
         created_at: now.to_rfc3339(),
         updated_at: now.to_rfc3339(),
         project_id,
         schema_info: None,
+        connection_status: Some("unknown".to_string()),
+        connection_error: None,
     };
 
     res.status_code(StatusCode::CREATED);
@@ -228,7 +242,7 @@ pub async fn update_datasource(
             let config_json = serde_json::to_string(config)
                 .map_err(|e| AppError::BadRequest(format!("Invalid config format: {}", e)))?;
             sqlx::query(
-                "UPDATE data_sources SET name = $1, config = $2, updated_at = $3 WHERE id = $4 RETURNING *"
+                "UPDATE data_sources SET name = $1, connection_config = $2, updated_at = $3 WHERE id = $4 RETURNING *, connection_config as config, last_tested_at"
             )
             .bind(name)
             .bind(&config_json)
@@ -240,7 +254,7 @@ pub async fn update_datasource(
         },
         (Some(name), None) => {
             sqlx::query(
-                "UPDATE data_sources SET name = $1, updated_at = $2 WHERE id = $3 RETURNING *"
+                "UPDATE data_sources SET name = $1, updated_at = $2 WHERE id = $3 RETURNING *, connection_config as config, last_tested_at"
             )
             .bind(name)
             .bind(&now)
@@ -253,7 +267,7 @@ pub async fn update_datasource(
             let config_json = serde_json::to_string(config)
                 .map_err(|e| AppError::BadRequest(format!("Invalid config format: {}", e)))?;
             sqlx::query(
-                "UPDATE data_sources SET config = $1, updated_at = $2 WHERE id = $3 RETURNING *"
+                "UPDATE data_sources SET connection_config = $1, updated_at = $2 WHERE id = $3 RETURNING *, connection_config as config, last_tested_at"
             )
             .bind(&config_json)
             .bind(&now)
@@ -266,20 +280,28 @@ pub async fn update_datasource(
     };
 
     // Return updated datasource
-    let config_str: String = updated_row.get("config");
-    let schema_info_str: Option<String> = updated_row.get("schema_info");
+    let config_json: Value = updated_row.get("config");
+    let schema_info_json: Option<Value> = updated_row.get("schema_info");
+    let last_tested_at: Option<chrono::DateTime<Utc>> = updated_row.get("last_tested_at");
+    
+    // Determine connection status
+    let connection_status = if last_tested_at.is_some() {
+        Some("connected".to_string())
+    } else {
+        Some("unknown".to_string())
+    };
     
     let updated_datasource = DatasourceResponse {
         id: updated_row.get("id"),
         name: updated_row.get("name"),
         source_type: updated_row.get("source_type"),
-        config: serde_json::from_str(&config_str).unwrap_or(Value::String(config_str)),
+        config: config_json,
         created_at: updated_row.get::<chrono::DateTime<Utc>, _>("created_at").to_rfc3339(),
         updated_at: updated_row.get::<chrono::DateTime<Utc>, _>("updated_at").to_rfc3339(),
         project_id: updated_row.get("project_id"),
-        schema_info: schema_info_str
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or(None),
+        schema_info: schema_info_json,
+        connection_status,
+        connection_error: None,
     };
 
     res.render(Json(updated_datasource));
@@ -348,7 +370,7 @@ pub async fn test_connection(
     // Get datasource and verify ownership
     let datasource = sqlx::query(
         r#"
-        SELECT ds.*, p.client_id 
+        SELECT ds.*, ds.connection_config as config, p.client_id 
         FROM data_sources ds
         JOIN projects p ON ds.project_id = p.id
         WHERE ds.id = $1 AND ds.deleted_at IS NULL AND p.deleted_at IS NULL
@@ -367,11 +389,7 @@ pub async fn test_connection(
     }
 
     let source_type: String = datasource_row.get("source_type");
-    let config_str: String = datasource_row.get("config");
-    
-    // Parse config
-    let config: Value = serde_json::from_str(&config_str)
-        .map_err(|_| AppError::InternalServerError("Invalid datasource config".to_string()))?;
+    let config: Value = datasource_row.get("config");
 
     // Test connection based on source type
     let test_result = match source_type.as_str() {
@@ -404,7 +422,7 @@ pub async fn get_schema(
     // Get datasource and verify ownership
     let datasource = sqlx::query(
         r#"
-        SELECT ds.*, p.client_id 
+        SELECT ds.*, ds.connection_config as config, p.client_id 
         FROM data_sources ds
         JOIN projects p ON ds.project_id = p.id
         WHERE ds.id = $1 AND ds.deleted_at IS NULL AND p.deleted_at IS NULL
@@ -502,12 +520,45 @@ async fn test_sqlite_connection(_config: &Value) -> TestConnectionResponse {
     }
 }
 
+/// Normalize database type strings to handle common variations
+fn normalize_database_type(input: &str) -> String {
+    // Convert to lowercase and remove spaces, hyphens, underscores
+    let normalized = input
+        .to_lowercase()
+        .replace(" ", "")
+        .replace("-", "")
+        .replace("_", "");
+    
+    match normalized.as_str() {
+        // PostgreSQL variations
+        "postgres" | "postgresql" | "pgsql" | "pg" | "postgre" => "postgresql".to_string(),
+        
+        // MySQL variations
+        "mysql" | "my" | "mariadb" | "maria" => "mysql".to_string(),
+        
+        // ClickHouse variations
+        "clickhouse" | "click" | "ch" | "yandex" => "clickhouse".to_string(),
+        
+        // SQLite variations
+        "sqlite" | "sqlite3" | "sql3" | "lite" => "sqlite".to_string(),
+        
+        // Oracle variations
+        "oracle" | "oracledb" | "ora" | "orcl" => "oracle".to_string(),
+        
+        // SQL Server variations
+        "sqlserver" | "mssql" | "microsoftsqlserver" | "microsoft" | "tsql" | "mssqlserver" => "sqlserver".to_string(),
+        
+        // Return as-is if no match (will be caught by validation)
+        _ => normalized,
+    }
+}
+
 pub fn datasource_routes() -> Router {
     Router::new()
         // Project-scoped routes
-        .push(Router::with_path("/<project_id>/datasources").get(list_datasources).post(create_datasource))
+        .push(Router::with_path("/projects/{project_id}/datasources").get(list_datasources).post(create_datasource))
         // Datasource-specific routes
-        .push(Router::with_path("/datasources/<datasource_id>").put(update_datasource).delete(delete_datasource))
-        .push(Router::with_path("/datasources/<datasource_id>/test").post(test_connection))
-        .push(Router::with_path("/datasources/<datasource_id>/schema").get(get_schema))
+        .push(Router::with_path("/datasources/{datasource_id}").put(update_datasource).delete(delete_datasource))
+        .push(Router::with_path("/datasources/{datasource_id}/test").post(test_connection))
+        .push(Router::with_path("/datasources/{datasource_id}/schema").get(get_schema))
 }

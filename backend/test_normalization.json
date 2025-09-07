@@ -1,0 +1,19 @@
+{
+  "test_cases": [
+    {"input": "PostgreSQL", "expected": "postgresql"},
+    {"input": "POSTGRES", "expected": "postgresql"}, 
+    {"input": "postgres", "expected": "postgresql"},
+    {"input": "pg", "expected": "postgresql"},
+    {"input": "MSSQL", "expected": "sqlserver"},
+    {"input": "Microsoft SQL Server", "expected": "sqlserver"},
+    {"input": "SQL-Server", "expected": "sqlserver"},
+    {"input": "MySQL", "expected": "mysql"},
+    {"input": "MariaDB", "expected": "mysql"},
+    {"input": "ClickHouse", "expected": "clickhouse"},
+    {"input": "CLICK_HOUSE", "expected": "clickhouse"},
+    {"input": "SQLite", "expected": "sqlite"},
+    {"input": "SQLite3", "expected": "sqlite"},
+    {"input": "Oracle", "expected": "oracle"},
+    {"input": "OracleDB", "expected": "oracle"}
+  ]
+}
