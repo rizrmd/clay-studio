@@ -1,16 +1,10 @@
-import { useMemo, Suspense, lazy } from "react";
+import { useMemo, Suspense } from "react";
 import { AskUser } from "./ask-user";
 // import { WebSocketService } from "@/lib/services/websocket-service";
 import { InteractiveTable } from "@/components/data-table/interactive-table";
 import type { ChartType } from "@/components/data-chart/chart-types";
+import { ChartDisplay } from "@/components/data-chart";
 import { parseMcpToolResult } from "../../../tool/tool-call-utils";
-
-// Lazy load ChartDisplay only when needed
-const ChartDisplay = lazy(() =>
-  import("@/components/data-chart").then((module) => ({
-    default: module.ChartDisplay,
-  }))
-);
 
 // Stub implementation
 const WebSocketService = {

@@ -6,40 +6,24 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { DatasourceCard } from "./datasource-card";
 import { DatasourceForm } from "./datasource-form";
 import { datasourcesStore, datasourcesActions } from "@/lib/store/datasources-store";
-import { datasourcesApi } from "@/lib/api/datasources";
 
 interface DatasourcesMainProps {
   projectId: string;
 }
 
 export function DatasourcesMain({ projectId }: DatasourcesMainProps) {
+  console.log('DatasourcesMain: Component rendered with projectId:', projectId);
   const snapshot = useSnapshot(datasourcesStore);
 
   // Load datasources when component mounts
   useEffect(() => {
+    console.log('DatasourcesMain: Loading datasources for project:', projectId);
     loadDatasources();
   }, [projectId]);
 
   const loadDatasources = async () => {
     if (!projectId) return;
-
-    datasourcesActions.setLoading(true);
-    datasourcesActions.setError(null);
-    
-    try {
-      const datasources = await datasourcesApi.list(projectId);
-      // Ensure we always set an array
-      datasourcesActions.setDatasources(Array.isArray(datasources) ? datasources : []);
-    } catch (error) {
-      console.error("Failed to load datasources:", error);
-      // Set empty array on error
-      datasourcesActions.setDatasources([]);
-      datasourcesActions.setError(
-        error instanceof Error ? error.message : "Failed to load datasources"
-      );
-    } finally {
-      datasourcesActions.setLoading(false);
-    }
+    await datasourcesActions.loadDatasources(projectId);
   };
 
   const handleCreateNew = () => {
@@ -56,36 +40,17 @@ export function DatasourcesMain({ projectId }: DatasourcesMainProps) {
     }
 
     try {
-      await datasourcesApi.delete(datasourceId);
-      datasourcesActions.removeDatasource(datasourceId);
+      await datasourcesActions.deleteDatasource(datasourceId);
     } catch (error) {
       console.error("Failed to delete datasource:", error);
-      datasourcesActions.setError(
-        error instanceof Error ? error.message : "Failed to delete datasource"
-      );
     }
   };
 
   const handleTestConnection = async (datasourceId: string) => {
-    datasourcesActions.setTestingConnection(datasourceId);
-    datasourcesActions.updateConnectionStatus(datasourceId, "testing");
-    
     try {
-      const result = await datasourcesApi.testConnection(datasourceId);
-      datasourcesActions.updateConnectionStatus(
-        datasourceId, 
-        result.success ? "connected" : "error",
-        result.success ? undefined : result.error
-      );
+      await datasourcesActions.testConnection(datasourceId);
     } catch (error) {
       console.error("Failed to test connection:", error);
-      datasourcesActions.updateConnectionStatus(
-        datasourceId, 
-        "error",
-        error instanceof Error ? error.message : "Connection test failed"
-      );
-    } finally {
-      datasourcesActions.setTestingConnection(null);
     }
   };
 

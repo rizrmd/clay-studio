@@ -12,8 +12,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { datasourcesApi } from "@/lib/api/datasources";
-import type { Datasource } from "@/lib/store/datasources-store";
+import { datasourcesActions, type Datasource } from "@/lib/store/datasources-store";
 
 interface DatasourceFormProps {
   projectId: string;
@@ -39,6 +38,8 @@ export function DatasourceForm({
 }: DatasourceFormProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<{success: boolean; message: string; error?: string} | null>(null);
+  const [isTesting, setIsTesting] = useState(false);
   const [formData, setFormData] = useState({
     name: "",
     source_type: "postgresql" as Datasource["source_type"],
@@ -56,6 +57,8 @@ export function DatasourceForm({
   // Initialize form with existing datasource data
   useEffect(() => {
     if (datasource) {
+      console.log('DatasourceForm: Initializing form with datasource:', datasource);
+      console.log('DatasourceForm: datasource.source_type:', datasource.source_type);
       setFormData(prev => ({
         ...prev,
         name: datasource.name,
@@ -71,13 +74,49 @@ export function DatasourceForm({
               host: (datasource.config as any)?.host || "",
               port: (datasource.config as any)?.port?.toString() || "",
               database: (datasource.config as any)?.database || "",
-              username: (datasource.config as any)?.user || "",
+              username: (datasource.config as any)?.user || (datasource.config as any)?.username || "",
               password: (datasource.config as any)?.password || "",
             }
         ),
       }));
     }
   }, [datasource]);
+
+  const handleTestConnection = async () => {
+    setIsTesting(true);
+    setTestResult(null);
+
+    try {
+      // Prepare config based on selected type
+      const config = formData.configType === "url" 
+        ? formData.connectionUrl
+        : {
+            host: formData.host,
+            port: formData.port ? parseInt(formData.port) : undefined,
+            database: formData.database,
+            user: formData.username,
+            password: formData.password,
+          };
+
+      const testData = {
+        source_type: formData.source_type,
+        config,
+      };
+
+      // Test connection with current form data
+      const result = await datasourcesActions.testConnectionWithConfig(testData);
+      setTestResult(result);
+    } catch (err) {
+      console.error("Failed to test connection:", err);
+      setTestResult({
+        success: false,
+        message: "Test failed",
+        error: err instanceof Error ? err.message : "Unknown error"
+      });
+    } finally {
+      setIsTesting(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -96,18 +135,24 @@ export function DatasourceForm({
             password: formData.password,
           };
 
-      const requestData = {
-        name: formData.name,
-        source_type: formData.source_type,
-        config,
-      };
-
       if (datasource) {
         // Update existing datasource
-        await datasourcesApi.update(datasource.id, requestData);
+        const updateData = {
+          name: formData.name,
+          source_type: formData.source_type,
+          config,
+        };
+        await datasourcesActions.updateDatasourceApi(datasource.id, updateData);
       } else {
         // Create new datasource
-        await datasourcesApi.create(projectId, requestData);
+        const createData = {
+          name: formData.name,
+          source_type: formData.source_type,
+          config,
+          project_id: projectId,
+          connection_status: "unknown" as const,
+        };
+        await datasourcesActions.createDatasource(projectId, createData);
       }
 
       onSuccess();
@@ -165,15 +210,16 @@ export function DatasourceForm({
           <Label htmlFor="source_type">Database Type</Label>
           <Select
             value={formData.source_type}
-            onValueChange={(value) => 
+            onValueChange={(value) => {
+              console.log('DatasourceForm: Select onValueChange:', value);
               setFormData(prev => ({ 
                 ...prev, 
                 source_type: value as Datasource["source_type"] 
               }))
-            }
+            }}
           >
             <SelectTrigger>
-              <SelectValue />
+              <SelectValue placeholder="Select database type" />
             </SelectTrigger>
             <SelectContent>
               {DATABASE_TYPES.map((type) => (
@@ -299,6 +345,47 @@ export function DatasourceForm({
           </div>
         </div>
       )}
+
+      {/* Test Connection */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <Label>Test Connection</Label>
+          <Button 
+            type="button" 
+            variant="outline" 
+            onClick={handleTestConnection}
+            disabled={isTesting}
+            className="flex items-center gap-2"
+          >
+            {isTesting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0" />
+              </svg>
+            )}
+            {isTesting ? "Testing..." : "Test Connection"}
+          </Button>
+        </div>
+        
+        {testResult && (
+          <Alert variant={testResult.success ? "default" : "destructive"}>
+            <AlertDescription>
+              <div className="font-medium">
+                {testResult.success ? "✅ Connection successful!" : "❌ Connection failed"}
+              </div>
+              <div className="text-sm mt-1">
+                {testResult.message}
+                {testResult.error && (
+                  <div className="mt-1 text-xs opacity-75">
+                    {testResult.error}
+                  </div>
+                )}
+              </div>
+            </AlertDescription>
+          </Alert>
+        )}
+      </div>
 
       {/* Actions */}
       <div className="flex gap-3 justify-end">

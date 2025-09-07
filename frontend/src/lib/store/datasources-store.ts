@@ -1,4 +1,5 @@
 import { proxy } from "valtio";
+import { api } from "@/lib/utils/api";
 
 export interface Datasource {
   id: string;
@@ -95,6 +96,129 @@ export const datasourcesActions = {
       if (error) {
         datasourcesStore.datasources[index].connection_error = error;
       }
+    }
+  },
+
+  // API Actions
+  async loadDatasources(projectId: string) {
+    try {
+      console.log('DatasourcesStore: Starting loadDatasources for project:', projectId);
+      datasourcesStore.isLoading = true;
+      datasourcesStore.error = null;
+      
+      console.log('DatasourcesStore: Making API call to:', `/projects/${projectId}/datasources`);
+      const response = await api.get(`/projects/${projectId}/datasources`);
+      console.log('DatasourcesStore: API response:', response);
+      
+      const datasources = Array.isArray(response) ? response : [];
+      console.log('DatasourcesStore: Processed datasources:', datasources);
+      
+      datasourcesActions.setDatasources(datasources);
+    } catch (error: any) {
+      console.error('DatasourcesStore: Failed to load datasources:', error);
+      console.error('DatasourcesStore: Error response:', error?.response);
+      datasourcesStore.error = error?.response?.data?.error || 'Failed to load datasources';
+      datasourcesActions.setDatasources([]);
+    } finally {
+      datasourcesStore.isLoading = false;
+    }
+  },
+
+  async createDatasource(projectId: string, datasource: Omit<Datasource, 'id' | 'created_at' | 'updated_at'>) {
+    try {
+      datasourcesStore.isLoading = true;
+      datasourcesStore.error = null;
+      
+      const newDatasource = await api.post(`/projects/${projectId}/datasources`, datasource);
+      
+      datasourcesActions.addDatasource(newDatasource);
+      return newDatasource;
+    } catch (error: any) {
+      console.error('Failed to create datasource:', error);
+      const errorMessage = error?.response?.data?.error || 'Failed to create datasource';
+      datasourcesStore.error = errorMessage;
+      throw error;
+    } finally {
+      datasourcesStore.isLoading = false;
+    }
+  },
+
+  async updateDatasourceApi(id: string, updates: Partial<Datasource>) {
+    try {
+      datasourcesStore.isLoading = true;
+      datasourcesStore.error = null;
+      
+      const updatedDatasource = await api.put(`/datasources/${id}`, updates);
+      
+      datasourcesActions.updateDatasource(id, updatedDatasource);
+      return updatedDatasource;
+    } catch (error: any) {
+      console.error('Failed to update datasource:', error);
+      const errorMessage = error?.response?.data?.error || 'Failed to update datasource';
+      datasourcesStore.error = errorMessage;
+      throw error;
+    } finally {
+      datasourcesStore.isLoading = false;
+    }
+  },
+
+  async deleteDatasource(id: string) {
+    try {
+      datasourcesStore.isLoading = true;
+      datasourcesStore.error = null;
+      
+      await api.delete(`/datasources/${id}`);
+      
+      datasourcesActions.removeDatasource(id);
+    } catch (error: any) {
+      console.error('Failed to delete datasource:', error);
+      const errorMessage = error?.response?.data?.error || 'Failed to delete datasource';
+      datasourcesStore.error = errorMessage;
+      throw error;
+    } finally {
+      datasourcesStore.isLoading = false;
+    }
+  },
+
+  async testConnection(id: string) {
+    try {
+      datasourcesStore.testingConnection = id;
+      datasourcesActions.updateConnectionStatus(id, "testing");
+      
+      const result = await api.post(`/datasources/${id}/test`);
+      
+      if (result.success) {
+        datasourcesActions.updateConnectionStatus(id, "connected");
+      } else {
+        datasourcesActions.updateConnectionStatus(id, "error", result.error);
+      }
+      
+      return result;
+    } catch (error: any) {
+      console.error('Failed to test connection:', error);
+      const errorMessage = error?.response?.data?.error || 'Failed to test connection';
+      datasourcesActions.updateConnectionStatus(id, "error", errorMessage);
+      throw error;
+    } finally {
+      datasourcesStore.testingConnection = null;
+    }
+  },
+
+  async getSchema(id: string) {
+    try {
+      return await api.get(`/datasources/${id}/schema`);
+    } catch (error: any) {
+      console.error('Failed to get schema:', error);
+      throw error;
+    }
+  },
+
+  async testConnectionWithConfig(testData: {source_type: Datasource["source_type"]; config: any}) {
+    try {
+      return await api.post(`/test-connection`, testData);
+    } catch (error: any) {
+      console.error('Failed to test connection with config:', error);
+      throw error;
     }
   },
 };
