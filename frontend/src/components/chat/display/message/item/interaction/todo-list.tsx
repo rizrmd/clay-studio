@@ -19,7 +19,7 @@ interface TodoListProps {
 export function TodoList({ todos, className }: TodoListProps) {
 
   return (
-    <div className={cn("rounded-lg border bg-muted/30 p-3 -mt-3", className)}>
+    <div className={cn("rounded-lg border bg-muted/30 p-3 mt-2 w-full bg-white", className)}>
       {/* Header */}
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-1.5 text-gray-600">

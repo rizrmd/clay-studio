@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useEffect } from "react";
 import { Message } from "../types";
 import { cn } from "@/lib/utils";
 import { FilePreview } from "@/components/ui/file-preview";
@@ -14,6 +14,7 @@ import {
   InteractionRenderer,
   hasInteraction,
 } from "@/components/chat/display/message/item/interaction/interaction-renderer";
+import { TodoList } from "@/components/chat/display/message/item/interaction/todo-list";
 
 export interface MessageItemProps {
   message: Message;
@@ -107,6 +108,29 @@ export function MessageItem({
       invocation.state === "result" && !invocation.result.__cancelled && invocation.toolName !== 'TodoWrite'
   );
 
+  const todoWriteInvocations = toolInvocations?.filter(
+    (invocation) =>
+      invocation.state === "result" && !invocation.result.__cancelled && invocation.toolName === 'TodoWrite'
+  );
+
+  // Debug logging to see what tools are being called
+  useEffect(() => {
+    if (toolInvocations && toolInvocations.length > 0) {
+      console.log('All tool invocations:', toolInvocations.map(inv => ({
+        toolName: inv.toolName,
+        state: inv.state,
+        result: inv.state === 'result' ? (inv as any).result : undefined
+      })));
+      console.log('TodoWrite invocations:', todoWriteInvocations);
+      
+      // Debug the TodoWrite results structure
+      todoWriteInvocations?.forEach((invocation, index) => {
+        console.log(`TodoWrite ${index} FULL invocation:`, invocation);
+        console.log(`TodoWrite ${index} result:`, invocation.state === 'result' ? invocation.result : 'no result');
+      });
+    }
+  }, [toolInvocations, todoWriteInvocations]);
+
   const renderMessage = (className?: string) => (
     <div className={cn("flex flex-col", isUser ? "items-end" : "items-start")}>
       {files ? (
@@ -172,6 +196,28 @@ export function MessageItem({
                 );
               } else if (isMcpInteraction) {
                 console.log('MCP interaction tool but no interaction detected:', invocation.toolName, 'data:', interactionData);
+              }
+            }
+            return null;
+          })}
+          {/* Render TodoWrite invocations as proper todo lists - show only the most recent */}
+          {todoWriteInvocations?.slice(-1).map((invocation) => {
+            if (invocation.state === "result") {
+              // Check for todos data in result
+              const todos = invocation.result?.todos;
+              
+              if (todos && Array.isArray(todos) && todos.length > 0) {
+                console.log(`Rendering TodoList with todos:`, todos);
+                return (
+                  <TodoList
+                    key={`todo-${invocation.id}`}
+                    todos={todos}
+                  />
+                );
+              } else {
+                console.log(`No todos found for invocation ${invocation.id}:`, {
+                  resultTodos: invocation.result?.todos
+                });
               }
             }
             return null;

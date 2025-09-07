@@ -49,13 +49,17 @@ async fn save_message(
         for tool_usage in tool_usages {
             // Always save tool usage for tracking purposes, including failed MCP interactions
             
+            // Helper function to determine if a tool should preserve parameters and output
+            let should_preserve_tool_data = |tool_name: &str| -> bool {
+                tool_name.starts_with("mcp__interaction__") || tool_name == "TodoWrite"
+            };
+
             // Determine final parameters and output
-            let (final_parameters, final_output) = if tool_usage.tool_name.starts_with("mcp__interaction__") {
-                // For MCP interaction tools, preserve original output to track success/failure status
-                // Keep original parameters as they contain the attempted interaction data
+            let (final_parameters, final_output) = if should_preserve_tool_data(&tool_usage.tool_name) {
+                // For MCP interaction tools and TodoWrite, preserve original output and parameters
                 (tool_usage.parameters.clone(), tool_usage.output.clone())
             } else {
-                // Non-MCP interaction tools, keep original
+                // Other tools, keep original (for backward compatibility)
                 (tool_usage.parameters.clone(), tool_usage.output.clone())
             };
 
@@ -595,15 +599,15 @@ pub async fn handle_chat_message_ws(
                             let filtered_tool_usages: Vec<crate::models::tool_usage::ToolUsage> = tool_usages
                                 .iter()
                                 .map(|tu| {
-                                    // Don't filter MCP interaction tools - they need their output for rendering
-                                    let is_mcp_interaction = tu.tool_name.starts_with("mcp__interaction__");
+                                    // Don't filter MCP interaction tools and TodoWrite - they need their output for rendering
+                                    let should_preserve = tu.tool_name.starts_with("mcp__interaction__") || tu.tool_name == "TodoWrite";
                                     crate::models::tool_usage::ToolUsage {
                                         id: tu.id,
                                         message_id: tu.message_id.clone(),
                                         tool_name: tu.tool_name.clone(),
                                         tool_use_id: tu.tool_use_id.clone(),
-                                        parameters: if is_mcp_interaction { tu.parameters.clone() } else { None },
-                                        output: if is_mcp_interaction { tu.output.clone() } else { None },
+                                        parameters: if should_preserve { tu.parameters.clone() } else { None },
+                                        output: if should_preserve { tu.output.clone() } else { None },
                                         execution_time_ms: tu.execution_time_ms,
                                         created_at: tu.created_at.clone(),
                                     }
@@ -663,15 +667,15 @@ pub async fn handle_chat_message_ws(
                         let filtered_tool_usages: Vec<crate::models::tool_usage::ToolUsage> = tool_usages
                             .iter()
                             .map(|tu| {
-                                // Don't filter MCP interaction tools - they need their output for rendering
-                                let is_mcp_interaction = tu.tool_name.starts_with("mcp__interaction__");
+                                // Don't filter MCP interaction tools and TodoWrite - they need their output for rendering
+                                let should_preserve = tu.tool_name.starts_with("mcp__interaction__") || tu.tool_name == "TodoWrite";
                                 crate::models::tool_usage::ToolUsage {
                                     id: tu.id,
                                     message_id: tu.message_id.clone(),
                                     tool_name: tu.tool_name.clone(),
                                     tool_use_id: tu.tool_use_id.clone(),
-                                    parameters: if is_mcp_interaction { tu.parameters.clone() } else { None },
-                                    output: if is_mcp_interaction { tu.output.clone() } else { None },
+                                    parameters: if should_preserve { tu.parameters.clone() } else { None },
+                                    output: if should_preserve { tu.output.clone() } else { None },
                                     execution_time_ms: tu.execution_time_ms,
                                     created_at: tu.created_at.clone(),
                                 }

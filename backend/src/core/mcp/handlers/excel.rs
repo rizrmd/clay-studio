@@ -1,7 +1,7 @@
 use super::base::McpHandlers;
 use crate::core::mcp::types::*;
 use chrono::Utc;
-use rust_xlsxwriter::{Color, Format, Workbook};
+use rust_xlsxwriter::{Color, Format, FormatBorder, Workbook};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use tokio::fs;
@@ -52,7 +52,12 @@ impl McpHandlers {
                     "options": {
                         "auto_filter": true,
                         "freeze_panes": {"row": 1, "col": 0},
-                        "column_widths": {"0": 15, "1": 20, "2": 25}
+                        "column_widths": {"0": 15, "1": 20, "2": 25},
+                        "borders": {
+                            "style": "thin",
+                            "color": "black",
+                            "sides": ["all"]
+                        }
                     }
                 }
             });
@@ -171,7 +176,14 @@ impl McpHandlers {
             let header_format = Format::new()
                 .set_bold()
                 .set_background_color(Color::RGB(0xE6E6FA)) // Light lavender
-                .set_border(rust_xlsxwriter::FormatBorder::Thin);
+                .set_border(FormatBorder::Thin);
+
+            // Create data format based on border options
+            let data_format = if let Some(opts) = options {
+                create_data_format_with_borders(opts)
+            } else {
+                None
+            };
 
             // Write headers if provided
             let mut row_idx = 0;
@@ -201,60 +213,120 @@ impl McpHandlers {
                     for (col_idx, cell_value) in row_array.iter().enumerate() {
                         match cell_value {
                             Value::String(s) => {
-                                worksheet.write_string(row_idx, col_idx as u16, s).map_err(
-                                    |e| JsonRpcError {
-                                        code: INTERNAL_ERROR,
-                                        message: format!("Failed to write string cell: {}", e),
-                                        data: None,
-                                    },
-                                )?;
+                                if let Some(ref format) = data_format {
+                                    worksheet.write_string_with_format(row_idx, col_idx as u16, s, format).map_err(
+                                        |e| JsonRpcError {
+                                            code: INTERNAL_ERROR,
+                                            message: format!("Failed to write string cell: {}", e),
+                                            data: None,
+                                        },
+                                    )?;
+                                } else {
+                                    worksheet.write_string(row_idx, col_idx as u16, s).map_err(
+                                        |e| JsonRpcError {
+                                            code: INTERNAL_ERROR,
+                                            message: format!("Failed to write string cell: {}", e),
+                                            data: None,
+                                        },
+                                    )?;
+                                }
                             }
                             Value::Number(n) => {
                                 if let Some(int_val) = n.as_i64() {
+                                    if let Some(ref format) = data_format {
+                                        worksheet
+                                            .write_number_with_format(row_idx, col_idx as u16, int_val as f64, format)
+                                            .map_err(|e| JsonRpcError {
+                                                code: INTERNAL_ERROR,
+                                                message: format!("Failed to write number cell: {}", e),
+                                                data: None,
+                                            })?;
+                                    } else {
+                                        worksheet
+                                            .write_number(row_idx, col_idx as u16, int_val as f64)
+                                            .map_err(|e| JsonRpcError {
+                                                code: INTERNAL_ERROR,
+                                                message: format!("Failed to write number cell: {}", e),
+                                                data: None,
+                                            })?;
+                                    }
+                                } else if let Some(float_val) = n.as_f64() {
+                                    if let Some(ref format) = data_format {
+                                        worksheet
+                                            .write_number_with_format(row_idx, col_idx as u16, float_val, format)
+                                            .map_err(|e| JsonRpcError {
+                                                code: INTERNAL_ERROR,
+                                                message: format!("Failed to write number cell: {}", e),
+                                                data: None,
+                                            })?;
+                                    } else {
+                                        worksheet
+                                            .write_number(row_idx, col_idx as u16, float_val)
+                                            .map_err(|e| JsonRpcError {
+                                                code: INTERNAL_ERROR,
+                                                message: format!("Failed to write number cell: {}", e),
+                                                data: None,
+                                            })?;
+                                    }
+                                }
+                            }
+                            Value::Bool(b) => {
+                                if let Some(ref format) = data_format {
                                     worksheet
-                                        .write_number(row_idx, col_idx as u16, int_val as f64)
+                                        .write_boolean_with_format(row_idx, col_idx as u16, *b, format)
                                         .map_err(|e| JsonRpcError {
                                             code: INTERNAL_ERROR,
-                                            message: format!("Failed to write number cell: {}", e),
+                                            message: format!("Failed to write boolean cell: {}", e),
                                             data: None,
                                         })?;
-                                } else if let Some(float_val) = n.as_f64() {
+                                } else {
                                     worksheet
-                                        .write_number(row_idx, col_idx as u16, float_val)
+                                        .write_boolean(row_idx, col_idx as u16, *b)
                                         .map_err(|e| JsonRpcError {
                                             code: INTERNAL_ERROR,
-                                            message: format!("Failed to write number cell: {}", e),
+                                            message: format!("Failed to write boolean cell: {}", e),
                                             data: None,
                                         })?;
                                 }
                             }
-                            Value::Bool(b) => {
-                                worksheet
-                                    .write_boolean(row_idx, col_idx as u16, *b)
-                                    .map_err(|e| JsonRpcError {
-                                        code: INTERNAL_ERROR,
-                                        message: format!("Failed to write boolean cell: {}", e),
-                                        data: None,
-                                    })?;
-                            }
                             Value::Null => {
-                                worksheet
-                                    .write_string(row_idx, col_idx as u16, "")
-                                    .map_err(|e| JsonRpcError {
-                                        code: INTERNAL_ERROR,
-                                        message: format!("Failed to write empty cell: {}", e),
-                                        data: None,
-                                    })?;
+                                if let Some(ref format) = data_format {
+                                    worksheet
+                                        .write_string_with_format(row_idx, col_idx as u16, "", format)
+                                        .map_err(|e| JsonRpcError {
+                                            code: INTERNAL_ERROR,
+                                            message: format!("Failed to write empty cell: {}", e),
+                                            data: None,
+                                        })?;
+                                } else {
+                                    worksheet
+                                        .write_string(row_idx, col_idx as u16, "")
+                                        .map_err(|e| JsonRpcError {
+                                            code: INTERNAL_ERROR,
+                                            message: format!("Failed to write empty cell: {}", e),
+                                            data: None,
+                                        })?;
+                                }
                             }
                             _ => {
                                 // Convert other types to string
-                                worksheet
-                                    .write_string(row_idx, col_idx as u16, cell_value.to_string())
-                                    .map_err(|e| JsonRpcError {
-                                        code: INTERNAL_ERROR,
-                                        message: format!("Failed to write cell: {}", e),
-                                        data: None,
-                                    })?;
+                                if let Some(ref format) = data_format {
+                                    worksheet
+                                        .write_string_with_format(row_idx, col_idx as u16, &cell_value.to_string(), format)
+                                        .map_err(|e| JsonRpcError {
+                                            code: INTERNAL_ERROR,
+                                            message: format!("Failed to write cell: {}", e),
+                                            data: None,
+                                        })?;
+                                } else {
+                                    worksheet
+                                        .write_string(row_idx, col_idx as u16, &cell_value.to_string())
+                                        .map_err(|e| JsonRpcError {
+                                            code: INTERNAL_ERROR,
+                                            message: format!("Failed to write cell: {}", e),
+                                            data: None,
+                                        })?;
+                                }
                             }
                         }
                     }
@@ -417,5 +489,104 @@ impl McpHandlers {
         }
 
         Ok(())
+    }
+}
+
+// Helper function to create data format with border options
+fn create_data_format_with_borders(options: &Value) -> Option<Format> {
+    if let Some(border_opts) = options.get("borders").and_then(|v| v.as_object()) {
+        let mut format = Format::new();
+        
+        // Parse border style
+        let border_style = border_opts
+            .get("style")
+            .and_then(|v| v.as_str())
+            .unwrap_or("thin");
+            
+        let format_border = match border_style {
+            "none" => return None,
+            "thin" => FormatBorder::Thin,
+            "medium" => FormatBorder::Medium,
+            "thick" => FormatBorder::Thick,
+            "double" => FormatBorder::Double,
+            "dotted" => FormatBorder::Dotted,
+            "dashed" => FormatBorder::Dashed,
+            _ => FormatBorder::Thin,
+        };
+        
+        // Parse border color
+        let border_color = if let Some(color_str) = border_opts.get("color").and_then(|v| v.as_str()) {
+            parse_color(color_str).unwrap_or(Color::Black)
+        } else {
+            Color::Black
+        };
+        
+        // Apply borders based on sides specified
+        if let Some(sides) = border_opts.get("sides") {
+            if let Some(sides_array) = sides.as_array() {
+                // Apply specific sides
+                for side in sides_array {
+                    if let Some(side_str) = side.as_str() {
+                        match side_str {
+                            "top" => format = format.set_border_top_color(border_color).set_border_top(format_border),
+                            "bottom" => format = format.set_border_bottom_color(border_color).set_border_bottom(format_border),
+                            "left" => format = format.set_border_left_color(border_color).set_border_left(format_border),
+                            "right" => format = format.set_border_right_color(border_color).set_border_right(format_border),
+                            "all" => format = format.set_border_color(border_color).set_border(format_border),
+                            _ => {}
+                        }
+                    }
+                }
+            } else if let Some(sides_str) = sides.as_str() {
+                // Single side as string
+                match sides_str {
+                    "top" => format = format.set_border_top_color(border_color).set_border_top(format_border),
+                    "bottom" => format = format.set_border_bottom_color(border_color).set_border_bottom(format_border),
+                    "left" => format = format.set_border_left_color(border_color).set_border_left(format_border),
+                    "right" => format = format.set_border_right_color(border_color).set_border_right(format_border),
+                    "all" => format = format.set_border_color(border_color).set_border(format_border),
+                    _ => {}
+                }
+            }
+        } else {
+            // Default to all sides if no specific sides specified
+            format = format.set_border_color(border_color).set_border(format_border);
+        }
+        
+        Some(format)
+    } else {
+        None
+    }
+}
+
+// Helper function to parse color strings
+fn parse_color(color_str: &str) -> Option<Color> {
+    match color_str.to_lowercase().as_str() {
+        "black" => Some(Color::Black),
+        "white" => Some(Color::White),
+        "red" => Some(Color::Red),
+        "green" => Some(Color::Green),
+        "blue" => Some(Color::Blue),
+        "yellow" => Some(Color::Yellow),
+        "magenta" => Some(Color::Magenta),
+        "cyan" => Some(Color::Cyan),
+        _ => {
+            // Try to parse hex color (#RRGGBB or #RGB)
+            if color_str.starts_with('#') {
+                let hex = &color_str[1..];
+                if hex.len() == 6 {
+                    if let Ok(rgb) = u32::from_str_radix(hex, 16) {
+                        return Some(Color::RGB(rgb));
+                    }
+                } else if hex.len() == 3 {
+                    // Convert #RGB to #RRGGBB
+                    let r = u32::from_str_radix(&hex[0..1], 16).ok()? * 17;
+                    let g = u32::from_str_radix(&hex[1..2], 16).ok()? * 17;
+                    let b = u32::from_str_radix(&hex[2..3], 16).ok()? * 17;
+                    return Some(Color::RGB((r << 16) | (g << 8) | b));
+                }
+            }
+            None
+        }
     }
 }

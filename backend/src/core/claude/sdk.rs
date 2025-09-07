@@ -66,21 +66,46 @@ impl ClaudeSDK {
                 let _ = std::fs::create_dir_all(&claude_dir);
             }
 
-            // Check if existing config needs migration from stdio to HTTP
+            // Check if existing config is valid, otherwise overwrite it
             let force_update = if mcp_servers_file.exists() {
                 match std::fs::read_to_string(&mcp_servers_file) {
                     Ok(content) => {
-                        let is_stdio = content.contains("\"type\": \"stdio\"") || content.contains("\"type\":\"stdio\"");
-                        if is_stdio {
-                            tracing::info!("🔄 Migrating MCP config from stdio to HTTP transport for project {}", project_id);
-                            // Backup the stdio config
-                            let backup_path = claude_dir.join("mcp_servers_stdio_backup.json");
+                        // Try to parse as JSON and validate structure
+                        let is_valid_config = match serde_json::from_str::<serde_json::Value>(&content) {
+                            Ok(json) => {
+                                // Check if it has the expected structure with centralized server URLs
+                                if let Some(mcp_servers) = json.get("mcpServers") {
+                                    let data_analysis_valid = mcp_servers
+                                        .get("data-analysis")
+                                        .and_then(|da| da.get("url"))
+                                        .and_then(|url| url.as_str())
+                                        .map(|url| url.contains(":7670/data-analysis/"))
+                                        .unwrap_or(false);
+                                    
+                                    let interaction_valid = mcp_servers
+                                        .get("interaction")
+                                        .and_then(|ia| ia.get("url"))
+                                        .and_then(|url| url.as_str())
+                                        .map(|url| url.contains(":7670/interaction/"))
+                                        .unwrap_or(false);
+                                    
+                                    data_analysis_valid && interaction_valid
+                                } else {
+                                    false
+                                }
+                            }
+                            Err(_) => false,
+                        };
+                        
+                        if is_valid_config {
+                            tracing::debug!("✅ MCP config is valid for project {}", project_id);
+                            false
+                        } else {
+                            tracing::info!("🔄 Invalid or outdated MCP config detected, updating for project {}", project_id);
+                            // Backup the invalid config
+                            let backup_path = claude_dir.join("mcp_servers_backup.json");
                             let _ = std::fs::write(&backup_path, &content);
                             true
-                        } else {
-                            // Already HTTP, but verify servers are running
-                            tracing::debug!("🔍 Verifying existing HTTP MCP servers for project {}", project_id);
-                            false
                         }
                     }
                     Err(_) => {
