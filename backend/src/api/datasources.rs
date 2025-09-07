@@ -355,6 +355,41 @@ pub async fn delete_datasource(
     Ok(())
 }
 
+/// Test connection with arbitrary config (for form validation)
+#[handler]
+pub async fn test_connection_with_config(
+    req: &mut Request,
+    res: &mut Response,
+    depot: &mut Depot,
+) -> Result<(), AppError> {
+    #[derive(Debug, Serialize, Deserialize)]
+    struct TestConfigRequest {
+        source_type: String,
+        config: Value,
+    }
+
+    let test_data: TestConfigRequest = req.parse_json().await
+        .map_err(|e| AppError::BadRequest(format!("Invalid JSON: {}", e)))?;
+
+    // Normalize source type
+    let normalized_source_type = normalize_database_type(&test_data.source_type);
+    
+    // Test connection based on source type
+    let test_result = match normalized_source_type.as_str() {
+        "postgresql" => test_postgres_connection(&test_data.config).await,
+        "mysql" => test_mysql_connection(&test_data.config).await,
+        "sqlite" => test_sqlite_connection(&test_data.config).await,
+        _ => TestConnectionResponse {
+            success: false,
+            message: format!("Connection testing not implemented for {}", normalized_source_type),
+            error: Some("Not implemented".to_string()),
+        }
+    };
+
+    res.render(Json(test_result));
+    Ok(())
+}
+
 /// Test connection to a datasource
 #[handler]
 pub async fn test_connection(
@@ -460,14 +495,21 @@ async fn test_postgres_connection(config: &Value) -> TestConnectionResponse {
     let connection_url = if let Some(url) = config.as_str() {
         url.to_string()
     } else if let Some(obj) = config.as_object() {
-        // Build connection URL from object
-        let host = obj.get("host").and_then(|v| v.as_str()).unwrap_or("localhost");
-        let port = obj.get("port").and_then(|v| v.as_u64()).unwrap_or(5432);
-        let database = obj.get("database").and_then(|v| v.as_str()).unwrap_or("");
-        let user = obj.get("user").and_then(|v| v.as_str()).unwrap_or("");
-        let password = obj.get("password").and_then(|v| v.as_str()).unwrap_or("");
-        
-        format!("postgresql://{}:{}@{}:{}/{}", user, password, host, port, database)
+        // If object has a 'url' field, use that directly
+        if let Some(url) = obj.get("url").and_then(|v| v.as_str()) {
+            url.to_string()
+        } else {
+            // Build connection URL from individual fields
+            let host = obj.get("host").and_then(|v| v.as_str()).unwrap_or("localhost");
+            let port = obj.get("port").and_then(|v| v.as_u64()).unwrap_or(5432);
+            let database = obj.get("database").and_then(|v| v.as_str()).unwrap_or("");
+            let user = obj.get("user").and_then(|v| v.as_str())
+                .or_else(|| obj.get("username").and_then(|v| v.as_str()))
+                .unwrap_or("");
+            let password = obj.get("password").and_then(|v| v.as_str()).unwrap_or("");
+            
+            format!("postgresql://{}:{}@{}:{}/{}", user, password, host, port, database)
+        }
     } else {
         return TestConnectionResponse {
             success: false,
@@ -561,4 +603,6 @@ pub fn datasource_routes() -> Router {
         .push(Router::with_path("/datasources/{datasource_id}").put(update_datasource).delete(delete_datasource))
         .push(Router::with_path("/datasources/{datasource_id}/test").post(test_connection))
         .push(Router::with_path("/datasources/{datasource_id}/schema").get(get_schema))
+        // Test arbitrary config
+        .push(Router::with_path("/test-connection").post(test_connection_with_config))
 }
