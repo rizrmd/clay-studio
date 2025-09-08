@@ -448,13 +448,38 @@ impl McpHandlers {
             },
             Tool {
                 name: "schema_get".to_string(),
-                description: "Get the complete schema information for a datasource".to_string(),
+                description: "Get schema information for a datasource. Can return complete schema or specific table schema.".to_string(),
                 input_schema: json!({
                     "type": "object",
                     "properties": {
                         "datasource_id": {
                             "type": "string",
                             "description": "ID of the datasource"
+                        },
+                        "table_name": {
+                            "type": "string",
+                            "description": "Optional: specific table name to get schema for. If not provided, returns complete database schema."
+                        },
+                        "use_cache": {
+                            "type": "boolean",
+                            "default": true,
+                            "description": "Optional: use cached schema if available (default: true)"
+                        },
+                        "summary_only": {
+                            "type": "boolean", 
+                            "default": false,
+                            "description": "Optional: return only table names and column counts instead of full schema (default: false)"
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 100,
+                            "description": "Optional: maximum number of tables to return when getting complete schema"
+                        },
+                        "offset": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "description": "Optional: number of tables to skip when getting complete schema"
                         }
                     },
                     "required": ["datasource_id"]

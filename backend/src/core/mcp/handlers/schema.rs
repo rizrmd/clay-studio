@@ -4,6 +4,39 @@ use crate::utils::datasource::create_connector;
 use serde_json::{json, Value};
 
 impl McpHandlers {
+    /// Creates a summary of the schema with just table names and column counts
+    fn create_schema_summary(&self, schema: &Value) -> Value {
+        let mut summary = json!({
+            "database_schema": schema.get("database_schema").unwrap_or(&json!("unknown")),
+            "tables": {},
+            "summary": true,
+            "refreshed_at": chrono::Utc::now().to_rfc3339()
+        });
+
+        if let Some(tables) = schema.get("tables").and_then(|v| v.as_object()) {
+            let mut table_summary = serde_json::Map::new();
+            
+            for (table_name, table_data) in tables {
+                let column_count = if let Some(columns) = table_data.as_array() {
+                    columns.len()
+                } else if let Some(columns) = table_data.get("columns").and_then(|v| v.as_array()) {
+                    columns.len()
+                } else {
+                    0
+                };
+
+                table_summary.insert(table_name.clone(), json!({
+                    "column_count": column_count,
+                    "has_details": column_count > 0
+                }));
+            }
+
+            summary["tables"] = json!(table_summary);
+            summary["total_tables"] = json!(table_summary.len());
+        }
+
+        summary
+    }
     pub async fn get_schema(
         &self,
         args: &serde_json::Map<String, Value>,
@@ -14,24 +47,185 @@ impl McpHandlers {
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| "Missing required parameter: datasource_id".to_string())?;
 
-            // Get connector
+            let table_name = args.get("table_name").and_then(|v| v.as_str());
+            let use_cache = args.get("use_cache").and_then(|v| v.as_bool()).unwrap_or(true);
+            let summary_only = args.get("summary_only").and_then(|v| v.as_bool()).unwrap_or(false);
+            let limit = args.get("limit").and_then(|v| v.as_u64()).map(|v| v.min(100) as usize);
+            let offset = args.get("offset").and_then(|v| v.as_u64()).map(|v| v as usize).unwrap_or(0);
+
+            // Get datasource info
             let source = self.get_datasource_connector(datasource_id).await?;
+
+            // If specific table is requested, get only that table's schema
+            if let Some(table_name) = table_name {
+                let connector = create_connector(&source.source_type, &source.connection_config)
+                    .await
+                    .map_err(|e| format!("Failed to create connector: {}", e))?;
+
+                let schema = connector
+                    .get_tables_schema(vec![table_name])
+                    .await
+                    .map_err(|e| format!("Failed to get table schema: {}", e))?;
+
+                let response_data = json!({
+                    "datasource": {
+                        "id": datasource_id,
+                        "name": source.name
+                    },
+                    "table_name": table_name,
+                    "schema": schema,
+                    "metadata": {
+                        "table_specific": true
+                    }
+                });
+                return Ok(serde_json::to_string(&response_data)?);
+            }
+
+            // Check if we should use cached schema
+            if use_cache {
+                if let Ok(cached_result) = sqlx::query_scalar::<_, Option<String>>(
+                    "SELECT schema_info FROM data_sources WHERE id = $1 AND project_id = $2 AND deleted_at IS NULL"
+                )
+                .bind(datasource_id)
+                .bind(&self.project_id)
+                .fetch_optional(&self.db_pool)
+                .await
+                {
+                    if let Some(Some(cached_schema_str)) = cached_result {
+                        if let Ok(cached_schema) = serde_json::from_str::<Value>(&cached_schema_str) {
+                            // Apply summary mode if requested
+                            if summary_only {
+                                let summary_schema = self.create_schema_summary(&cached_schema);
+                                let response_data = json!({
+                                    "datasource": {
+                                        "id": datasource_id,
+                                        "name": source.name
+                                    },
+                                    "schema": summary_schema,
+                                    "metadata": {
+                                        "from_cache": true,
+                                        "summary_only": true
+                                    }
+                                });
+                                return Ok(serde_json::to_string(&response_data)?);
+                            }
+
+                            // Apply pagination if requested  
+                            if let Some(limit) = limit {
+                                if let Some(tables) = cached_schema.get("tables").and_then(|v| v.as_object()) {
+                                let mut paginated_tables = serde_json::Map::new();
+                                for (k, v) in tables.iter().skip(offset).take(limit) {
+                                    paginated_tables.insert(k.clone(), v.clone());
+                                }
+                                
+                                let mut paginated_schema = cached_schema.clone();
+                                paginated_schema["tables"] = json!(paginated_tables);
+                                paginated_schema["metadata"] = json!({
+                                    "from_cache": true,
+                                    "paginated": true,
+                                    "limit": limit,
+                                    "offset": offset,
+                                    "total_tables": tables.len()
+                                });
+
+                                let response_data = json!({
+                                    "datasource": {
+                                        "id": datasource_id,
+                                        "name": source.name
+                                    },
+                                    "schema": paginated_schema,
+                                    "metadata": {
+                                        "from_cache": true,
+                                        "paginated": true
+                                    }
+                                });
+                                return Ok(serde_json::to_string(&response_data)?);
+                                }
+                            }
+
+                            // Return full cached schema
+                            let response_data = json!({
+                                "datasource": {
+                                    "id": datasource_id,
+                                    "name": source.name
+                                },
+                                "schema": cached_schema,
+                                "metadata": {
+                                    "from_cache": true
+                                }
+                            });
+                            return Ok(serde_json::to_string(&response_data)?);
+                        }
+                    }
+                }
+            }
+
+            // Fetch fresh schema from database
             let connector = create_connector(&source.source_type, &source.connection_config)
                 .await
                 .map_err(|e| format!("Failed to create connector: {}", e))?;
 
-            // Get schema
             let schema = connector
                 .fetch_schema()
                 .await
                 .map_err(|e| format!("Failed to get schema: {}", e))?;
 
+            // Apply summary mode if requested
+            if summary_only {
+                let summary_schema = self.create_schema_summary(&schema);
+                let response_data = json!({
+                    "datasource": {
+                        "id": datasource_id,
+                        "name": source.name
+                    },
+                    "schema": summary_schema,
+                    "metadata": {
+                        "from_cache": false,
+                        "summary_only": true
+                    }
+                });
+                return Ok(serde_json::to_string(&response_data)?);
+            }
+
+            // Apply pagination if requested
+            if let Some(limit) = limit {
+                if let Some(tables) = schema.get("tables").and_then(|v| v.as_object()) {
+                let mut paginated_tables = serde_json::Map::new();
+                for (k, v) in tables.iter().skip(offset).take(limit) {
+                    paginated_tables.insert(k.clone(), v.clone());
+                }
+                
+                let mut paginated_schema = schema.clone();
+                paginated_schema["tables"] = json!(paginated_tables);
+                
+                let response_data = json!({
+                    "datasource": {
+                        "id": datasource_id,
+                        "name": source.name
+                    },
+                    "schema": paginated_schema,
+                    "metadata": {
+                        "from_cache": false,
+                        "paginated": true,
+                        "limit": limit,
+                        "offset": offset,
+                        "total_tables": tables.len()
+                    }
+                });
+                return Ok(serde_json::to_string(&response_data)?);
+                }
+            }
+
+            // Return full schema
             let response_data = json!({
                 "datasource": {
                     "id": datasource_id,
                     "name": source.name
                 },
-                "schema": schema
+                "schema": schema,
+                "metadata": {
+                    "from_cache": false
+                }
             });
             Ok(serde_json::to_string(&response_data)?)
         })
