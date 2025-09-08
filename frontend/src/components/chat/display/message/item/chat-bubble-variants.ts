@@ -1,7 +1,7 @@
 import { cva, type VariantProps } from "class-variance-authority";
 
 export const chatBubbleVariants = cva(
-  "group/message relative break-words text-[14px] rounded-lg p-3 sm:max-w-[70%]",
+  "group/message relative break-words text-[14px] rounded-lg p-3 sm:max-w-[85%]",
   {
     variants: {
       isUser: {

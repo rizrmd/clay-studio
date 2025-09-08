@@ -1,4 +1,4 @@
-import { useMemo, useEffect } from "react";
+import { useMemo } from "react";
 import { Message } from "../types";
 import { cn } from "@/lib/utils";
 import { FilePreview } from "@/components/ui/file-preview";
@@ -112,24 +112,6 @@ export function MessageItem({
     (invocation) =>
       invocation.state === "result" && !invocation.result.__cancelled && invocation.toolName === 'TodoWrite'
   );
-
-  // Debug logging to see what tools are being called
-  useEffect(() => {
-    if (toolInvocations && toolInvocations.length > 0) {
-      console.log('All tool invocations:', toolInvocations.map(inv => ({
-        toolName: inv.toolName,
-        state: inv.state,
-        result: inv.state === 'result' ? (inv as any).result : undefined
-      })));
-      console.log('TodoWrite invocations:', todoWriteInvocations);
-      
-      // Debug the TodoWrite results structure
-      todoWriteInvocations?.forEach((invocation, index) => {
-        console.log(`TodoWrite ${index} FULL invocation:`, invocation);
-        console.log(`TodoWrite ${index} result:`, invocation.state === 'result' ? invocation.result : 'no result');
-      });
-    }
-  }, [toolInvocations, todoWriteInvocations]);
 
   const renderMessage = (className?: string) => (
     <div className={cn("flex flex-col", isUser ? "items-end" : "items-start")}>

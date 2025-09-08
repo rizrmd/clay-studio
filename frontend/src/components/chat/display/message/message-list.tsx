@@ -30,7 +30,7 @@ export const MessageList = () => {
 
   return (
     <div className="flex-1 overflow-auto flex relative" ref={scrollAreaRef}>
-      <div className="flex flex-col absolute inset-0 mx-auto max-w-2xl ">
+      <div className="flex flex-col absolute inset-0 mx-auto max-w-2xl">
         {currentMessages.map((message, index) => {
           if (message.content === "") return null;
           const isLastMessage = index === currentMessages.length - 1;

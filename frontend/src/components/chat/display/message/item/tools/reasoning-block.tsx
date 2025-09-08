@@ -16,7 +16,7 @@ export const ReasoningBlock: React.FC<ReasoningBlockProps> = ({ part }) => {
   const [isOpen, setIsOpen] = useState(false);
 
   return (
-    <div className="mb-2 flex flex-col items-start sm:max-w-[70%]">
+    <div className="mb-2 flex flex-col items-start sm:max-w-[85%]">
       <Collapsible
         open={isOpen}
         onOpenChange={setIsOpen}

@@ -360,7 +360,7 @@ pub async fn delete_datasource(
 pub async fn test_connection_with_config(
     req: &mut Request,
     res: &mut Response,
-    depot: &mut Depot,
+    _depot: &mut Depot,
 ) -> Result<(), AppError> {
     #[derive(Debug, Serialize, Deserialize)]
     struct TestConfigRequest {
