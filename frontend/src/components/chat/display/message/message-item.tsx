@@ -114,7 +114,7 @@ export function MessageItem({
   );
 
   const renderMessage = (className?: string) => (
-    <div className={cn("flex flex-col", isUser ? "items-end" : "items-start")}>
+    <div className={cn(" max-w-full overflow-auto flex flex-col", isUser ? "items-end" : "items-start")}>
       {files ? (
         <div className="mb-1 flex flex-wrap gap-2">
           {files.map((file, index) => {
