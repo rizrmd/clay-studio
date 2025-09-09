@@ -173,16 +173,23 @@ export function MessageItem({
                 ? invocation.result // This now contains the original parameters
                 : invocation.result;
               
-              if (hasInteraction(interactionData)) {
-                console.log('Rendering interaction for tool:', invocation.toolName, 'with data:', interactionData);
+              // For export_excel specifically, also check the original output
+              let dataToCheck = interactionData;
+              if (invocation.toolName === 'mcp__interaction__export_excel' && 
+                  (invocation as any).originalOutput) {
+                dataToCheck = (invocation as any).originalOutput;
+              }
+              
+              if (hasInteraction(dataToCheck)) {
+                console.log('Rendering interaction for tool:', invocation.toolName, 'with data:', dataToCheck);
                 return (
                   <InteractionRenderer
                     key={`interaction-${invocation.id}`}
-                    toolOutput={interactionData}
+                    toolOutput={dataToCheck}
                   />
                 );
               } else if (isMcpInteraction) {
-                console.log('MCP interaction tool but no interaction detected:', invocation.toolName, 'data:', interactionData);
+                console.log('MCP interaction tool but no interaction detected:', invocation.toolName, 'data:', dataToCheck);
               }
             }
             return null;

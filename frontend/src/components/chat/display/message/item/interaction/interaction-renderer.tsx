@@ -122,6 +122,23 @@ export function InteractionRenderer({
 
       // If it's a string, try to extract JSON from it
       if (typeof actualOutput === "string") {
+        // First try parsing as JSON directly
+        try {
+          const jsonOutput = JSON.parse(actualOutput);
+          if (jsonOutput.status === "success" && jsonOutput.download_url) {
+            return {
+              interaction_type: "excel_export",
+              title: "Excel Export",
+              data: jsonOutput,
+              interaction_id: `excel-${Date.now()}`,
+              requires_response: false,
+              created_at: new Date().toISOString(),
+            } as InteractionSpec;
+          }
+        } catch (e) {
+          // Fall back to MCP tool result parsing
+        }
+        
         return parseMcpToolResult(actualOutput) as InteractionSpec;
       }
     } catch (error) {
@@ -433,6 +450,16 @@ export function hasInteraction(toolOutput: any): boolean {
     }
 
     if (typeof actualOutput === "string") {
+      // Check for Excel export JSON
+      try {
+        const jsonOutput = JSON.parse(actualOutput);
+        if (jsonOutput.status === "success" && jsonOutput.download_url) {
+          return true;
+        }
+      } catch (e) {
+        // Not valid JSON, continue with other checks
+      }
+      
       // Check for interaction JSON in the output
       const hasInteractionType = actualOutput.includes('"interaction_type"');
       const hasInteractionId = actualOutput.includes('"interaction_id"');
