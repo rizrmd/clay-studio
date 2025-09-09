@@ -25,7 +25,8 @@ interface InteractionSpec {
     | "table"
     | "show_chart"
     | "show_table"
-    | "markdown";
+    | "markdown"
+    | "excel_export";
   title: string;
   data: any;
   headers?: string[];
@@ -96,6 +97,18 @@ export function InteractionRenderer({
             chart_type: actualOutput.chart_type,
             data: actualOutput.data,
             interaction_id: `chart-${Date.now()}`,
+            requires_response: false,
+            created_at: new Date().toISOString(),
+          } as InteractionSpec;
+        }
+
+        // excel_export format: {status: "success", download_url: "...", filename: "...", ...}
+        if (actualOutput.status === "success" && actualOutput.download_url) {
+          return {
+            interaction_type: "excel_export",
+            title: "Excel Export",
+            data: actualOutput,
+            interaction_id: `excel-${Date.now()}`,
             requires_response: false,
             created_at: new Date().toISOString(),
           } as InteractionSpec;
@@ -326,6 +339,43 @@ export function InteractionRenderer({
         </div>
       );
 
+    case "excel_export":
+      // Render Excel export result with download button
+      return (
+        <div className="border rounded-lg p-4 bg-green-50/50 border-green-200">
+          <h3 className="font-medium text-sm mb-3 text-green-800 flex items-center gap-2">
+            📊 Excel Export Complete
+          </h3>
+          <div className="space-y-2">
+            <div className="text-sm text-gray-700">
+              <strong>File:</strong> {interactionSpec.data.filename}
+            </div>
+            {interactionSpec.data.file_size && (
+              <div className="text-sm text-gray-700">
+                <strong>Size:</strong> {(interactionSpec.data.file_size / 1024).toFixed(1)} KB
+              </div>
+            )}
+            {interactionSpec.data.sheets_count && (
+              <div className="text-sm text-gray-700">
+                <strong>Sheets:</strong> {interactionSpec.data.sheets_count}
+              </div>
+            )}
+            <div className="mt-3">
+              <a
+                href={interactionSpec.data.download_url}
+                download={interactionSpec.data.filename}
+                className="inline-flex items-center gap-2 px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-md transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                Download Excel File
+              </a>
+            </div>
+          </div>
+        </div>
+      );
+
     default:
       return null;
   }
@@ -373,6 +423,11 @@ export function hasInteraction(toolOutput: any): boolean {
       if (actualOutput.data && 
           actualOutput.chart_type &&
           (actualOutput.data.categories || actualOutput.data.series)) {
+        return true;
+      }
+
+      // excel_export format: {status: "success", download_url: "...", filename: "...", ...}
+      if (actualOutput.status === "success" && actualOutput.download_url) {
         return true;
       }
     }

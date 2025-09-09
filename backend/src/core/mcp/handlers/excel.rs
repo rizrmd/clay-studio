@@ -377,7 +377,7 @@ impl McpHandlers {
                         })?;
                 }
 
-                // Column widths
+                // Column widths - apply auto-fit by default unless specific widths are provided
                 if let Some(widths) = opts.get("column_widths").and_then(|v| v.as_object()) {
                     for (col_str, width_val) in widths {
                         if let Ok(col_idx) = col_str.parse::<u16>() {
@@ -391,6 +391,60 @@ impl McpHandlers {
                                     })?;
                             }
                         }
+                    }
+                } else {
+                    // Auto-fit all columns to content if no specific widths provided
+                    let max_cols = if let Some(headers_array) = headers {
+                        headers_array.len()
+                    } else if !data.is_empty() {
+                        data[0]
+                            .as_array()
+                            .map(|r| r.len())
+                            .unwrap_or(0)
+                    } else {
+                        0
+                    };
+
+                    // Set auto-fit for each column by calculating optimal width
+                    for col_idx in 0..max_cols {
+                        let mut max_width: f64 = 8.0; // Minimum width
+                        
+                        // Check header width if exists
+                        if let Some(headers_array) = headers {
+                            if let Some(header) = headers_array.get(col_idx) {
+                                if let Some(header_str) = header.as_str() {
+                                    max_width = max_width.max(header_str.len() as f64 * 1.2);
+                                }
+                            }
+                        }
+                        
+                        // Check data width - sample up to 100 rows for performance
+                        let sample_size = data.len().min(100);
+                        for row in data.iter().take(sample_size) {
+                            if let Some(row_array) = row.as_array() {
+                                if let Some(cell_value) = row_array.get(col_idx) {
+                                    let cell_str = match cell_value {
+                                        Value::String(s) => s.clone(),
+                                        Value::Number(n) => n.to_string(),
+                                        Value::Bool(b) => b.to_string(),
+                                        Value::Null => "".to_string(),
+                                        _ => cell_value.to_string(),
+                                    };
+                                    max_width = max_width.max(cell_str.len() as f64 * 1.2);
+                                }
+                            }
+                        }
+                        
+                        // Cap maximum width to prevent extremely wide columns
+                        max_width = max_width.min(50.0);
+                        
+                        worksheet
+                            .set_column_width(col_idx as u16, max_width)
+                            .map_err(|e| JsonRpcError {
+                                code: INTERNAL_ERROR,
+                                message: format!("Failed to set auto-fit column width: {}", e),
+                                data: None,
+                            })?;
                     }
                 }
             }
