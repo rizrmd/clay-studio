@@ -42,11 +42,11 @@ export function DatasourcesPage() {
   };
 
   const handleCreateNew = () => {
-    datasourcesActions.openModal(); // This will set editingDatasource to null for create mode
+    datasourcesActions.showForm(); // Show form in create mode
   };
 
   const handleEdit = (datasource: any) => {
-    datasourcesActions.openModal(datasource);
+    datasourcesActions.showForm(datasource);
   };
 
   const handleDelete = async (datasourceId: string) => {
@@ -107,7 +107,7 @@ export function DatasourcesPage() {
             <div className="mb-6">
               <Button 
                 variant="ghost" 
-                onClick={() => datasourcesActions.closeModal()}
+                onClick={() => datasourcesActions.hideForm()}
                 className="mb-4"
               >
                 <ArrowLeft className="h-4 w-4 mr-2" />
@@ -126,10 +126,10 @@ export function DatasourcesPage() {
                 projectId={projectId}
                 datasource={snapshot.editingDatasource}
                 onSuccess={() => {
-                  datasourcesActions.closeModal();
+                  datasourcesActions.hideForm();
                   loadDatasources(); // Reload the list
                 }}
-                onCancel={() => datasourcesActions.closeModal()}
+                onCancel={() => datasourcesActions.hideForm()}
               />
             </div>
           </div>
