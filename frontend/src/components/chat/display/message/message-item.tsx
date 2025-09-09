@@ -47,6 +47,8 @@ export function MessageItem({
   );
 
   // Convert tool usages to tool invocations
+  const completedToolUsageIds = new Set(message.tool_usages?.map(usage => usage.id) || []);
+  
   const toolInvocations: ToolInvocation[] = [
     // Completed tool usages
     ...(message.tool_usages?.map((usage) => {
@@ -64,25 +66,28 @@ export function MessageItem({
       };
     }) || []),
     // Active/in-progress tools (show on the last assistant message during streaming)
+    // Only include active tools that aren't already in completed tool usages
     ...(message.role === "assistant" && isLastMessage && activeTools.length > 0
-      ? activeTools.map((tool: any) =>
-          tool.status === "completed"
-            ? {
-                state: "result" as const,
-                id: tool.toolUsageId,
-                toolName: tool.tool,
-                result: {
-                  __completed: true,
-                  executionTime: tool.executionTime,
-                },
-              }
-            : {
-                state: "call" as const,
-                id: tool.toolUsageId,
-                toolName: tool.tool,
-                args: tool.args || {},
-              }
-        )
+      ? activeTools
+          .filter((tool: any) => !completedToolUsageIds.has(tool.toolUsageId))
+          .map((tool: any) =>
+            tool.status === "completed"
+              ? {
+                  state: "result" as const,
+                  id: tool.toolUsageId,
+                  toolName: tool.tool,
+                  result: {
+                    __completed: true,
+                    executionTime: tool.executionTime,
+                  },
+                }
+              : {
+                  state: "call" as const,
+                  id: tool.toolUsageId,
+                  toolName: tool.tool,
+                  args: tool.args || {},
+                }
+          )
       : []),
   ];
 
