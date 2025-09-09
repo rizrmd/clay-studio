@@ -177,7 +177,16 @@ export function MessageItem({
               let dataToCheck = interactionData;
               if (invocation.toolName === 'mcp__interaction__export_excel' && 
                   (invocation as any).originalOutput) {
-                dataToCheck = (invocation as any).originalOutput;
+                try {
+                  // Parse the original output if it's a JSON string
+                  const originalOutput = (invocation as any).originalOutput;
+                  dataToCheck = typeof originalOutput === 'string' 
+                    ? JSON.parse(originalOutput) 
+                    : originalOutput;
+                } catch (e) {
+                  console.error('Failed to parse originalOutput for export_excel:', e);
+                  dataToCheck = (invocation as any).originalOutput;
+                }
               }
               
               if (hasInteraction(dataToCheck)) {

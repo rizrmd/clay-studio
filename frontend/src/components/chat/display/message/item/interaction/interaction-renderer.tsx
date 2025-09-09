@@ -104,6 +104,7 @@ export function InteractionRenderer({
 
         // excel_export format: {status: "success", download_url: "...", filename: "...", ...}
         if (actualOutput.status === "success" && actualOutput.download_url) {
+          console.log('Found Excel export data:', actualOutput);
           return {
             interaction_type: "excel_export",
             title: "Excel Export",
@@ -445,6 +446,7 @@ export function hasInteraction(toolOutput: any): boolean {
 
       // excel_export format: {status: "success", download_url: "...", filename: "...", ...}
       if (actualOutput.status === "success" && actualOutput.download_url) {
+        console.log('hasInteraction: Found Excel export interaction:', actualOutput);
         return true;
       }
     }
