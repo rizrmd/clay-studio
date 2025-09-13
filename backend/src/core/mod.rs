@@ -1,4 +1,5 @@
 pub mod claude;
+pub mod datasources;
 pub mod mcp;
 pub mod projects;
 pub mod sessions;

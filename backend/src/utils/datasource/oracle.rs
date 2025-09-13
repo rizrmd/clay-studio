@@ -828,4 +828,37 @@ impl DataSourceConnector for OracleConnector {
         }).await.map_err(|e| Box::new(e) as Box<dyn Error>)?
             .map_err(|e| e as Box<dyn Error>)
     }
+
+    async fn get_table_data_with_pagination(
+        &self, 
+        table_name: &str, 
+        page: i32, 
+        limit: i32, 
+        sort_column: Option<&str>, 
+        sort_direction: Option<&str>
+    ) -> Result<Value, Box<dyn Error>> {
+        // TODO: Implement proper pagination with total count for Oracle
+        let offset = (page - 1) * limit;
+        let mut query = format!("SELECT * FROM {}", table_name);
+        
+        if let Some(sort_col) = sort_column {
+            let direction = sort_direction.unwrap_or("ASC");
+            query.push_str(&format!(" ORDER BY {} {}", sort_col, direction));
+        }
+        
+        // Oracle uses ROWNUM instead of LIMIT/OFFSET
+        query = format!(
+            "SELECT * FROM (SELECT ROWNUM rn, t.* FROM ({}) t WHERE ROWNUM <= {}) WHERE rn > {}",
+            query, limit + offset, offset
+        );
+        
+        let mut result = self.execute_query(&query, limit).await?;
+        
+        // Add pagination metadata (temporary - needs proper total count)
+        result["total_rows"] = json!(result["row_count"]);
+        result["page"] = json!(page);
+        result["page_size"] = json!(limit);
+        
+        Ok(result)
+    }
 }

@@ -7,6 +7,17 @@ pub trait DataSourceConnector: Send + Sync {
     // Core connection methods
     async fn test_connection(&mut self) -> Result<bool, Box<dyn Error>>;
     async fn execute_query(&self, query: &str, limit: i32) -> Result<Value, Box<dyn Error>>;
+    
+    // Table data methods
+    #[allow(dead_code)]
+    async fn get_table_data_with_pagination(
+        &self, 
+        table_name: &str, 
+        page: i32, 
+        limit: i32, 
+        sort_column: Option<&str>, 
+        sort_direction: Option<&str>
+    ) -> Result<Value, Box<dyn Error>>;
 
     // Schema inspection methods
     async fn fetch_schema(&self) -> Result<Value, Box<dyn Error>>;

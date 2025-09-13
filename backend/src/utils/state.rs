@@ -89,6 +89,14 @@ impl AppState {
         let db_arc = Arc::new(db);
         let session_store = PostgresSessionStore::new(db_arc.clone());
 
+        // Warm up datasource connection pools to avoid slow first requests
+        use crate::utils::datasource::get_pool_manager;
+        let pool_manager = get_pool_manager().await;
+        match pool_manager.warm_up_pools(&db_pool).await {
+            Ok(count) => info!("🔥 Successfully warmed up {} connection pools", count),
+            Err(e) => warn!("⚠️ Pool warm-up failed: {}", e),
+        }
+
         Ok(AppState {
             db: db_arc,
             db_pool,

@@ -8,7 +8,7 @@ use sqlx::{
 };
 use std::error::Error;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 
@@ -166,17 +166,25 @@ impl PostgreSQLConnector {
     }
 
     async fn get_pool(&self) -> Result<PgPool, Box<dyn Error>> {
+        let pool_start = std::time::Instant::now();
         let mut pool_guard = self.pool.lock().await;
 
         if let Some(ref pool) = *pool_guard {
             // Test if the pool is still valid
+            let validation_start = std::time::Instant::now();
             if sqlx::query("SELECT 1").fetch_one(pool).await.is_ok() {
+                let validation_time = validation_start.elapsed().as_millis();
+                let total_time = pool_start.elapsed().as_millis();
+                debug!("Pool validation took {}ms, total pool access took {}ms", validation_time, total_time);
                 return Ok(pool.clone());
             }
             // Pool is invalid, will create a new one below
+            warn!("Pool validation failed, creating new pool");
         }
 
         // Create new pool with connection timeout
+        info!("Creating new PostgreSQL connection pool");
+        let pool_creation_start = std::time::Instant::now();
         let pool = PgPoolOptions::new()
             .max_connections(5)
             .min_connections(1)
@@ -184,7 +192,27 @@ impl PostgreSQLConnector {
             .idle_timeout(Some(Duration::from_secs(30)))
             .connect(&self.connection_string)
             .await?;
+        let creation_time = pool_creation_start.elapsed().as_millis();
+        let total_time = pool_start.elapsed().as_millis();
+        info!("Pool creation took {}ms, total pool access took {}ms", creation_time, total_time);
+        
         *pool_guard = Some(pool.clone());
+        Ok(pool)
+    }
+
+    /// Create a new connection pool (public method for pool manager)
+    pub async fn create_pool(&self) -> Result<PgPool, Box<dyn Error>> {
+        info!("Creating new PostgreSQL connection pool");
+        let pool_creation_start = std::time::Instant::now();
+        let pool = PgPoolOptions::new()
+            .max_connections(5)
+            .min_connections(1)
+            .acquire_timeout(Duration::from_secs(3))
+            .idle_timeout(Some(Duration::from_secs(30)))
+            .connect(&self.connection_string)
+            .await?;
+        let creation_time = pool_creation_start.elapsed().as_millis();
+        info!("Pool creation took {}ms", creation_time);
         Ok(pool)
     }
 }
@@ -442,7 +470,121 @@ impl DataSourceConnector for PostgreSQLConnector {
             "columns": columns,
             "rows": result_rows,
             "row_count": result_rows.len(),
-            "execution_time_ms": execution_time_ms
+            "execution_time_ms": execution_time_ms,
+            "query": query
+        }))
+    }
+
+    async fn get_table_data_with_pagination(
+        &self, 
+        table_name: &str, 
+        page: i32, 
+        limit: i32, 
+        sort_column: Option<&str>, 
+        sort_direction: Option<&str>
+    ) -> Result<Value, Box<dyn Error>> {
+        let pool_start = Instant::now();
+        let pool = self.get_pool().await?;
+        let pool_time = pool_start.elapsed().as_millis() as u64;
+        
+        let start = Instant::now();
+        
+        // First, get the total count
+        let count_start = Instant::now();
+        let count_query = format!("SELECT COUNT(*) as total FROM {}", table_name);
+        let count_row = sqlx::query(&count_query)
+            .fetch_one(&pool)
+            .await?;
+        let total_rows: i64 = count_row.try_get("total")?;
+        let count_time = count_start.elapsed().as_millis() as u64;
+        
+        // Build the data query
+        let offset = (page - 1) * limit;
+        let mut query = format!("SELECT * FROM {}", table_name);
+        
+        // Add sorting if specified
+        if let Some(sort_col) = sort_column {
+            let direction = sort_direction.unwrap_or("ASC");
+            query.push_str(&format!(" ORDER BY {} {}", sort_col, direction));
+        }
+        
+        // Add pagination
+        query.push_str(&format!(" LIMIT {} OFFSET {}", limit, offset));
+        
+        // Execute the data query
+        let data_start = Instant::now();
+        let rows = sqlx::query(&query)
+            .fetch_all(&pool)
+            .await?;
+        let data_time = data_start.elapsed().as_millis() as u64;
+
+        let execution_time_ms = start.elapsed().as_millis() as u64;
+
+        if rows.is_empty() {
+            return Ok(json!({
+                "columns": [],
+                "rows": [],
+                "row_count": rows.len(),
+                "total_rows": total_rows,
+                "execution_time_ms": execution_time_ms,
+                "timing_breakdown": {
+                    "pool_access_ms": pool_time,
+                    "count_query_ms": count_time,
+                    "data_query_ms": data_time,
+                    "total_db_ms": execution_time_ms
+                },
+                "page": page,
+                "page_size": limit
+            }));
+        }
+
+        // Get column names from the first row
+        let first_row = &rows[0];
+        let columns: Vec<String> = first_row
+            .columns()
+            .iter()
+            .map(|c| c.name().to_string())
+            .collect();
+
+        // Convert rows to JSON
+        let mut result_rows = Vec::new();
+        for row in rows.iter() {
+            let mut row_data = Vec::new();
+            for (i, _col) in columns.iter().enumerate() {
+                // Try to get value as different types, including PostgreSQL NUMERIC
+                if let Ok(val) = row.try_get::<String, _>(i) {
+                    row_data.push(val);
+                } else if let Ok(val) = row.try_get::<BigDecimal, _>(i) {
+                    row_data.push(val.to_string());
+                } else if let Ok(val) = row.try_get::<i32, _>(i) {
+                    row_data.push(val.to_string());
+                } else if let Ok(val) = row.try_get::<i64, _>(i) {
+                    row_data.push(val.to_string());
+                } else if let Ok(val) = row.try_get::<f64, _>(i) {
+                    row_data.push(val.to_string());
+                } else if let Ok(val) = row.try_get::<bool, _>(i) {
+                    row_data.push(val.to_string());
+                } else {
+                    row_data.push("NULL".to_string());
+                }
+            }
+            result_rows.push(row_data);
+        }
+
+        Ok(json!({
+            "columns": columns,
+            "rows": result_rows,
+            "row_count": result_rows.len(),
+            "total_rows": total_rows,
+            "execution_time_ms": execution_time_ms,
+            "timing_breakdown": {
+                "pool_access_ms": pool_time,
+                "count_query_ms": count_time,
+                "data_query_ms": data_time,
+                "total_db_ms": execution_time_ms
+            },
+            "page": page,
+            "page_size": limit
         }))
     }
 

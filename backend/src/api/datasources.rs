@@ -7,7 +7,8 @@ use uuid::Uuid;
 
 use crate::utils::middleware::{get_current_user_id, is_current_user_root};
 use crate::utils::{get_app_state, AppError};
-use crate::utils::datasource::base::DataSourceConnector;
+use crate::utils::datasource::get_pool_manager;
+use crate::core::datasources::cache::{get_datasource_cache, CachedDatasource};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CreateDatasourceRequest {
@@ -326,6 +327,10 @@ pub async fn update_datasource(
         (None, None) => unreachable!(), // We already checked this case above
     };
 
+    // Invalidate cache for this datasource
+    let cache = get_datasource_cache().await;
+    cache.invalidate(&datasource_id, None).await;
+
     // Return updated datasource
     let config_json: Value = updated_row.get("config");
     let schema_info_json: Option<Value> = updated_row.get("schema_info");
@@ -409,6 +414,10 @@ pub async fn delete_datasource(
     .await
     .map_err(|e| AppError::InternalServerError(format!("Failed to delete datasource: {}", e)))?;
 
+    // Invalidate cache for this datasource
+    let cache = get_datasource_cache().await;
+    cache.invalidate(&datasource_id, None).await;
+
     res.status_code(StatusCode::NO_CONTENT);
     Ok(())
 }
@@ -460,40 +469,11 @@ pub async fn test_connection(
     let datasource_id = req.param::<String>("datasource_id")
         .ok_or_else(|| AppError::BadRequest("Missing datasource_id".to_string()))?;
 
-    // Get datasource and verify ownership
-    let datasource = if is_current_user_root(depot) {
-        sqlx::query(
-            r#"
-            SELECT ds.*, ds.connection_config as config 
-            FROM data_sources ds
-            JOIN projects p ON ds.project_id = p.id
-            WHERE ds.id = $1 AND ds.deleted_at IS NULL AND p.deleted_at IS NULL
-            "#
-        )
-        .bind(&datasource_id)
-        .fetch_optional(&state.db_pool)
-        .await
-        .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?
-    } else {
-        sqlx::query(
-            r#"
-            SELECT ds.*, ds.connection_config as config 
-            FROM data_sources ds
-            JOIN projects p ON ds.project_id = p.id
-            WHERE ds.id = $1 AND p.user_id = $2 AND ds.deleted_at IS NULL AND p.deleted_at IS NULL
-            "#
-        )
-        .bind(&datasource_id)
-        .bind(&user_id)
-        .fetch_optional(&state.db_pool)
-        .await
-        .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?
-    };
-
-    let datasource_row = datasource.ok_or_else(|| AppError::NotFound("Datasource not found".to_string()))?;
-
-    let source_type: String = datasource_row.get("source_type");
-    let config: Value = datasource_row.get("config");
+    // Get datasource and verify ownership using cache
+    let cached_datasource = get_cached_datasource(&datasource_id, &user_id, is_current_user_root(depot), &state.db_pool).await?;
+    
+    let source_type = cached_datasource.datasource_type.clone();
+    let config = cached_datasource.connection_config.clone();
 
     // Test connection based on source type
     let test_result = match source_type.as_str() {
@@ -523,34 +503,16 @@ pub async fn get_schema(
     let datasource_id = req.param::<String>("datasource_id")
         .ok_or_else(|| AppError::BadRequest("Missing datasource_id".to_string()))?;
 
-    // Get datasource and verify ownership
-    let datasource = if is_current_user_root(depot) {
-        sqlx::query(
-            r#"
-            SELECT ds.*, ds.connection_config as config 
-            FROM data_sources ds
-            JOIN projects p ON ds.project_id = p.id
-            WHERE ds.id = $1 AND ds.deleted_at IS NULL AND p.deleted_at IS NULL
-            "#
-        )
-        .bind(&datasource_id)
-    } else {
-        sqlx::query(
-            r#"
-            SELECT ds.*, ds.connection_config as config 
-            FROM data_sources ds
-            JOIN projects p ON ds.project_id = p.id
-            WHERE ds.id = $1 AND p.user_id = $2 AND ds.deleted_at IS NULL AND p.deleted_at IS NULL
-            "#
-        )
-        .bind(&datasource_id)
-        .bind(&user_id)
-    }
-    .fetch_optional(&state.db_pool)
-    .await
-    .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
+    // Get datasource and verify ownership using cache
+    let _cached_datasource = get_cached_datasource(&datasource_id, &user_id, is_current_user_root(depot), &state.db_pool).await?;
 
-    let datasource_row = datasource.ok_or_else(|| AppError::NotFound("Datasource not found".to_string()))?;
+    // For schema info, we still need to query the database since schema_info is not cached
+    let datasource_row = sqlx::query("SELECT schema_info FROM data_sources WHERE id = $1")
+        .bind(&datasource_id)
+        .fetch_optional(&state.db_pool)
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?
+        .ok_or_else(|| AppError::NotFound("Datasource not found".to_string()))?;
 
     let schema_info_str: Option<String> = datasource_row.get("schema_info");
     let schema_info: Option<Value> = schema_info_str
@@ -582,46 +544,17 @@ pub async fn execute_query(
     let request_data: QueryRequest = req.parse_json().await
         .map_err(|e| AppError::BadRequest(format!("Invalid JSON: {}", e)))?;
 
-    // Get datasource and verify ownership
-    let datasource = if is_current_user_root(depot) {
-        sqlx::query(
-            r#"
-            SELECT ds.*, ds.connection_config as config 
-            FROM data_sources ds
-            JOIN projects p ON ds.project_id = p.id
-            WHERE ds.id = $1 AND ds.deleted_at IS NULL AND p.deleted_at IS NULL
-            "#
-        )
-        .bind(&datasource_id)
-    } else {
-        sqlx::query(
-            r#"
-            SELECT ds.*, ds.connection_config as config 
-            FROM data_sources ds
-            JOIN projects p ON ds.project_id = p.id
-            WHERE ds.id = $1 AND p.user_id = $2 AND ds.deleted_at IS NULL AND p.deleted_at IS NULL
-            "#
-        )
-        .bind(&datasource_id)
-        .bind(&user_id)
-    }
-    .fetch_optional(&state.db_pool)
-    .await
-    .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
+    // Get datasource and verify ownership using cache
+    let cached_datasource = get_cached_datasource(&datasource_id, &user_id, is_current_user_root(depot), &state.db_pool).await?;
+    
+    let source_type = cached_datasource.datasource_type.clone();
+    let config = cached_datasource.connection_config.clone();
 
-    let datasource_row = datasource.ok_or_else(|| AppError::NotFound("Datasource not found".to_string()))?;
-
-    let source_type: String = datasource_row.get("source_type");
-    let config: Value = datasource_row.get("config");
-
-    // Execute query based on source type
+    // Execute query based on source type using cached connection pools
     let result = match source_type.as_str() {
         "postgresql" => {
-            let connector = crate::utils::datasource::postgres::PostgreSQLConnector::new(&config)
-                .map_err(|e| AppError::InternalServerError(format!("Failed to create connector: {}", e)))?;
-            
             let limit = request_data.limit.unwrap_or(100);
-            connector.execute_query(&request_data.query, limit).await
+            execute_custom_query(&datasource_id, &config, &request_data.query, limit).await
                 .map_err(|e| AppError::InternalServerError(format!("Query execution failed: {}", e)))?
         },
         _ => {
@@ -640,6 +573,7 @@ pub async fn get_table_data(
     res: &mut Response,
     depot: &mut Depot,
 ) -> Result<(), AppError> {
+    let request_start = std::time::Instant::now();
     let state = get_app_state(depot)?;
     let user_id = get_current_user_id(depot)?;
     let datasource_id = req.param::<String>("datasource_id")
@@ -649,62 +583,29 @@ pub async fn get_table_data(
 
     let request_data: TableDataRequest = req.parse_json().await
         .map_err(|e| AppError::BadRequest(format!("Invalid JSON: {}", e)))?;
+    
+    let parse_time = request_start.elapsed().as_millis();
+    tracing::info!("Request parsing took {}ms", parse_time);
 
-    // Get datasource and verify ownership
-    let datasource = if is_current_user_root(depot) {
-        sqlx::query(
-            r#"
-            SELECT ds.*, ds.connection_config as config 
-            FROM data_sources ds
-            JOIN projects p ON ds.project_id = p.id
-            WHERE ds.id = $1 AND ds.deleted_at IS NULL AND p.deleted_at IS NULL
-            "#
-        )
-        .bind(&datasource_id)
-    } else {
-        sqlx::query(
-            r#"
-            SELECT ds.*, ds.connection_config as config 
-            FROM data_sources ds
-            JOIN projects p ON ds.project_id = p.id
-            WHERE ds.id = $1 AND p.user_id = $2 AND ds.deleted_at IS NULL AND p.deleted_at IS NULL
-            "#
-        )
-        .bind(&datasource_id)
-        .bind(&user_id)
-    }
-    .fetch_optional(&state.db_pool)
-    .await
-    .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
+    // Get datasource and verify ownership using cache
+    let db_query_start = std::time::Instant::now();
+    let cached_datasource = get_cached_datasource(&datasource_id, &user_id, is_current_user_root(depot), &state.db_pool).await?;
+    let db_query_time = db_query_start.elapsed().as_millis();
+    tracing::info!("Datasource validation query took {}ms", db_query_time);
 
-    let datasource_row = datasource.ok_or_else(|| AppError::NotFound("Datasource not found".to_string()))?;
+    let source_type = cached_datasource.datasource_type.clone();
+    let config = cached_datasource.connection_config.clone();
 
-    let source_type: String = datasource_row.get("source_type");
-    let config: Value = datasource_row.get("config");
-
-    // Build query with pagination and sorting
+    // Get pagination parameters
     let page = request_data.page.unwrap_or(1);
     let limit = request_data.limit.unwrap_or(50);
-    let offset = (page - 1) * limit;
 
-    let mut query = format!("SELECT * FROM {}", table_name);
-    
-    // Add sorting if specified
-    if let Some(sort_column) = &request_data.sort_column {
-        let direction = request_data.sort_direction.as_deref().unwrap_or("ASC");
-        query.push_str(&format!(" ORDER BY {} {}", sort_column, direction));
-    }
-
-    // Add pagination
-    query.push_str(&format!(" LIMIT {} OFFSET {}", limit, offset));
-
-    // Execute query based on source type
+    // Execute query based on source type using cached connection pools
     let result = match source_type.as_str() {
         "postgresql" => {
-            let connector = crate::utils::datasource::postgres::PostgreSQLConnector::new(&config)
-                .map_err(|e| AppError::InternalServerError(format!("Failed to create connector: {}", e)))?;
-            
-            connector.execute_query(&query, limit).await
+            execute_table_data_query(&datasource_id, &config, &table_name, page, limit, 
+                                   request_data.sort_column.as_deref(), 
+                                   request_data.sort_direction.as_deref()).await
                 .map_err(|e| AppError::InternalServerError(format!("Query execution failed: {}", e)))?
         },
         _ => {
@@ -712,7 +613,25 @@ pub async fn get_table_data(
         }
     };
 
-    res.render(Json(result));
+    let total_time = request_start.elapsed().as_millis();
+    tracing::info!("Total request took {}ms", total_time);
+
+    // Add timing breakdown to response
+    if let Value::Object(mut result_obj) = result {
+        result_obj.insert("total_api_time_ms".to_string(), Value::Number(serde_json::Number::from(total_time as u64)));
+        result_obj.insert("validation_time_ms".to_string(), Value::Number(serde_json::Number::from(db_query_time as u64)));
+        
+        // Calculate API overhead
+        let db_execution_time = result_obj.get("execution_time_ms")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as u128;
+        let api_overhead = total_time.saturating_sub(db_execution_time);
+        result_obj.insert("api_overhead_ms".to_string(), Value::Number(serde_json::Number::from(api_overhead as u64)));
+        
+        res.render(Json(Value::Object(result_obj)));
+    } else {
+        res.render(Json(result));
+    }
     Ok(())
 }
 
@@ -728,45 +647,16 @@ pub async fn get_tables(
     let datasource_id = req.param::<String>("datasource_id")
         .ok_or_else(|| AppError::BadRequest("Missing datasource_id".to_string()))?;
 
-    // Get datasource and verify ownership
-    let datasource = if is_current_user_root(depot) {
-        sqlx::query(
-            r#"
-            SELECT ds.*, ds.connection_config as config 
-            FROM data_sources ds
-            JOIN projects p ON ds.project_id = p.id
-            WHERE ds.id = $1 AND ds.deleted_at IS NULL AND p.deleted_at IS NULL
-            "#
-        )
-        .bind(&datasource_id)
-    } else {
-        sqlx::query(
-            r#"
-            SELECT ds.*, ds.connection_config as config 
-            FROM data_sources ds
-            JOIN projects p ON ds.project_id = p.id
-            WHERE ds.id = $1 AND p.user_id = $2 AND ds.deleted_at IS NULL AND p.deleted_at IS NULL
-            "#
-        )
-        .bind(&datasource_id)
-        .bind(&user_id)
-    }
-    .fetch_optional(&state.db_pool)
-    .await
-    .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
+    // Get datasource and verify ownership using cache
+    let cached_datasource = get_cached_datasource(&datasource_id, &user_id, is_current_user_root(depot), &state.db_pool).await?;
+    
+    let source_type = cached_datasource.datasource_type.clone();
+    let config = cached_datasource.connection_config.clone();
 
-    let datasource_row = datasource.ok_or_else(|| AppError::NotFound("Datasource not found".to_string()))?;
-
-    let source_type: String = datasource_row.get("source_type");
-    let config: Value = datasource_row.get("config");
-
-    // Get tables based on source type
+    // Get tables based on source type using cached connection pools
     let result = match source_type.as_str() {
         "postgresql" => {
-            let connector = crate::utils::datasource::postgres::PostgreSQLConnector::new(&config)
-                .map_err(|e| AppError::InternalServerError(format!("Failed to create connector: {}", e)))?;
-            
-            connector.list_tables().await
+            list_tables(&datasource_id, &config).await
                 .map_err(|e| AppError::InternalServerError(format!("Failed to list tables: {}", e)))?
         },
         _ => {
@@ -881,6 +771,300 @@ fn normalize_database_type(input: &str) -> String {
         // Return as-is if no match (will be caught by validation)
         _ => normalized,
     }
+}
+
+/// Optimized table data query using cached connection pools
+async fn execute_table_data_query(
+    datasource_id: &str, 
+    config: &Value, 
+    table_name: &str, 
+    page: i32, 
+    limit: i32,
+    sort_column: Option<&str>,
+    sort_direction: Option<&str>
+) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+    use sqlx::{Row as SqlxRow, Column};
+    use serde_json::json;
+    use std::time::Instant;
+    
+    let pool_start = Instant::now();
+    let pool_manager = get_pool_manager().await;
+    let pool = pool_manager.get_pool(datasource_id, config).await?;
+    let pool_time = pool_start.elapsed().as_millis() as u64;
+    
+    let start = Instant::now();
+    
+    // First, get the total count
+    let count_start = Instant::now();
+    let count_query = format!("SELECT COUNT(*) as total FROM {}", table_name);
+    let count_row = sqlx::query(&count_query)
+        .fetch_one(pool.as_ref())
+        .await?;
+    let total_rows: i64 = count_row.try_get("total")?;
+    let count_time = count_start.elapsed().as_millis() as u64;
+    
+    // Build the data query
+    let offset = (page - 1) * limit;
+    let mut query = format!("SELECT * FROM {}", table_name);
+    
+    // Add sorting if specified
+    if let Some(sort_col) = sort_column {
+        let direction = sort_direction.unwrap_or("ASC");
+        query.push_str(&format!(" ORDER BY {} {}", sort_col, direction));
+    }
+    
+    // Add pagination
+    query.push_str(&format!(" LIMIT {} OFFSET {}", limit, offset));
+    
+    // Execute the data query
+    let data_start = Instant::now();
+    let rows = sqlx::query(&query)
+        .fetch_all(pool.as_ref())
+        .await?;
+    let data_time = data_start.elapsed().as_millis() as u64;
+
+    let execution_time_ms = start.elapsed().as_millis() as u64;
+
+    if rows.is_empty() {
+        return Ok(json!({
+            "columns": [],
+            "rows": [],
+            "row_count": rows.len(),
+            "total_rows": total_rows,
+            "execution_time_ms": execution_time_ms,
+            "timing_breakdown": {
+                "pool_access_ms": pool_time,
+                "count_query_ms": count_time,
+                "data_query_ms": data_time,
+                "total_db_ms": execution_time_ms
+            },
+            "page": page,
+            "page_size": limit
+        }));
+    }
+
+    // Get column names from the first row
+    let first_row = &rows[0];
+    let columns: Vec<String> = first_row
+        .columns()
+        .iter()
+        .map(|c| c.name().to_string())
+        .collect();
+
+    // Convert rows to JSON
+    let mut result_rows = Vec::new();
+    for row in rows.iter() {
+        let mut row_data = Vec::new();
+        for (i, _col) in columns.iter().enumerate() {
+            // Try to get value as different types, including PostgreSQL NUMERIC
+            if let Ok(val) = row.try_get::<String, _>(i) {
+                row_data.push(val);
+            } else if let Ok(val) = row.try_get::<sqlx::types::BigDecimal, _>(i) {
+                row_data.push(val.to_string());
+            } else if let Ok(val) = row.try_get::<i32, _>(i) {
+                row_data.push(val.to_string());
+            } else if let Ok(val) = row.try_get::<i64, _>(i) {
+                row_data.push(val.to_string());
+            } else if let Ok(val) = row.try_get::<f64, _>(i) {
+                row_data.push(val.to_string());
+            } else if let Ok(val) = row.try_get::<bool, _>(i) {
+                row_data.push(val.to_string());
+            } else {
+                row_data.push("NULL".to_string());
+            }
+        }
+        result_rows.push(row_data);
+    }
+
+    Ok(json!({
+        "columns": columns,
+        "rows": result_rows,
+        "row_count": result_rows.len(),
+        "total_rows": total_rows,
+        "execution_time_ms": execution_time_ms,
+        "timing_breakdown": {
+            "pool_access_ms": pool_time,
+            "count_query_ms": count_time,
+            "data_query_ms": data_time,
+            "total_db_ms": execution_time_ms
+        },
+        "page": page,
+        "page_size": limit
+    }))
+}
+
+/// Optimized custom query execution using cached connection pools
+async fn execute_custom_query(
+    datasource_id: &str, 
+    config: &Value, 
+    query: &str, 
+    limit: i32
+) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+    use sqlx::{Row as SqlxRow, Column};
+    use serde_json::json;
+    
+    let pool_manager = get_pool_manager().await;
+    let pool = pool_manager.get_pool(datasource_id, config).await?;
+    
+    // Add LIMIT if not present
+    let query_with_limit = if query.to_lowercase().contains("limit") {
+        query.to_string()
+    } else {
+        format!("{} LIMIT {}", query, limit)
+    };
+
+    let start = std::time::Instant::now();
+    let rows = sqlx::query(&query_with_limit).fetch_all(pool.as_ref()).await?;
+    let execution_time_ms = start.elapsed().as_millis() as i64;
+
+    if rows.is_empty() {
+        return Ok(json!({
+            "columns": [],
+            "rows": [],
+            "row_count": 0,
+            "execution_time_ms": execution_time_ms
+        }));
+    }
+
+    // Get column names from the first row
+    let first_row = &rows[0];
+    let columns: Vec<String> = first_row
+        .columns()
+        .iter()
+        .map(|c| c.name().to_string())
+        .collect();
+
+    // Convert rows to JSON
+    let mut result_rows = Vec::new();
+    for row in rows.iter() {
+        let mut row_data = Vec::new();
+        for (i, _col) in columns.iter().enumerate() {
+            // Try to get value as different types, including PostgreSQL NUMERIC
+            if let Ok(val) = row.try_get::<String, _>(i) {
+                row_data.push(val);
+            } else if let Ok(val) = row.try_get::<sqlx::types::BigDecimal, _>(i) {
+                row_data.push(val.to_string());
+            } else if let Ok(val) = row.try_get::<i32, _>(i) {
+                row_data.push(val.to_string());
+            } else if let Ok(val) = row.try_get::<i64, _>(i) {
+                row_data.push(val.to_string());
+            } else if let Ok(val) = row.try_get::<f64, _>(i) {
+                row_data.push(val.to_string());
+            } else if let Ok(val) = row.try_get::<bool, _>(i) {
+                row_data.push(val.to_string());
+            } else {
+                row_data.push("NULL".to_string());
+            }
+        }
+        result_rows.push(row_data);
+    }
+
+    Ok(json!({
+        "columns": columns,
+        "rows": result_rows,
+        "row_count": result_rows.len(),
+        "execution_time_ms": execution_time_ms,
+        "query": query
+    }))
+}
+
+/// Optimized list tables using cached connection pools
+async fn list_tables(
+    datasource_id: &str, 
+    config: &Value
+) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+    let pool_manager = get_pool_manager().await;
+    let pool = pool_manager.get_pool(datasource_id, config).await?;
+
+    // Get schema from config (default to 'public')
+    let schema = config
+        .get("schema")
+        .and_then(|v| v.as_str())
+        .unwrap_or("public");
+
+    let tables = sqlx::query(
+        "SELECT table_name 
+         FROM information_schema.tables 
+         WHERE table_schema = $1 
+         AND table_type = 'BASE TABLE'
+         ORDER BY table_name",
+    )
+    .bind(schema)
+    .fetch_all(pool.as_ref())
+    .await?;
+
+    let mut table_names = Vec::new();
+    for row in &tables {
+        let table_name: String = row
+            .try_get("table_name")
+            .map_err(|e| format!("Failed to get table_name: {}", e))?;
+        table_names.push(table_name);
+    }
+    Ok(table_names)
+}
+
+/// Cached datasource validation to avoid repeated database queries
+async fn get_cached_datasource(
+    datasource_id: &str,
+    user_id: &Uuid,
+    is_root: bool,
+    db_pool: &sqlx::PgPool,
+) -> Result<CachedDatasource, AppError> {
+    let cache = get_datasource_cache().await;
+    
+    // Try to get from cache first
+    if let Some(cached) = cache.get(datasource_id, &user_id.to_string()).await {
+        return Ok(cached);
+    }
+    
+    // Cache miss - fetch from database
+    let datasource_row = if is_root {
+        sqlx::query(
+            r#"
+            SELECT ds.id, ds.name, ds.source_type, ds.connection_config, ds.project_id, p.user_id
+            FROM data_sources ds
+            JOIN projects p ON ds.project_id = p.id
+            WHERE ds.id = $1 AND ds.deleted_at IS NULL AND p.deleted_at IS NULL
+            "#
+        )
+        .bind(datasource_id)
+        .fetch_optional(db_pool)
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?
+    } else {
+        sqlx::query(
+            r#"
+            SELECT ds.id, ds.name, ds.source_type, ds.connection_config, ds.project_id, p.user_id
+            FROM data_sources ds
+            JOIN projects p ON ds.project_id = p.id
+            WHERE ds.id = $1 AND p.user_id = $2 AND ds.deleted_at IS NULL AND p.deleted_at IS NULL
+            "#
+        )
+        .bind(datasource_id)
+        .bind(user_id)
+        .fetch_optional(db_pool)
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?
+    };
+    
+    let row = datasource_row
+        .ok_or_else(|| AppError::NotFound("Datasource not found".to_string()))?;
+    
+    // Create cached datasource
+    let cached_datasource = CachedDatasource {
+        id: row.try_get("id").map_err(|e| AppError::InternalServerError(format!("Failed to get id: {}", e)))?,
+        name: row.try_get("name").map_err(|e| AppError::InternalServerError(format!("Failed to get name: {}", e)))?,
+        datasource_type: row.try_get("source_type").map_err(|e| AppError::InternalServerError(format!("Failed to get source_type: {}", e)))?,
+        connection_config: row.try_get("connection_config").map_err(|e| AppError::InternalServerError(format!("Failed to get connection_config: {}", e)))?,
+        project_id: row.try_get("project_id").map_err(|e| AppError::InternalServerError(format!("Failed to get project_id: {}", e)))?,
+        user_id: row.try_get::<Uuid, _>("user_id").map_err(|e| AppError::InternalServerError(format!("Failed to get user_id: {}", e)))?,
+        cached_at: std::time::Instant::now(),
+    };
+    
+    // Store in cache
+    cache.set(cached_datasource.clone()).await;
+    
+    Ok(cached_datasource)
 }
 
 pub fn datasource_routes() -> Router {
