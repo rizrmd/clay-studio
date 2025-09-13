@@ -26,7 +26,7 @@ export function ConversationSidebarFooter({
   if (isCollapsed && !sidebarSnapshot.isMobileMenuOpen) {
     return (
       <button
-        className="h-8 w-8 p-0 cursor-pointer hover:bg-accent rounded-md flex items-center justify-center pointer-events-auto"
+        className="h-8 w-8 p-0 cursor-pointer hover:bg-accent rounded-none flex items-center justify-center pointer-events-auto"
         onClick={onLogout}
         type="button"
       >

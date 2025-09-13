@@ -8,6 +8,8 @@ interface UIState {
   isSidebarCollapsed: boolean;
   currentProject: string | null;
   currentConversation: string | null;
+  currentDatasource: string | null;
+  currentTable: string | null;
   isDraggingOver: boolean;
   shouldFocusInput: boolean;
   isWsSubscribed: boolean;
@@ -21,6 +23,8 @@ const initialUIState: UIState = {
   isSidebarCollapsed: false,
   currentProject: null,
   currentConversation: null,
+  currentDatasource: null,
+  currentTable: null,
   isDraggingOver: false,
   shouldFocusInput: false,
   isWsSubscribed: false,
@@ -40,6 +44,12 @@ export const uiActions = {
   },
   setCurrentConversation: (id: string) => {
     uiStore.currentConversation = id;
+  },
+  setCurrentDatasource: (id: string | null) => {
+    uiStore.currentDatasource = id;
+  },
+  setCurrentTable: (table: string | null) => {
+    uiStore.currentTable = table;
   },
   setMobile: (mobile: boolean) => {
     uiStore.isMobile = mobile;

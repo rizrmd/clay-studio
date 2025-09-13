@@ -59,18 +59,20 @@ export function ConversationList({
   }
 
   return (
-    <div className="p-2 min-w-[130px] absolute inset-0">
-      {conversations.map((conversation) => (
-        <ConversationItem
-          key={conversation.id}
-          href={`/p/${chat.projectId}/c/${chat.conversationId}`}
-          conversation={conversation}
-          isActive={currentConversationId === conversation.id}
-          onClick={onConversationClick}
-          onRename={onRenameConversation}
-          onDelete={onDeleteConversation}
-        />
-      ))}
+    <div className="overflow-y-auto flex relative flex-1">
+      <div className="absolute inset-0 px-2">
+        {conversations.map((conversation) => (
+          <ConversationItem
+            key={conversation.id}
+            href={`/p/${chat.projectId}/c/${chat.conversationId}`}
+            conversation={conversation}
+            isActive={currentConversationId === conversation.id}
+            onClick={onConversationClick}
+            onRename={onRenameConversation}
+            onDelete={onDeleteConversation}
+          />
+        ))}
+      </div>
     </div>
   );
 }

@@ -3,8 +3,8 @@ import { lazy, Suspense, useEffect } from "react";
 const Chat = lazy(() =>
   import("@/components/chat").then((m) => ({ default: m.Chat }))
 );
-const ConversationSidebar = lazy(() =>
-  import("@/components/chat").then((m) => ({ default: m.ConversationSidebar }))
+const ProjectSidebar = lazy(() =>
+  import("@/components/chat").then((m) => ({ default: m.ProjectSidebar }))
 );
 const NewChat = lazy(() =>
   import("@/components/chat/main/new-chat").then((m) => ({
@@ -83,9 +83,11 @@ export function MainApp() {
   }, [projectId, conversationId, navigate, isDatasourcesRoute, isDataBrowserRoute]);
 
   useEffect(() => {
-    if (projectId && projectId !== chat.projectId) {
-      chat.setProjectId(projectId);
-      wsService.listConversations(projectId);
+    if (projectId) {
+      if (projectId !== chat.projectId) {
+        chat.setProjectId(projectId);
+        // Note: Conversation loading is now handled by ProjectSidebar component
+      }
     }
   }, [projectId]);
 
@@ -164,7 +166,7 @@ export function MainApp() {
   return (
     <div className="flex-1 flex relative h-full w-full">
       <Suspense fallback={<div className="w-64 bg-gray-50 animate-pulse" />}>
-        <ConversationSidebar
+        <ProjectSidebar
           isCollapsed={
             uiSnapshot.isMobile ? true : uiSnapshot.isSidebarCollapsed
           }
