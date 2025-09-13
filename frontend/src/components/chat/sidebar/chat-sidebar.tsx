@@ -76,8 +76,9 @@ export function ConversationSidebar({
   const handleDatasourceClick = (datasourceId: string) => {
     sidebarActions.selectDatasource(datasourceId);
     sidebarActions.setMobileMenuOpen(false);
-    // TODO: Navigate to data browser or open data browser modal
-    console.log('Open data browser for datasource:', datasourceId);
+    if (projectId) {
+      navigate(`/p/${projectId}/datasources/${datasourceId}/browse`);
+    }
   };
 
   const handleAddDatasource = () => {

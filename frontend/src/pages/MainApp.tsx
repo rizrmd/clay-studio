@@ -16,6 +16,11 @@ const DatasourcesMain = lazy(() =>
     default: m.DatasourcesMain,
   }))
 );
+const DataBrowser = lazy(() =>
+  import("@/components/datasources/browser/data-browser").then((m) => ({
+    default: m.DataBrowser,
+  }))
+);
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useSnapshot } from "valtio";
 import { uiStore, uiActions } from "@/lib/store/chat/ui-store";
@@ -28,9 +33,10 @@ const useLoggerDebug = () => ({ isDebugMode: false });
 
 export function MainApp() {
   const uiSnapshot = useSnapshot(uiStore);
-  const { projectId, conversationId } = useParams<{
+  const { projectId, conversationId, datasourceId } = useParams<{
     projectId: string;
     conversationId?: string;
+    datasourceId?: string;
   }>();
   const navigate = useNavigate();
   const location = useLocation();
@@ -39,7 +45,9 @@ export function MainApp() {
   // Check if we're on the new conversation route
   const isNewRoute = location.pathname.endsWith("/new");
   // Check if we're on the datasources route
-  const isDatasourcesRoute = location.pathname.includes("/datasources");
+  const isDatasourcesRoute = location.pathname.includes("/datasources") && !location.pathname.includes("/browse");
+  // Check if we're on the data browser route
+  const isDataBrowserRoute = location.pathname.includes("/datasources/") && location.pathname.endsWith("/browse");
 
   // Enable debug logging hooks
   useLoggerDebug();
@@ -57,9 +65,9 @@ export function MainApp() {
   }, [projectId, conversationId, location.state]);
 
   // Handle redirection when visiting /p/:projectId without conversation ID
-  // Don't redirect if we're on the /new route or datasources route
+  // Don't redirect if we're on the /new route or datasources route or data browser route
   useEffect(() => {
-    if (projectId && !conversationId && !isNewRoute && !isDatasourcesRoute) {
+    if (projectId && !conversationId && !isNewRoute && !isDatasourcesRoute && !isDataBrowserRoute) {
       // Try to get the last conversation from localStorage
       const lastConversationKey = `last_conversation_${projectId}`;
       const lastConversationId = localStorage.getItem(lastConversationKey);
@@ -72,7 +80,7 @@ export function MainApp() {
         createNewConversationAndRedirect();
       }
     }
-  }, [projectId, conversationId, navigate, isDatasourcesRoute]);
+  }, [projectId, conversationId, navigate, isDatasourcesRoute, isDataBrowserRoute]);
 
   useEffect(() => {
     if (projectId && projectId !== chat.projectId) {
@@ -167,7 +175,16 @@ export function MainApp() {
         />
       </Suspense>
       <div className="flex flex-1 flex-col min-w-0">
-        {isDatasourcesRoute ? (
+        {isDataBrowserRoute && datasourceId ? (
+          <Suspense
+            fallback={<div className="flex-1 animate-pulse bg-gray-50" />}
+          >
+            <DataBrowser
+              datasourceId={datasourceId}
+              onClose={() => navigate(`/p/${projectId}/datasources`)}
+            />
+          </Suspense>
+        ) : isDatasourcesRoute ? (
           <Suspense
             fallback={<div className="flex-1 animate-pulse bg-gray-50" />}
           >

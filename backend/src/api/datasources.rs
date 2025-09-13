@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 use crate::utils::middleware::{get_current_user_id, is_current_user_root};
 use crate::utils::{get_app_state, AppError};
+use crate::utils::datasource::base::DataSourceConnector;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CreateDatasourceRequest {
@@ -40,6 +41,21 @@ pub struct TestConnectionResponse {
     pub success: bool,
     pub message: String,
     pub error: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct QueryRequest {
+    pub query: String,
+    pub limit: Option<i32>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TableDataRequest {
+    pub page: Option<i32>,
+    pub limit: Option<i32>,
+    pub sort_column: Option<String>,
+    pub sort_direction: Option<String>, // "asc" or "desc"
+    pub filters: Option<Value>,
 }
 
 /// List all datasources for a project
@@ -551,6 +567,217 @@ pub async fn get_schema(
     Ok(())
 }
 
+/// Execute a custom query on a datasource
+#[handler]
+pub async fn execute_query(
+    req: &mut Request,
+    res: &mut Response,
+    depot: &mut Depot,
+) -> Result<(), AppError> {
+    let state = get_app_state(depot)?;
+    let user_id = get_current_user_id(depot)?;
+    let datasource_id = req.param::<String>("datasource_id")
+        .ok_or_else(|| AppError::BadRequest("Missing datasource_id".to_string()))?;
+
+    let request_data: QueryRequest = req.parse_json().await
+        .map_err(|e| AppError::BadRequest(format!("Invalid JSON: {}", e)))?;
+
+    // Get datasource and verify ownership
+    let datasource = if is_current_user_root(depot) {
+        sqlx::query(
+            r#"
+            SELECT ds.*, ds.connection_config as config 
+            FROM data_sources ds
+            JOIN projects p ON ds.project_id = p.id
+            WHERE ds.id = $1 AND ds.deleted_at IS NULL AND p.deleted_at IS NULL
+            "#
+        )
+        .bind(&datasource_id)
+    } else {
+        sqlx::query(
+            r#"
+            SELECT ds.*, ds.connection_config as config 
+            FROM data_sources ds
+            JOIN projects p ON ds.project_id = p.id
+            WHERE ds.id = $1 AND p.user_id = $2 AND ds.deleted_at IS NULL AND p.deleted_at IS NULL
+            "#
+        )
+        .bind(&datasource_id)
+        .bind(&user_id)
+    }
+    .fetch_optional(&state.db_pool)
+    .await
+    .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
+
+    let datasource_row = datasource.ok_or_else(|| AppError::NotFound("Datasource not found".to_string()))?;
+
+    let source_type: String = datasource_row.get("source_type");
+    let config: Value = datasource_row.get("config");
+
+    // Execute query based on source type
+    let result = match source_type.as_str() {
+        "postgresql" => {
+            let connector = crate::utils::datasource::postgres::PostgreSQLConnector::new(&config)
+                .map_err(|e| AppError::InternalServerError(format!("Failed to create connector: {}", e)))?;
+            
+            let limit = request_data.limit.unwrap_or(100);
+            connector.execute_query(&request_data.query, limit).await
+                .map_err(|e| AppError::InternalServerError(format!("Query execution failed: {}", e)))?
+        },
+        _ => {
+            return Err(AppError::BadRequest(format!("Unsupported datasource type: {}", source_type)));
+        }
+    };
+
+    res.render(Json(result));
+    Ok(())
+}
+
+/// Get table data with pagination and sorting
+#[handler]
+pub async fn get_table_data(
+    req: &mut Request,
+    res: &mut Response,
+    depot: &mut Depot,
+) -> Result<(), AppError> {
+    let state = get_app_state(depot)?;
+    let user_id = get_current_user_id(depot)?;
+    let datasource_id = req.param::<String>("datasource_id")
+        .ok_or_else(|| AppError::BadRequest("Missing datasource_id".to_string()))?;
+    let table_name = req.param::<String>("table_name")
+        .ok_or_else(|| AppError::BadRequest("Missing table_name".to_string()))?;
+
+    let request_data: TableDataRequest = req.parse_json().await
+        .map_err(|e| AppError::BadRequest(format!("Invalid JSON: {}", e)))?;
+
+    // Get datasource and verify ownership
+    let datasource = if is_current_user_root(depot) {
+        sqlx::query(
+            r#"
+            SELECT ds.*, ds.connection_config as config 
+            FROM data_sources ds
+            JOIN projects p ON ds.project_id = p.id
+            WHERE ds.id = $1 AND ds.deleted_at IS NULL AND p.deleted_at IS NULL
+            "#
+        )
+        .bind(&datasource_id)
+    } else {
+        sqlx::query(
+            r#"
+            SELECT ds.*, ds.connection_config as config 
+            FROM data_sources ds
+            JOIN projects p ON ds.project_id = p.id
+            WHERE ds.id = $1 AND p.user_id = $2 AND ds.deleted_at IS NULL AND p.deleted_at IS NULL
+            "#
+        )
+        .bind(&datasource_id)
+        .bind(&user_id)
+    }
+    .fetch_optional(&state.db_pool)
+    .await
+    .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
+
+    let datasource_row = datasource.ok_or_else(|| AppError::NotFound("Datasource not found".to_string()))?;
+
+    let source_type: String = datasource_row.get("source_type");
+    let config: Value = datasource_row.get("config");
+
+    // Build query with pagination and sorting
+    let page = request_data.page.unwrap_or(1);
+    let limit = request_data.limit.unwrap_or(50);
+    let offset = (page - 1) * limit;
+
+    let mut query = format!("SELECT * FROM {}", table_name);
+    
+    // Add sorting if specified
+    if let Some(sort_column) = &request_data.sort_column {
+        let direction = request_data.sort_direction.as_deref().unwrap_or("ASC");
+        query.push_str(&format!(" ORDER BY {} {}", sort_column, direction));
+    }
+
+    // Add pagination
+    query.push_str(&format!(" LIMIT {} OFFSET {}", limit, offset));
+
+    // Execute query based on source type
+    let result = match source_type.as_str() {
+        "postgresql" => {
+            let connector = crate::utils::datasource::postgres::PostgreSQLConnector::new(&config)
+                .map_err(|e| AppError::InternalServerError(format!("Failed to create connector: {}", e)))?;
+            
+            connector.execute_query(&query, limit).await
+                .map_err(|e| AppError::InternalServerError(format!("Query execution failed: {}", e)))?
+        },
+        _ => {
+            return Err(AppError::BadRequest(format!("Unsupported datasource type: {}", source_type)));
+        }
+    };
+
+    res.render(Json(result));
+    Ok(())
+}
+
+/// Get list of tables for a datasource
+#[handler]
+pub async fn get_tables(
+    req: &mut Request,
+    res: &mut Response,
+    depot: &mut Depot,
+) -> Result<(), AppError> {
+    let state = get_app_state(depot)?;
+    let user_id = get_current_user_id(depot)?;
+    let datasource_id = req.param::<String>("datasource_id")
+        .ok_or_else(|| AppError::BadRequest("Missing datasource_id".to_string()))?;
+
+    // Get datasource and verify ownership
+    let datasource = if is_current_user_root(depot) {
+        sqlx::query(
+            r#"
+            SELECT ds.*, ds.connection_config as config 
+            FROM data_sources ds
+            JOIN projects p ON ds.project_id = p.id
+            WHERE ds.id = $1 AND ds.deleted_at IS NULL AND p.deleted_at IS NULL
+            "#
+        )
+        .bind(&datasource_id)
+    } else {
+        sqlx::query(
+            r#"
+            SELECT ds.*, ds.connection_config as config 
+            FROM data_sources ds
+            JOIN projects p ON ds.project_id = p.id
+            WHERE ds.id = $1 AND p.user_id = $2 AND ds.deleted_at IS NULL AND p.deleted_at IS NULL
+            "#
+        )
+        .bind(&datasource_id)
+        .bind(&user_id)
+    }
+    .fetch_optional(&state.db_pool)
+    .await
+    .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
+
+    let datasource_row = datasource.ok_or_else(|| AppError::NotFound("Datasource not found".to_string()))?;
+
+    let source_type: String = datasource_row.get("source_type");
+    let config: Value = datasource_row.get("config");
+
+    // Get tables based on source type
+    let result = match source_type.as_str() {
+        "postgresql" => {
+            let connector = crate::utils::datasource::postgres::PostgreSQLConnector::new(&config)
+                .map_err(|e| AppError::InternalServerError(format!("Failed to create connector: {}", e)))?;
+            
+            connector.list_tables().await
+                .map_err(|e| AppError::InternalServerError(format!("Failed to list tables: {}", e)))?
+        },
+        _ => {
+            return Err(AppError::BadRequest(format!("Unsupported datasource type: {}", source_type)));
+        }
+    };
+
+    res.render(Json(result));
+    Ok(())
+}
+
 // Helper functions for connection testing
 async fn test_postgres_connection(config: &Value) -> TestConnectionResponse {
     let connection_url = if let Some(url) = config.as_str() {
@@ -664,6 +891,10 @@ pub fn datasource_routes() -> Router {
         .push(Router::with_path("/datasources/{datasource_id}").put(update_datasource).delete(delete_datasource))
         .push(Router::with_path("/datasources/{datasource_id}/test").post(test_connection))
         .push(Router::with_path("/datasources/{datasource_id}/schema").get(get_schema))
+        // Data browser routes
+        .push(Router::with_path("/datasources/{datasource_id}/query").post(execute_query))
+        .push(Router::with_path("/datasources/{datasource_id}/tables").get(get_tables))
+        .push(Router::with_path("/datasources/{datasource_id}/tables/{table_name}/data").post(get_table_data))
         // Test arbitrary config
         .push(Router::with_path("/test-connection").post(test_connection_with_config))
 }

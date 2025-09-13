@@ -50,6 +50,14 @@ function App() {
         }
       />
       <Route
+        path="/p/:projectId/datasources/:datasourceId/browse"
+        element={
+          <AppRoute>
+            <MainApp />
+          </AppRoute>
+        }
+      />
+      <Route
         path="/projects"
         element={
           <AppRoute>
