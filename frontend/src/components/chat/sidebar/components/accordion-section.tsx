@@ -32,7 +32,7 @@ export function AccordionSection({
 
   return (
     <Collapsible open={isOpen} onOpenChange={onToggle}>
-      <div className="border-b">
+      <div className="group border-b">
         <div className="flex items-center justify-between py-2 px-3">
           <CollapsibleTrigger asChild>
             <button className="flex items-center gap-2 text-sm font-medium hover:bg-accent/50 rounded px-1 py-1 -mx-1 transition-colors">

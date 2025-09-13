@@ -19,7 +19,7 @@ pub async fn list_conversations(
 
     // Get current user's ID for filtering
     let user_id = get_current_user_id(depot)?;
-    let client_id = get_current_client_id(depot)?;
+    let _client_id = get_current_client_id(depot)?;
 
     // Optional project_id filter from query params
     let project_id = req.query::<String>("project_id");

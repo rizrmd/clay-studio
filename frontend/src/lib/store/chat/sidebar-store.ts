@@ -11,7 +11,7 @@ export const sidebarStore = proxy({
   renameDialogOpen: false,
   newTitle: "",
   // Accordion state
-  accordionValue: ["conversations"] as string[], // sections that are open
+  accordionValue: ["conversations", "datasources"] as string[], // sections that are open
   selectedDatasourceId: null as string | null,
 });
 

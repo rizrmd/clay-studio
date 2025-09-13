@@ -128,7 +128,7 @@ export function ConversationSidebar({
         {/* Accordion content */}
         {(!isCollapsed || sidebarSnapshot.isMobileMenuOpen) && (
           <div className="flex-1 overflow-y-auto">
-            <div className="group">
+            <div>
               <AccordionSection
                 title="Conversations"
                 isOpen={sidebarSnapshot.accordionValue.includes("conversations")}

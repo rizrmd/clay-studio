@@ -30,22 +30,22 @@ impl MigrationTrait for Migration {
                  FROM projects p 
                  JOIN users u ON u.client_id = p.client_id 
                  WHERE p.user_id IS NULL 
-                 ORDER BY p.client_id, u.created_at ASC"
+                 ORDER BY p.client_id, u.id ASC"
                     .to_string(),
             ))
             .await?;
 
         // For each client, update projects to use the first user
         for client_row in clients {
-            let client_id: String = client_row.try_get("", "client_id")?;
-            let first_user_id: String = client_row.try_get("", "first_user_id")?;
+            let client_id_str: String = client_row.try_get("", "client_id")?;
+            let first_user_id_str: String = client_row.try_get("", "first_user_id")?;
             
             // Update all projects for this client to be owned by the first user
             conn.execute(Statement::from_string(
                 manager.get_database_backend(),
                 format!(
-                    "UPDATE projects SET user_id = '{}'::uuid WHERE client_id = '{}'::uuid AND user_id IS NULL",
-                    first_user_id, client_id
+                    "UPDATE projects SET user_id = '{}' WHERE client_id = '{}' AND user_id IS NULL",
+                    first_user_id_str, client_id_str
                 ),
             ))
             .await?;

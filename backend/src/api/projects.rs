@@ -291,9 +291,8 @@ pub async fn create_project(
 pub async fn list_projects(depot: &mut Depot, res: &mut Response) -> Result<(), AppError> {
     let state = get_app_state(depot)?;
 
-    // Get current user's ID and client_id for filtering
+    // Get current user's ID for filtering
     let user_id = get_current_user_id(depot)?;
-    let client_id = get_current_client_id(depot)?;
 
     // Get projects filtered by user_id (unless user is root), excluding soft-deleted projects
     let project_rows = if is_current_user_root(depot) {
@@ -654,9 +653,8 @@ pub async fn delete_project(
         .param::<String>("project_id")
         .ok_or(AppError::BadRequest("Missing project_id".to_string()))?;
 
-    // Get current user's ID and client_id
+    // Get current user's ID for filtering
     let user_id = get_current_user_id(depot)?;
-    let client_id = get_current_client_id(depot)?;
 
     // Verify the project belongs to the current user (unless they're root)
     let project_exists = if is_current_user_root(depot) {
