@@ -505,9 +505,9 @@ pub async fn me(depot: &mut Depot, res: &mut Response) -> Result<(), AppError> {
         });
 
     // Check if user has at least one project
-    tracing::info!("Checking project count for client_id: {}", client_uuid);
-    let project_count = sqlx::query("SELECT COUNT(*) as count FROM projects WHERE client_id = $1")
-        .bind(client_uuid)
+    tracing::info!("Checking project count for user_id: {}", user_uuid);
+    let project_count = sqlx::query("SELECT COUNT(*) as count FROM projects WHERE user_id = $1")
+        .bind(user_uuid)
         .fetch_one(&state.db_pool)
         .await
         .map_err(|e| {

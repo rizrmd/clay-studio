@@ -10,6 +10,9 @@ export const sidebarStore = proxy({
   error: null as null | string,
   renameDialogOpen: false,
   newTitle: "",
+  // Accordion state
+  accordionValue: ["conversations"] as string[], // sections that are open
+  selectedDatasourceId: null as string | null,
 });
 
 export const sidebarActions = {
@@ -67,5 +70,19 @@ export const sidebarActions = {
   },
   setNewTitle: (title: string) => {
     sidebarStore.newTitle = title;
+  },
+  // Accordion actions
+  setAccordionValue: (value: string[]) => {
+    sidebarStore.accordionValue = value;
+  },
+  toggleAccordionSection: (section: string) => {
+    if (sidebarStore.accordionValue.includes(section)) {
+      sidebarStore.accordionValue = sidebarStore.accordionValue.filter(s => s !== section);
+    } else {
+      sidebarStore.accordionValue = [...sidebarStore.accordionValue, section];
+    }
+  },
+  selectDatasource: (datasourceId: string | null) => {
+    sidebarStore.selectedDatasourceId = datasourceId;
   },
 };

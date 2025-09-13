@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use sqlx::{
     postgres::{PgPool, PgPoolOptions},
+    types::BigDecimal,
     Column, Row as SqlxRow,
 };
 use std::error::Error;
@@ -417,9 +418,11 @@ impl DataSourceConnector for PostgreSQLConnector {
         for row in rows.iter() {
             let mut row_data = Vec::new();
             for (i, _col) in columns.iter().enumerate() {
-                // Try to get value as different types
+                // Try to get value as different types, including PostgreSQL NUMERIC
                 if let Ok(val) = row.try_get::<String, _>(i) {
                     row_data.push(val);
+                } else if let Ok(val) = row.try_get::<BigDecimal, _>(i) {
+                    row_data.push(val.to_string());
                 } else if let Ok(val) = row.try_get::<i32, _>(i) {
                     row_data.push(val.to_string());
                 } else if let Ok(val) = row.try_get::<i64, _>(i) {

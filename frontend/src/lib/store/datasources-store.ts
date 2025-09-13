@@ -124,7 +124,7 @@ export const datasourcesActions = {
     }
   },
 
-  async createDatasource(projectId: string, datasource: Omit<Datasource, 'id' | 'created_at' | 'updated_at'>) {
+  async createDatasource(projectId: string, datasource: {name: string, source_type: Datasource["source_type"], config: string | object}) {
     try {
       datasourcesStore.isLoading = true;
       datasourcesStore.error = null;

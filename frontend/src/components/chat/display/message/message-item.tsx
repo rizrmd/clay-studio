@@ -15,6 +15,7 @@ import {
   hasInteraction,
 } from "@/components/chat/display/message/item/interaction/interaction-renderer";
 import { TodoList } from "@/components/chat/display/message/item/interaction/todo-list";
+import { parseMcpToolResult } from "@/components/chat/display/tool/tool-call-utils";
 
 export interface MessageItemProps {
   message: Message;
@@ -175,17 +176,37 @@ export function MessageItem({
               
               // For export_excel specifically, also check the original output
               let dataToCheck = interactionData;
-              if (invocation.toolName === 'mcp__interaction__export_excel' && 
-                  (invocation as any).originalOutput) {
+              if (invocation.toolName === 'mcp__interaction__export_excel') {
+                // First try originalOutput, then fall back to result
+                const sourceData = (invocation as any).originalOutput || invocation.result;
+                
                 try {
-                  // Parse the original output if it's a JSON string
-                  const originalOutput = (invocation as any).originalOutput;
-                  dataToCheck = typeof originalOutput === 'string' 
-                    ? JSON.parse(originalOutput) 
-                    : originalOutput;
+                  // Handle array format with MCP tool result (same as tool-usage-dialog.tsx)
+                  if (Array.isArray(sourceData) && sourceData.length > 0) {
+                    const firstItem = sourceData[0];
+                    if (
+                      firstItem &&
+                      typeof firstItem === "object" &&
+                      firstItem.text &&
+                      firstItem.type === "text"
+                    ) {
+                      const parsedMcp = parseMcpToolResult(firstItem.text);
+                      if (parsedMcp) {
+                        dataToCheck = parsedMcp;
+                      }
+                    }
+                  }
+                  // Handle direct JSON string
+                  else if (typeof sourceData === 'string') {
+                    dataToCheck = JSON.parse(sourceData);
+                  }
+                  // Handle direct object
+                  else if (typeof sourceData === 'object') {
+                    dataToCheck = sourceData;
+                  }
                 } catch (e) {
-                  console.error('Failed to parse originalOutput for export_excel:', e);
-                  dataToCheck = (invocation as any).originalOutput;
+                  console.error('Failed to parse export_excel data:', e, 'sourceData:', sourceData);
+                  dataToCheck = sourceData;
                 }
               }
               

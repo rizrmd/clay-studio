@@ -240,6 +240,17 @@ pub fn get_current_client_id(depot: &Depot) -> Result<Uuid, AppError> {
         .map_err(|_| AppError::InternalServerError("Invalid client ID format".to_string()))
 }
 
+/// Helper function to get the current user's ID from depot
+/// This should be used in handlers that need to filter by user_id
+pub fn get_current_user_id(depot: &Depot) -> Result<Uuid, AppError> {
+    let user_id_str = depot
+        .get::<String>("current_user_id")
+        .map_err(|_| AppError::Unauthorized("User context not found".to_string()))?;
+
+    Uuid::parse_str(user_id_str)
+        .map_err(|_| AppError::InternalServerError("Invalid user ID format".to_string()))
+}
+
 /// Helper function to get the current user's role from depot
 pub fn get_current_user_role(depot: &Depot) -> Option<String> {
     depot.get::<String>("current_user_role").ok().cloned()

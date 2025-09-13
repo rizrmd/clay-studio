@@ -2,7 +2,7 @@ use crate::utils::AppState;
 use salvo::prelude::*;
 
 // Auth utilities are in utils/auth.rs, re-export them
-pub use crate::utils::auth::{self, client_scoped, get_current_client_id, is_current_user_root};
+pub use crate::utils::auth::{self, client_scoped, get_current_client_id, get_current_user_id, is_current_user_root};
 
 pub struct StateInjector {
     state: AppState,

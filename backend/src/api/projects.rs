@@ -2,7 +2,7 @@ use crate::core::projects::{ProjectInfo, ProjectInfoWithStats, ProjectManager};
 use crate::core::tools::ToolApplicabilityChecker;
 use crate::models::*;
 use crate::utils::claude_md_template;
-use crate::utils::middleware::{get_current_client_id, is_current_user_root};
+use crate::utils::middleware::{get_current_client_id, get_current_user_id, is_current_user_root};
 use crate::utils::AppError;
 use crate::utils::get_app_state;
 use chrono::Utc;
@@ -244,17 +244,19 @@ pub async fn create_project(
         .await
         .map_err(|_| AppError::BadRequest("Invalid request body".to_string()))?;
 
-    // Get current user's client_id
+    // Get current user's ID and client_id
+    let user_id = get_current_user_id(depot)?;
     let client_id = get_current_client_id(depot)?;
 
     // Insert project into database - PostgreSQL will generate the UUID as string
     let project_id = Uuid::new_v4().to_string();
     let project_row = sqlx::query(
-        "INSERT INTO projects (id, name, client_id) VALUES ($1, $2, $3) RETURNING id, name, created_at, updated_at"
+        "INSERT INTO projects (id, name, client_id, user_id) VALUES ($1, $2, $3, $4) RETURNING id, name, created_at, updated_at"
     )
     .bind(&project_id)
     .bind(&create_req.name)
     .bind(client_id)
+    .bind(user_id)
     .fetch_one(&state.db_pool)
     .await
     .map_err(|e| AppError::InternalServerError(format!("Failed to create project: {}", e)))?;
@@ -289,10 +291,11 @@ pub async fn create_project(
 pub async fn list_projects(depot: &mut Depot, res: &mut Response) -> Result<(), AppError> {
     let state = get_app_state(depot)?;
 
-    // Get current user's client_id for filtering
+    // Get current user's ID and client_id for filtering
+    let user_id = get_current_user_id(depot)?;
     let client_id = get_current_client_id(depot)?;
 
-    // Get projects filtered by client_id (unless user is root), excluding soft-deleted projects
+    // Get projects filtered by user_id (unless user is root), excluding soft-deleted projects
     let project_rows = if is_current_user_root(depot) {
         sqlx::query(
             "SELECT id, name, created_at, updated_at FROM projects WHERE deleted_at IS NULL ORDER BY created_at DESC"
@@ -302,9 +305,9 @@ pub async fn list_projects(depot: &mut Depot, res: &mut Response) -> Result<(), 
         .map_err(|e| AppError::InternalServerError(format!("Failed to fetch projects: {}", e)))?
     } else {
         sqlx::query(
-            "SELECT id, name, created_at, updated_at FROM projects WHERE client_id = $1 AND deleted_at IS NULL ORDER BY created_at DESC"
+            "SELECT id, name, created_at, updated_at FROM projects WHERE user_id = $1 AND deleted_at IS NULL ORDER BY created_at DESC"
         )
-        .bind(client_id)
+        .bind(user_id)
         .fetch_all(&state.db_pool)
         .await
         .map_err(|e| AppError::InternalServerError(format!("Failed to fetch projects: {}", e)))?
@@ -553,7 +556,8 @@ pub async fn refresh_claude_md(
         .param::<String>("project_id")
         .ok_or(AppError::BadRequest("Missing project_id".to_string()))?;
 
-    // Get current user's client_id
+    // Get current user's ID and client_id
+    let user_id = get_current_user_id(depot)?;
     let client_id = get_current_client_id(depot)?;
 
     // Verify the project belongs to the current user (unless they're root)
@@ -567,10 +571,10 @@ pub async fn refresh_claude_md(
         .unwrap_or(false)
     } else {
         sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM projects WHERE id = $1 AND client_id = $2 AND deleted_at IS NULL)"
+            "SELECT EXISTS(SELECT 1 FROM projects WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL)"
         )
         .bind(&project_id)
-        .bind(client_id)
+        .bind(user_id)
         .fetch_one(&state.db_pool)
         .await
         .unwrap_or(false)
@@ -650,7 +654,8 @@ pub async fn delete_project(
         .param::<String>("project_id")
         .ok_or(AppError::BadRequest("Missing project_id".to_string()))?;
 
-    // Get current user's client_id
+    // Get current user's ID and client_id
+    let user_id = get_current_user_id(depot)?;
     let client_id = get_current_client_id(depot)?;
 
     // Verify the project belongs to the current user (unless they're root)
@@ -664,10 +669,10 @@ pub async fn delete_project(
         .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?
     } else {
         sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM projects WHERE id = $1 AND client_id = $2 AND deleted_at IS NULL)"
+            "SELECT EXISTS(SELECT 1 FROM projects WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL)"
         )
         .bind(&project_id)
-        .bind(client_id)
+        .bind(user_id)
         .fetch_one(&state.db_pool)
         .await
         .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?

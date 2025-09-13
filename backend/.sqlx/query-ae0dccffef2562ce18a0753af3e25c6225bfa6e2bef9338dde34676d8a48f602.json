@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO conversations (id, project_id, title, created_at, updated_at, is_title_manually_set)\n        VALUES ($1, $2, $3, NOW(), NOW(), $4)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ae0dccffef2562ce18a0753af3e25c6225bfa6e2bef9338dde34676d8a48f602"
+}

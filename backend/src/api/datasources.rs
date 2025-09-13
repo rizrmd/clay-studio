@@ -5,7 +5,7 @@ use serde_json::Value;
 use sqlx::Row;
 use uuid::Uuid;
 
-use crate::utils::middleware::get_current_client_id;
+use crate::utils::middleware::{get_current_user_id, is_current_user_root};
 use crate::utils::{get_app_state, AppError};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -50,19 +50,29 @@ pub async fn list_datasources(
     depot: &mut Depot,
 ) -> Result<(), AppError> {
     let state = get_app_state(depot)?;
-    let client_id = get_current_client_id(depot)?;
+    let user_id = get_current_user_id(depot)?;
     let project_id = req.param::<String>("project_id")
         .ok_or_else(|| AppError::BadRequest("Missing project_id".to_string()))?;
 
-    // Validate project ownership
-    let project_exists = sqlx::query(
-        "SELECT 1 FROM projects WHERE id = $1 AND client_id = $2 AND deleted_at IS NULL"
-    )
-    .bind(&project_id)
-    .bind(&client_id)
-    .fetch_optional(&state.db_pool)
-    .await
-    .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
+    // Validate project ownership (user owns project or is root)
+    let project_exists = if is_current_user_root(depot) {
+        sqlx::query(
+            "SELECT 1 FROM projects WHERE id = $1 AND deleted_at IS NULL"
+        )
+        .bind(&project_id)
+        .fetch_optional(&state.db_pool)
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?
+    } else {
+        sqlx::query(
+            "SELECT 1 FROM projects WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL"
+        )
+        .bind(&project_id)
+        .bind(&user_id)
+        .fetch_optional(&state.db_pool)
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?
+    };
 
     if project_exists.is_none() {
         return Err(AppError::NotFound("Project not found".to_string()));
@@ -123,22 +133,32 @@ pub async fn create_datasource(
     depot: &mut Depot,
 ) -> Result<(), AppError> {
     let state = get_app_state(depot)?;
-    let client_id = get_current_client_id(depot)?;
+    let user_id = get_current_user_id(depot)?;
     let project_id = req.param::<String>("project_id")
         .ok_or_else(|| AppError::BadRequest("Missing project_id".to_string()))?;
 
     let request_data: CreateDatasourceRequest = req.parse_json().await
         .map_err(|e| AppError::BadRequest(format!("Invalid JSON: {}", e)))?;
 
-    // Validate project ownership
-    let project_exists = sqlx::query(
-        "SELECT 1 FROM projects WHERE id = $1 AND client_id = $2 AND deleted_at IS NULL"
-    )
-    .bind(&project_id)
-    .bind(&client_id)
-    .fetch_optional(&state.db_pool)
-    .await
-    .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
+    // Validate project ownership (user owns project or is root)
+    let project_exists = if is_current_user_root(depot) {
+        sqlx::query(
+            "SELECT 1 FROM projects WHERE id = $1 AND deleted_at IS NULL"
+        )
+        .bind(&project_id)
+        .fetch_optional(&state.db_pool)
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?
+    } else {
+        sqlx::query(
+            "SELECT 1 FROM projects WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL"
+        )
+        .bind(&project_id)
+        .bind(&user_id)
+        .fetch_optional(&state.db_pool)
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?
+    };
 
     if project_exists.is_none() {
         return Err(AppError::NotFound("Project not found".to_string()));
@@ -202,33 +222,44 @@ pub async fn update_datasource(
     depot: &mut Depot,
 ) -> Result<(), AppError> {
     let state = get_app_state(depot)?;
-    let client_id = get_current_client_id(depot)?;
+    let user_id = get_current_user_id(depot)?;
     let datasource_id = req.param::<String>("datasource_id")
         .ok_or_else(|| AppError::BadRequest("Missing datasource_id".to_string()))?;
 
     let request_data: UpdateDatasourceRequest = req.parse_json().await
         .map_err(|e| AppError::BadRequest(format!("Invalid JSON: {}", e)))?;
 
-    // Check if datasource exists and belongs to client's project
-    let existing = sqlx::query(
-        r#"
-        SELECT ds.*, p.client_id 
-        FROM data_sources ds
-        JOIN projects p ON ds.project_id = p.id
-        WHERE ds.id = $1 AND ds.deleted_at IS NULL AND p.deleted_at IS NULL
-        "#
-    )
-    .bind(&datasource_id)
-    .fetch_optional(&state.db_pool)
-    .await
-    .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
+    // Check if datasource exists and belongs to user's project (or user is root)
+    let existing = if is_current_user_root(depot) {
+        sqlx::query(
+            r#"
+            SELECT ds.* 
+            FROM data_sources ds
+            JOIN projects p ON ds.project_id = p.id
+            WHERE ds.id = $1 AND ds.deleted_at IS NULL AND p.deleted_at IS NULL
+            "#
+        )
+        .bind(&datasource_id)
+        .fetch_optional(&state.db_pool)
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?
+    } else {
+        sqlx::query(
+            r#"
+            SELECT ds.* 
+            FROM data_sources ds
+            JOIN projects p ON ds.project_id = p.id
+            WHERE ds.id = $1 AND p.user_id = $2 AND ds.deleted_at IS NULL AND p.deleted_at IS NULL
+            "#
+        )
+        .bind(&datasource_id)
+        .bind(&user_id)
+        .fetch_optional(&state.db_pool)
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?
+    };
 
-    let existing_row = existing.ok_or_else(|| AppError::NotFound("Datasource not found".to_string()))?;
-    let row_client_id: Uuid = existing_row.get("client_id");
-    
-    if row_client_id != client_id {
-        return Err(AppError::Forbidden("Access denied".to_string()));
-    }
+    let _existing_row = existing.ok_or_else(|| AppError::NotFound("Datasource not found".to_string()))?;
 
     if request_data.name.is_none() && request_data.config.is_none() {
         return Err(AppError::BadRequest("No fields to update".to_string()));
@@ -316,30 +347,41 @@ pub async fn delete_datasource(
     depot: &mut Depot,
 ) -> Result<(), AppError> {
     let state = get_app_state(depot)?;
-    let client_id = get_current_client_id(depot)?;
+    let user_id = get_current_user_id(depot)?;
     let datasource_id = req.param::<String>("datasource_id")
         .ok_or_else(|| AppError::BadRequest("Missing datasource_id".to_string()))?;
 
-    // Check if datasource exists and belongs to client's project
-    let existing = sqlx::query(
-        r#"
-        SELECT ds.id, p.client_id 
-        FROM data_sources ds
-        JOIN projects p ON ds.project_id = p.id
-        WHERE ds.id = $1 AND ds.deleted_at IS NULL AND p.deleted_at IS NULL
-        "#
-    )
-    .bind(&datasource_id)
-    .fetch_optional(&state.db_pool)
-    .await
-    .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
+    // Check if datasource exists and belongs to user's project (or user is root)
+    let existing = if is_current_user_root(depot) {
+        sqlx::query(
+            r#"
+            SELECT ds.id 
+            FROM data_sources ds
+            JOIN projects p ON ds.project_id = p.id
+            WHERE ds.id = $1 AND ds.deleted_at IS NULL AND p.deleted_at IS NULL
+            "#
+        )
+        .bind(&datasource_id)
+        .fetch_optional(&state.db_pool)
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?
+    } else {
+        sqlx::query(
+            r#"
+            SELECT ds.id 
+            FROM data_sources ds
+            JOIN projects p ON ds.project_id = p.id
+            WHERE ds.id = $1 AND p.user_id = $2 AND ds.deleted_at IS NULL AND p.deleted_at IS NULL
+            "#
+        )
+        .bind(&datasource_id)
+        .bind(&user_id)
+        .fetch_optional(&state.db_pool)
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?
+    };
 
-    let existing_row = existing.ok_or_else(|| AppError::NotFound("Datasource not found".to_string()))?;
-    let row_client_id: Uuid = existing_row.get("client_id");
-    
-    if row_client_id != client_id {
-        return Err(AppError::Forbidden("Access denied".to_string()));
-    }
+    let _existing_row = existing.ok_or_else(|| AppError::NotFound("Datasource not found".to_string()))?;
 
     // Soft delete the datasource
     sqlx::query(
@@ -398,30 +440,41 @@ pub async fn test_connection(
     depot: &mut Depot,
 ) -> Result<(), AppError> {
     let state = get_app_state(depot)?;
-    let client_id = get_current_client_id(depot)?;
+    let user_id = get_current_user_id(depot)?;
     let datasource_id = req.param::<String>("datasource_id")
         .ok_or_else(|| AppError::BadRequest("Missing datasource_id".to_string()))?;
 
     // Get datasource and verify ownership
-    let datasource = sqlx::query(
-        r#"
-        SELECT ds.*, ds.connection_config as config, p.client_id 
-        FROM data_sources ds
-        JOIN projects p ON ds.project_id = p.id
-        WHERE ds.id = $1 AND ds.deleted_at IS NULL AND p.deleted_at IS NULL
-        "#
-    )
-    .bind(&datasource_id)
-    .fetch_optional(&state.db_pool)
-    .await
-    .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
+    let datasource = if is_current_user_root(depot) {
+        sqlx::query(
+            r#"
+            SELECT ds.*, ds.connection_config as config 
+            FROM data_sources ds
+            JOIN projects p ON ds.project_id = p.id
+            WHERE ds.id = $1 AND ds.deleted_at IS NULL AND p.deleted_at IS NULL
+            "#
+        )
+        .bind(&datasource_id)
+        .fetch_optional(&state.db_pool)
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?
+    } else {
+        sqlx::query(
+            r#"
+            SELECT ds.*, ds.connection_config as config 
+            FROM data_sources ds
+            JOIN projects p ON ds.project_id = p.id
+            WHERE ds.id = $1 AND p.user_id = $2 AND ds.deleted_at IS NULL AND p.deleted_at IS NULL
+            "#
+        )
+        .bind(&datasource_id)
+        .bind(&user_id)
+        .fetch_optional(&state.db_pool)
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?
+    };
 
     let datasource_row = datasource.ok_or_else(|| AppError::NotFound("Datasource not found".to_string()))?;
-    let row_client_id: Uuid = datasource_row.get("client_id");
-    
-    if row_client_id != client_id {
-        return Err(AppError::Forbidden("Access denied".to_string()));
-    }
 
     let source_type: String = datasource_row.get("source_type");
     let config: Value = datasource_row.get("config");
@@ -450,30 +503,38 @@ pub async fn get_schema(
     depot: &mut Depot,
 ) -> Result<(), AppError> {
     let state = get_app_state(depot)?;
-    let client_id = get_current_client_id(depot)?;
+    let user_id = get_current_user_id(depot)?;
     let datasource_id = req.param::<String>("datasource_id")
         .ok_or_else(|| AppError::BadRequest("Missing datasource_id".to_string()))?;
 
     // Get datasource and verify ownership
-    let datasource = sqlx::query(
-        r#"
-        SELECT ds.*, ds.connection_config as config, p.client_id 
-        FROM data_sources ds
-        JOIN projects p ON ds.project_id = p.id
-        WHERE ds.id = $1 AND ds.deleted_at IS NULL AND p.deleted_at IS NULL
-        "#
-    )
-    .bind(&datasource_id)
+    let datasource = if is_current_user_root(depot) {
+        sqlx::query(
+            r#"
+            SELECT ds.*, ds.connection_config as config 
+            FROM data_sources ds
+            JOIN projects p ON ds.project_id = p.id
+            WHERE ds.id = $1 AND ds.deleted_at IS NULL AND p.deleted_at IS NULL
+            "#
+        )
+        .bind(&datasource_id)
+    } else {
+        sqlx::query(
+            r#"
+            SELECT ds.*, ds.connection_config as config 
+            FROM data_sources ds
+            JOIN projects p ON ds.project_id = p.id
+            WHERE ds.id = $1 AND p.user_id = $2 AND ds.deleted_at IS NULL AND p.deleted_at IS NULL
+            "#
+        )
+        .bind(&datasource_id)
+        .bind(&user_id)
+    }
     .fetch_optional(&state.db_pool)
     .await
     .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
 
     let datasource_row = datasource.ok_or_else(|| AppError::NotFound("Datasource not found".to_string()))?;
-    let row_client_id: Uuid = datasource_row.get("client_id");
-    
-    if row_client_id != client_id {
-        return Err(AppError::Forbidden("Access denied".to_string()));
-    }
 
     let schema_info_str: Option<String> = datasource_row.get("schema_info");
     let schema_info: Option<Value> = schema_info_str

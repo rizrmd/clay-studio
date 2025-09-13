@@ -2,7 +2,7 @@ use super::types::{
     CreateConversationRequest, CreateFromMessageRequest, UpdateConversationRequest,
 };
 use crate::models::*;
-use crate::utils::middleware::{get_current_client_id, is_current_user_root};
+use crate::utils::middleware::{get_current_client_id, get_current_user_id, is_current_user_root};
 use crate::utils::{get_app_state, AppError};
 use chrono::Utc;
 use salvo::prelude::*;
@@ -17,7 +17,8 @@ pub async fn list_conversations(
 ) -> Result<(), AppError> {
     let state = get_app_state(depot)?;
 
-    // Get current user's client_id for filtering
+    // Get current user's ID for filtering
+    let user_id = get_current_user_id(depot)?;
     let client_id = get_current_client_id(depot)?;
 
     // Optional project_id filter from query params
@@ -65,13 +66,11 @@ pub async fn list_conversations(
                     c.updated_at, 
                     c.is_title_manually_set 
                  FROM conversations c
-                 JOIN projects p ON c.project_id = p.id
-                 WHERE c.project_id = $1 AND p.client_id = $2
+                 WHERE c.project_id = $1
                  ORDER BY c.created_at DESC 
                  LIMIT 100",
             )
             .bind(pid)
-            .bind(client_id)
             .fetch_all(&state.db_pool)
             .await
         }
@@ -113,11 +112,11 @@ pub async fn list_conversations(
                 c.is_title_manually_set 
              FROM conversations c
              JOIN projects p ON c.project_id = p.id
-             WHERE p.client_id = $1
+             WHERE p.user_id = $1
              ORDER BY c.created_at DESC 
              LIMIT 100",
         )
-        .bind(client_id)
+        .bind(user_id)
         .fetch_all(&state.db_pool)
         .await
     }

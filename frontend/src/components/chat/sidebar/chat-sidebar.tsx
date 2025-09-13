@@ -1,13 +1,15 @@
 import { useChat } from "@/lib/hooks/use-chat";
 import { sidebarActions, sidebarStore } from "@/lib/store/chat/sidebar-store";
+import { datasourcesStore, datasourcesActions } from "@/lib/store/datasources-store";
 import { cn } from "@/lib/utils";
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import { useSnapshot } from "valtio";
 import { useNavigate } from "react-router-dom";
-import { Database } from "lucide-react";
 import { ConversationSidebarFooter } from "./components/footer";
 import { ConversationSidebarHeader } from "./components/header";
 import { ConversationList } from "./components/list";
+import { DatasourceList } from "./components/datasource-list";
+import { AccordionSection } from "./components/accordion-section";
 import { MobileMenuToggle } from "./components/toggle";
 
 interface ConversationSidebarProps {
@@ -25,8 +27,10 @@ export function ConversationSidebar({
   onConversationSelect,
 }: ConversationSidebarProps) {
   const sidebarSnapshot = useSnapshot(sidebarStore);
+  const datasourcesSnapshot = useSnapshot(datasourcesStore);
   const { deleteConversation, bulkDeleteConversations } = useChat();
   const navigate = useNavigate();
+  const chat = useChat();
 
   const handleConversationClick = (conversationId: string) => {
     sidebarActions.setMobileMenuOpen(false);
@@ -61,11 +65,31 @@ export function ConversationSidebar({
     // Implementation for profile
   };
 
-  const handleDatasourcesClick = () => {
+  // Load datasources when component mounts or projectId changes
+  useEffect(() => {
+    if (projectId && !isCollapsed) {
+      datasourcesActions.loadDatasources(projectId);
+    }
+  }, [projectId, isCollapsed]);
+
+
+  const handleDatasourceClick = (datasourceId: string) => {
+    sidebarActions.selectDatasource(datasourceId);
+    sidebarActions.setMobileMenuOpen(false);
+    // TODO: Navigate to data browser or open data browser modal
+    console.log('Open data browser for datasource:', datasourceId);
+  };
+
+  const handleAddDatasource = () => {
     if (projectId) {
       navigate(`/p/${projectId}/datasources`);
     }
     sidebarActions.setMobileMenuOpen(false);
+  };
+
+  const handleAddConversation = () => {
+    // TODO: Create new conversation
+    console.log('Create new conversation');
   };
 
   return (
@@ -100,40 +124,42 @@ export function ConversationSidebar({
           onBulkDelete={handleBulkDelete}
         />
 
-        {/* Conversations area */}
+        {/* Accordion content */}
         {(!isCollapsed || sidebarSnapshot.isMobileMenuOpen) && (
-          <div className="flex-1 overflow-y-auto relative">
-            <ConversationList
-              currentConversationId={currentConversationId}
-              onConversationClick={handleConversationClick}
-              onRenameConversation={openRenameDialog}
-              onDeleteConversation={handleDeleteConversation}
-            />
-          </div>
-        )}
+          <div className="flex-1 overflow-y-auto">
+            <div className="group">
+              <AccordionSection
+                title="Conversations"
+                isOpen={sidebarSnapshot.accordionValue.includes("conversations")}
+                onToggle={() => sidebarActions.toggleAccordionSection("conversations")}
+                count={chat.conversationList?.length || 0}
+                onAdd={handleAddConversation}
+                addButtonTitle="New conversation"
+                isCollapsed={isCollapsed}
+              >
+                <ConversationList
+                  currentConversationId={currentConversationId}
+                  onConversationClick={handleConversationClick}
+                  onRenameConversation={openRenameDialog}
+                  onDeleteConversation={handleDeleteConversation}
+                />
+              </AccordionSection>
 
-        {/* Datasources button */}
-        {(!isCollapsed || sidebarSnapshot.isMobileMenuOpen) && (
-          <div className="border-t">
-            <button
-              onClick={handleDatasourcesClick}
-              className="w-full p-2 px-5 hover:bg-accent rounded-none flex items-center gap-2"
-            >
-              <Database className="h-4 w-4" />
-              <span className="text-sm">Datasources</span>
-            </button>
-          </div>
-        )}
-
-        {/* For collapsed state - datasources icon only */}
-        {isCollapsed && !sidebarSnapshot.isMobileMenuOpen && (
-          <div className="border-t">
-            <button
-              onClick={handleDatasourcesClick}
-              className="h-8 w-8 p-0 hover:bg-accent rounded-md flex items-center justify-center"
-            >
-              <Database className="h-4 w-4" />
-            </button>
+              <AccordionSection
+                title="Datasources"
+                isOpen={sidebarSnapshot.accordionValue.includes("datasources")}
+                onToggle={() => sidebarActions.toggleAccordionSection("datasources")}
+                count={datasourcesSnapshot.datasources?.length || 0}
+                onAdd={handleAddDatasource}
+                addButtonTitle="Add datasource"
+                isCollapsed={isCollapsed}
+              >
+                <DatasourceList
+                  projectId={projectId}
+                  onDatasourceClick={handleDatasourceClick}
+                />
+              </AccordionSection>
+            </div>
           </div>
         )}
 

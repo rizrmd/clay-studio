@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Code2, Clock, FileText, Play, Copy, Check } from "lucide-react";
+import { Code2, Clock, FileText, Play, Copy, Check, ChevronLeft, ChevronRight } from "lucide-react";
 import { api } from "@/lib/utils/api";
 import { Button } from "@/components/ui/button";
 import { parseMcpToolResult } from "../../../tool/tool-call-utils";
@@ -28,11 +28,17 @@ interface ToolUsageDetails {
 interface ToolUsageDialogProps {
   toolUsageId: string;
   children: React.ReactNode;
+  onNavigate?: (direction: 'prev' | 'next') => void;
+  hasNext?: boolean;
+  hasPrev?: boolean;
 }
 
 export function ToolUsageDialog({
   toolUsageId,
   children,
+  onNavigate,
+  hasNext = false,
+  hasPrev = false,
 }: ToolUsageDialogProps) {
   const [toolUsage, setToolUsage] = useState<ToolUsageDetails | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -66,6 +72,12 @@ export function ToolUsageDialog({
       setIsLoading(false);
     }
   };
+
+  // Clear tool usage when toolUsageId changes
+  React.useEffect(() => {
+    setToolUsage(null);
+    setError(null);
+  }, [toolUsageId]);
 
   const handleOpenChange = (newOpen: boolean) => {
     setOpen(newOpen);
@@ -122,9 +134,33 @@ export function ToolUsageDialog({
       <DialogTrigger asChild>{children}</DialogTrigger>
       <DialogContent className="min-w-[95vw] min-h-[90vh] text-xs flex flex-col">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Code2 className="h-5 w-5" />
-            Tool Usage Details
+          <DialogTitle className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Code2 className="h-5 w-5" />
+              Tool Usage Details
+            </div>
+            {onNavigate && (hasPrev || hasNext) && (
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onNavigate('prev')}
+                  disabled={!hasPrev}
+                  className="h-8 w-8 p-0"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onNavigate('next')}
+                  disabled={!hasNext}
+                  className="h-8 w-8 p-0"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
           </DialogTitle>
         </DialogHeader>
 

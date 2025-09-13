@@ -149,8 +149,6 @@ export function DatasourceForm({
           name: formData.name,
           source_type: formData.source_type,
           config,
-          project_id: projectId,
-          connection_status: "unknown" as const,
         };
         await datasourcesActions.createDatasource(projectId, createData);
       }
