@@ -9,10 +9,8 @@ use uuid::Uuid;
 #[derive(Clone, Debug)]
 pub struct CachedDatasource {
     pub id: String,
-    pub name: String,
     pub datasource_type: String,
     pub connection_config: Value,
-    pub project_id: String,
     pub user_id: Uuid,
     pub cached_at: Instant,
 }
@@ -79,39 +77,6 @@ impl DatasourceCache {
         stats.evictions += 1;
     }
 
-    pub async fn clear(&self) {
-        let mut cache = self.cache.write().await;
-        let count = cache.len();
-        cache.clear();
-        
-        let mut stats = self.stats.write().await;
-        stats.evictions += count as u64;
-        
-        info!("🗑️ Cleared {} datasource cache entries", count);
-    }
-
-    pub async fn cleanup_expired(&self) {
-        let mut cache = self.cache.write().await;
-        let before_count = cache.len();
-        
-        cache.retain(|_, cached| cached.cached_at.elapsed() < self.ttl);
-        
-        let removed = before_count - cache.len();
-        if removed > 0 {
-            let mut stats = self.stats.write().await;
-            stats.evictions += removed as u64;
-            info!("🧹 Cleaned up {} expired datasource cache entries", removed);
-        }
-    }
-
-    pub async fn get_stats(&self) -> DatasourceCacheStats {
-        let stats = self.stats.read().await;
-        DatasourceCacheStats {
-            hits: stats.hits,
-            misses: stats.misses,
-            evictions: stats.evictions,
-        }
-    }
 }
 
 // Global cache instance

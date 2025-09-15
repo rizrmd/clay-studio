@@ -9,10 +9,22 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Code2, Clock, FileText, Play, Copy, Check, ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  Code2,
+  Clock,
+  FileText,
+  Play,
+  Copy,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
 import { api } from "@/lib/utils/api";
 import { Button } from "@/components/ui/button";
 import { parseMcpToolResult } from "../../../tool/tool-call-utils";
+import { JsonTableRenderer } from "./json-table-renderer";
+import { css } from "goober";
+import { cn } from "@/lib/utils";
 
 interface ToolUsageDetails {
   id: string;
@@ -28,7 +40,7 @@ interface ToolUsageDetails {
 interface ToolUsageDialogProps {
   toolUsageId: string;
   children: React.ReactNode;
-  onNavigate?: (direction: 'prev' | 'next') => void;
+  onNavigate?: (direction: "prev" | "next") => void;
   hasNext?: boolean;
   hasPrev?: boolean;
 }
@@ -86,8 +98,8 @@ export function ToolUsageDialog({
     }
   };
 
-  const formatOutput = (output: any): string => {
-    if (!output) return "null";
+  const processOutput = (output: any) => {
+    if (!output) return null;
 
     // Check for array format with MCP tool result
     if (Array.isArray(output) && output.length > 0) {
@@ -99,25 +111,20 @@ export function ToolUsageDialog({
         firstItem.type === "text"
       ) {
         const parsedMcp = parseMcpToolResult(firstItem.text);
-
         if (parsedMcp) {
-          return JSON.stringify(parsedMcp, null, 2);
+          return parsedMcp;
         }
       }
     }
 
-    return JSON.stringify(output, null, 2);
+    return output;
   };
 
-  const formatJson = (obj: any) => {
-    if (!obj) return "null";
-    return JSON.stringify(obj, null, 2);
-  };
-
-  const copyToClipboard = async (text: string, type: 'parameters' | 'output') => {
+  const copyToClipboard = async (data: any, type: "parameters" | "output") => {
     try {
+      const text = JSON.stringify(data, null, 2);
       await navigator.clipboard.writeText(text);
-      if (type === 'parameters') {
+      if (type === "parameters") {
         setParametersCopied(true);
         setTimeout(() => setParametersCopied(false), 2000);
       } else {
@@ -125,7 +132,7 @@ export function ToolUsageDialog({
         setTimeout(() => setOutputCopied(false), 2000);
       }
     } catch (err) {
-      console.error('Failed to copy to clipboard:', err);
+      console.error("Failed to copy to clipboard:", err);
     }
   };
 
@@ -144,7 +151,7 @@ export function ToolUsageDialog({
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => onNavigate('prev')}
+                  onClick={() => onNavigate("prev")}
                   disabled={!hasPrev}
                   className="h-8 w-8 p-0"
                 >
@@ -153,7 +160,7 @@ export function ToolUsageDialog({
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => onNavigate('next')}
+                  onClick={() => onNavigate("next")}
                   disabled={!hasNext}
                   className="h-8 w-8 p-0"
                 >
@@ -205,7 +212,9 @@ export function ToolUsageDialog({
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => copyToClipboard(formatJson(toolUsage.parameters), 'parameters')}
+                    onClick={() =>
+                      copyToClipboard(toolUsage.parameters, "parameters")
+                    }
                     className="h-8 px-2"
                   >
                     {parametersCopied ? (
@@ -215,10 +224,19 @@ export function ToolUsageDialog({
                     )}
                   </Button>
                 </div>
-                <div className="border  relative overflow-auto flex-1 bg-muted/30 rounded-lg">
-                  <pre className="p-4 absolute inset-0 text-xs font-mono whitespace-pre-wrap">
-                    {formatJson(toolUsage.parameters)}
-                  </pre>
+                <div className=" relative overflow-auto flex-1">
+                  <div
+                    className={cn(
+                      "absolute inset-0 flex flex-1 items-stretch justify-stretch",
+                      css`
+                        > div {
+                          width: 100%;
+                        }
+                      `
+                    )}
+                  >
+                    <JsonTableRenderer data={toolUsage.parameters} />
+                  </div>
                 </div>
               </div>
 
@@ -232,7 +250,9 @@ export function ToolUsageDialog({
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => copyToClipboard(formatOutput(toolUsage.output), 'output')}
+                    onClick={() =>
+                      copyToClipboard(processOutput(toolUsage.output), "output")
+                    }
                     className="h-8 px-2"
                   >
                     {outputCopied ? (
@@ -242,10 +262,19 @@ export function ToolUsageDialog({
                     )}
                   </Button>
                 </div>
-                <div className="border relative overflow-auto flex-1 bg-muted/30 rounded-lg ">
-                  <pre className="p-4 absolute inset-0 text-xs font-mono whitespace-pre-wrap">
-                    {formatOutput(toolUsage.output)}
-                  </pre>
+                <div className=" relative overflow-auto flex-1">
+                  <div
+                    className={cn(
+                      "absolute inset-0 flex flex-1 items-stretch justify-stretch",
+                      css`
+                        > div {
+                          width: 100%;
+                        }
+                      `
+                    )}
+                  >
+                    <JsonTableRenderer data={processOutput(toolUsage.output)} />
+                  </div>
                 </div>
               </div>
             </div>

@@ -102,16 +102,12 @@ export const datasourcesActions = {
   // API Actions
   async loadDatasources(projectId: string) {
     try {
-      console.log('DatasourcesStore: Starting loadDatasources for project:', projectId);
       datasourcesStore.isLoading = true;
       datasourcesStore.error = null;
       
-      console.log('DatasourcesStore: Making API call to:', `/projects/${projectId}/datasources`);
       const response = await api.get(`/projects/${projectId}/datasources`);
-      console.log('DatasourcesStore: API response:', response);
       
       const datasources = Array.isArray(response) ? response : [];
-      console.log('DatasourcesStore: Processed datasources:', datasources);
       
       datasourcesActions.setDatasources(datasources);
     } catch (error: any) {

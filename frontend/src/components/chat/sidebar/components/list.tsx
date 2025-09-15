@@ -10,6 +10,7 @@ interface ConversationListProps {
   onConversationClick: (conversationId: string) => void;
   onRenameConversation: (conversation: Conversation) => void;
   onDeleteConversation: (conversationId: string) => void;
+  projectId?: string;
 }
 
 export function ConversationList({
@@ -17,6 +18,7 @@ export function ConversationList({
   onConversationClick,
   onRenameConversation,
   onDeleteConversation,
+  projectId,
 }: ConversationListProps) {
   const sidebarSnapshot = useSnapshot(sidebarStore);
   const chat = useChat();
@@ -64,12 +66,13 @@ export function ConversationList({
         {conversations.map((conversation) => (
           <ConversationItem
             key={conversation.id}
-            href={`/p/${chat.projectId}/c/${chat.conversationId}`}
+            href={`/p/${chat.projectId}/c/${conversation.id}`}
             conversation={conversation}
             isActive={currentConversationId === conversation.id}
             onClick={onConversationClick}
             onRename={onRenameConversation}
             onDelete={onDeleteConversation}
+            projectId={projectId}
           />
         ))}
       </div>

@@ -1,4 +1,4 @@
-import { DataTable } from "@/components/data-table/data-table-virtual"
+import { DataTable } from "@/components/data-table/data-table"
 import { generateDemoData, demoColumns } from "@/components/data-table/demo-data"
 import { useState } from "react"
 import { Card } from "@/components/ui/card"

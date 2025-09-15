@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useSnapshot } from "valtio";
 import { ChatSkeleton, MessageList } from "../display";
 import { MultimodalInput } from "../input";
 import { uiStore, uiActions } from "@/lib/store/chat/ui-store";
+import { chatInputStore, chatInputActions } from "@/lib/store/chat-input-store";
 import { useChat } from "@/lib/hooks/use-chat";
 import { FileText, PanelLeftOpen, PanelLeftClose } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -10,10 +11,7 @@ import { Button } from "@/components/ui/button";
 export function Chat() {
   // UI state and navigation
   const uiSnapshot = useSnapshot(uiStore, { sync: true });
-
-  // Input state
-  const [input, setInput] = useState("");
-  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const chatInputSnapshot = useSnapshot(chatInputStore);
 
   // Current conversation info
   const projectId = uiSnapshot.currentProject;
@@ -25,12 +23,17 @@ export function Chat() {
   // Chat state and actions
   const {
     currentMessages,
+    conversationMap,
     sendMessage,
     stopStreaming: _stopStreaming,
     isConnected,
     isStreaming,
     // testToolEvents: _testToolEvents, // Keep for potential future debug use
   } = useChat();
+
+  // Debug logging for conversation data
+  useEffect(() => {
+  }, [conversationId, conversationMap, currentMessages.length]);
 
   // Update UI WebSocket status
   useEffect(() => {
@@ -45,9 +48,9 @@ export function Chat() {
     e.preventDefault();
     if (!message.trim()) return;
 
-    setInput("");
-    const allFiles = [...(files || []), ...pendingFiles];
-    setPendingFiles([]);
+    chatInputActions.clearInput();
+    const allFiles = [...(files || []), ...chatInputSnapshot.pendingFiles];
+    chatInputActions.clearPendingFiles();
 
     // Convert File objects to file paths/names for the WebSocket API
     const fileNames = allFiles.map((f) => f.name);
@@ -86,7 +89,7 @@ export function Chat() {
 
     if (e.dataTransfer.files?.length > 0) {
       const droppedFiles = Array.from(e.dataTransfer.files);
-      setPendingFiles([...pendingFiles, ...droppedFiles]);
+      chatInputActions.addPendingFiles(droppedFiles);
       e.dataTransfer.clearData();
     }
   };
@@ -99,7 +102,7 @@ export function Chat() {
   return (
     <>
       <div
-        className="group w-full overflow-auto pl-0 relative flex flex-col h-screen"
+        className="group w-full overflow-auto pl-0 relative flex flex-col h-full"
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
         onDragOver={handleDragOver}
@@ -146,10 +149,16 @@ export function Chat() {
                   with Claude.
                 </p>
               </div>
-            ) : currentMessages.length === 0 ? (
+            ) : conversationId && !conversationMap[conversationId] ? (
+              // Show loading while conversation is being loaded
               <>
                 <ChatSkeleton />
               </>
+            ) : currentMessages.length === 0 ? (
+              // Conversation is loaded but has no messages - this is a valid empty state
+              <div className="flex flex-col relative flex-1">
+                <MessageList />
+              </div>
             ) : (
               <div className="flex flex-col relative flex-1">
                 <MessageList />
@@ -161,15 +170,15 @@ export function Chat() {
         <div className="bg-background border-t">
           <div className="mx-auto max-w-2xl sm:px-4">
             <MultimodalInput
-              input={input}
-              setInput={setInput}
+              input={chatInputSnapshot.input}
+              setInput={chatInputActions.setInput}
               handleSubmit={handleSubmit}
               isLoading={false}
               isStreaming={isStreaming}
               projectId={projectId || undefined}
               uploadedFiles={[]}
-              externalFiles={pendingFiles}
-              onExternalFilesChange={setPendingFiles}
+              externalFiles={[...chatInputSnapshot.pendingFiles]}
+              onExternalFilesChange={chatInputActions.setPendingFiles}
               shouldFocus={uiSnapshot.shouldFocusInput}
               isSubscribed={uiSnapshot.isWsSubscribed}
               conversationId={conversationId || undefined}

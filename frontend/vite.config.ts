@@ -43,7 +43,6 @@ export default defineConfig({
         secure: false,
         configure: (proxy, _options) => {
           proxy.on('error', (err, _req, _res) => {
-            console.log('proxy error', err);
           });
           proxy.on('proxyReq', (proxyReq, req, _res) => {
           });

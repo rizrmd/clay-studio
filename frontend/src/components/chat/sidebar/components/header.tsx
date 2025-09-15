@@ -1,8 +1,9 @@
 import { ChevronLeft, X, MessageSquare, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useSnapshot } from "valtio";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { sidebarActions, sidebarStore } from "@/lib/store/chat/sidebar-store";
+import { tabsActions } from "@/lib/store/tabs-store";
 
 interface ConversationSidebarHeaderProps {
   onNavigateToProjects: () => void;
@@ -62,17 +63,27 @@ export function ConversationSidebarHeader({
             </Button>
           </div>
         ) : (
-          <Link to={`/p/${projectId}/new`} className="flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="gap-1 h-[25px] border border-transparent hover:border-gray-200"
-              title="New Chat"
-            >
-              <MessageSquare size={10} />
-              <span className="text-xs">New</span>
-            </Button>
-          </Link>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              if (projectId) {
+                // Always create a new chat tab
+                tabsActions.openInNewTab('chat', {
+                  projectId,
+                  conversationId: 'new',
+                }, 'New Chat');
+                
+                // Navigate to the new route
+                navigate(`/p/${projectId}/new`);
+              }
+            }}
+            className="gap-1 h-[25px] border border-transparent hover:border-gray-200"
+            title="New Chat"
+          >
+            <MessageSquare size={10} />
+            <span className="text-xs">New</span>
+          </Button>
         )}
       </div>
     </div>

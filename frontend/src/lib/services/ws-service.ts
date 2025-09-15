@@ -266,7 +266,6 @@ class WebSocketService extends EventEmitter {
     if (!this.ws) return;
 
     this.ws.onopen = () => {
-      console.log("WebSocket connected");
       this.isConnecting = false;
       this.reconnectAttempts = 0;
 
@@ -300,7 +299,6 @@ class WebSocketService extends EventEmitter {
     };
 
     this.ws.onclose = (event) => {
-      console.log("WebSocket closed:", event.code, event.reason);
       this.isConnecting = false;
       this.clearTimers();
       this.emit("disconnected");
@@ -320,7 +318,6 @@ class WebSocketService extends EventEmitter {
   private handleServerMessage(message: ServerMessage): void {
     // Debug log for tool events
     if (message.type === "tool_use" || message.type === "tool_complete") {
-      console.log("🔧 WebSocket received tool event:", message);
     }
     
     // Emit the message for components to listen to
@@ -530,11 +527,6 @@ class WebSocketService extends EventEmitter {
     }
 
     const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
-    console.log(
-      `Attempting to reconnect in ${delay}ms (attempt ${
-        this.reconnectAttempts + 1
-      }/${this.maxReconnectAttempts})`
-    );
 
     this.reconnectTimeout = setTimeout(() => {
       this.reconnectAttempts++;

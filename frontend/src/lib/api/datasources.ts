@@ -31,11 +31,98 @@ export interface TableDataRequest {
   filters?: any;
 }
 
+export interface DistinctValuesRequest {
+  column: string;
+  limit?: number;
+  search?: string;
+}
+
+export interface DistinctValuesResult {
+  readonly values: readonly string[];
+  readonly count: number;
+  readonly execution_time_ms: number;
+}
+
+export interface DeleteRowsRequest {
+  row_ids: string[];
+  id_column?: string;
+}
+
+export interface DeleteRowsResult {
+  readonly success: boolean;
+  readonly rows_affected: number;
+  readonly execution_time_ms: number;
+  readonly deleted_ids: readonly string[];
+}
+
+export interface UpdateRowsRequest {
+  updates: Record<string, Record<string, any>>; // rowId -> columnKey -> newValue
+  id_column?: string;
+}
+
+export interface UpdateRowsResult {
+  readonly success: boolean;
+  readonly rows_affected: number;
+  readonly execution_time_ms: number;
+  readonly updated_ids: readonly string[];
+}
+
+export interface InsertRowsRequest {
+  rows: Record<string, any>[]; // Array of row objects
+}
+
+export interface InsertRowsResult {
+  readonly success: boolean;
+  readonly rows_affected: number;
+  readonly execution_time_ms: number;
+  readonly inserted_ids: readonly string[];
+}
+
 export interface QueryResult {
   readonly columns: readonly string[];
   readonly rows: readonly (readonly string[])[];
   readonly row_count: number;
   readonly execution_time_ms: number;
+  readonly query?: string; // For execute_query responses
+}
+
+export interface TableDataResult {
+  readonly columns: readonly string[];
+  readonly rows: readonly (readonly string[])[];
+  readonly row_count: number;
+  readonly total_rows: number;
+  readonly execution_time_ms: number;
+  readonly page: number;
+  readonly page_size: number;
+}
+
+export interface TableColumn {
+  readonly name: string;
+  readonly data_type: string;
+  readonly is_nullable: boolean;
+  readonly column_default?: string;
+  readonly is_primary_key: boolean;
+  readonly is_foreign_key: boolean;
+  readonly foreign_key_reference?: string;
+  readonly character_maximum_length?: number;
+  readonly numeric_precision?: number;
+  readonly numeric_scale?: number;
+}
+
+export interface TableStructure {
+  readonly table_name: string;
+  readonly columns: readonly TableColumn[];
+  readonly primary_keys: readonly string[];
+  readonly foreign_keys: readonly {
+    readonly column_name: string;
+    readonly referenced_table: string;
+    readonly referenced_column: string;
+  }[];
+  readonly indexes: readonly {
+    readonly name: string;
+    readonly columns: readonly string[];
+    readonly is_unique: boolean;
+  }[];
 }
 
 export const datasourcesApi = {
@@ -76,12 +163,37 @@ export const datasourcesApi = {
   },
 
   // Get table data with pagination and sorting
-  getTableData: async (datasourceId: string, tableName: string, data: TableDataRequest): Promise<QueryResult> => {
+  getTableData: async (datasourceId: string, tableName: string, data: TableDataRequest): Promise<TableDataResult> => {
     return api.post(`/datasources/${datasourceId}/tables/${tableName}/data`, data);
   },
 
   // Get list of tables
   getTables: async (datasourceId: string): Promise<string[]> => {
     return api.get(`/datasources/${datasourceId}/tables`);
+  },
+
+  // Get table structure information
+  getTableStructure: async (datasourceId: string, tableName: string): Promise<TableStructure> => {
+    return api.get(`/datasources/${datasourceId}/tables/${tableName}/structure`);
+  },
+
+  // Get distinct values for a column
+  getDistinctValues: async (datasourceId: string, tableName: string, data: DistinctValuesRequest): Promise<DistinctValuesResult> => {
+    return api.post(`/datasources/${datasourceId}/tables/${tableName}/distinct`, data);
+  },
+
+  // Delete rows from a table
+  deleteRows: async (datasourceId: string, tableName: string, data: DeleteRowsRequest): Promise<DeleteRowsResult> => {
+    return api.delete(`/datasources/${datasourceId}/tables/${tableName}/rows`, data);
+  },
+
+  // Update rows in a table
+  updateRows: async (datasourceId: string, tableName: string, data: UpdateRowsRequest): Promise<UpdateRowsResult> => {
+    return api.put(`/datasources/${datasourceId}/tables/${tableName}/rows`, data);
+  },
+
+  // Insert rows into a table
+  insertRows: async (datasourceId: string, tableName: string, data: InsertRowsRequest): Promise<InsertRowsResult> => {
+    return api.post(`/datasources/${datasourceId}/tables/${tableName}/rows`, data);
   },
 };

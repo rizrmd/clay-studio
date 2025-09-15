@@ -1,5 +1,5 @@
 import { proxy } from "valtio";
-import { datasourcesApi, type QueryResult, type TableDataRequest } from "@/lib/api/datasources";
+import { datasourcesApi, type QueryResult, type TableDataResult, type TableDataRequest, type TableStructure } from "@/lib/api/datasources";
 
 export interface DataBrowserStore {
   // Current datasource
@@ -11,7 +11,7 @@ export interface DataBrowserStore {
   tablesLoading: boolean;
   
   // Table data
-  tableData: QueryResult | null;
+  tableData: TableDataResult | null;
   currentPage: number;
   pageSize: number;
   totalRows: number;
@@ -19,6 +19,10 @@ export interface DataBrowserStore {
   sortDirection: "asc" | "desc";
   filters: Record<string, any>;
   dataLoading: boolean;
+  
+  // Table structure
+  tableStructure: TableStructure | null;
+  structureLoading: boolean;
   
   // Query execution
   currentQuery: string;
@@ -29,6 +33,13 @@ export interface DataBrowserStore {
   // UI state
   error: string | null;
   isDirty: boolean;
+  
+  // Cell editing
+  editingChanges: Record<string, Record<string, any>>; // rowId -> columnKey -> newValue
+  editingInProgress: boolean;
+  
+  // New row insertion
+  pendingNewRows: any[]; // Array of new rows to be inserted
 }
 
 export const dataBrowserStore = proxy<DataBrowserStore>({
@@ -47,6 +58,9 @@ export const dataBrowserStore = proxy<DataBrowserStore>({
   filters: {},
   dataLoading: false,
   
+  tableStructure: null,
+  structureLoading: false,
+  
   currentQuery: "",
   queryResults: null,
   queryHistory: [],
@@ -54,6 +68,11 @@ export const dataBrowserStore = proxy<DataBrowserStore>({
   
   error: null,
   isDirty: false,
+  
+  editingChanges: {},
+  editingInProgress: false,
+  
+  pendingNewRows: [],
 });
 
 export const dataBrowserActions = {
@@ -92,6 +111,7 @@ export const dataBrowserActions = {
   selectTable: (tableName: string | null) => {
     dataBrowserStore.selectedTable = tableName;
     dataBrowserStore.tableData = null;
+    dataBrowserStore.tableStructure = null;
     dataBrowserStore.currentPage = 1;
     dataBrowserStore.sortColumn = null;
     dataBrowserStore.sortDirection = "asc";
@@ -99,6 +119,7 @@ export const dataBrowserActions = {
     
     if (tableName && dataBrowserStore.selectedDatasourceId) {
       dataBrowserActions.loadTableData();
+      dataBrowserActions.loadTableStructure();
     }
   },
 
@@ -126,13 +147,37 @@ export const dataBrowserActions = {
       );
 
       dataBrowserStore.tableData = result;
-      dataBrowserStore.totalRows = result.row_count;
+      dataBrowserStore.totalRows = result.total_rows;
     } catch (error: any) {
       console.error('Failed to load table data:', error);
       dataBrowserStore.error = error?.response?.data?.error || 'Failed to load table data';
       dataBrowserStore.tableData = null;
     } finally {
       dataBrowserStore.dataLoading = false;
+    }
+  },
+
+  async loadTableStructure() {
+    if (!dataBrowserStore.selectedDatasourceId || !dataBrowserStore.selectedTable) {
+      return;
+    }
+
+    try {
+      dataBrowserStore.structureLoading = true;
+      dataBrowserStore.error = null;
+
+      const structure = await datasourcesApi.getTableStructure(
+        dataBrowserStore.selectedDatasourceId,
+        dataBrowserStore.selectedTable
+      );
+
+      dataBrowserStore.tableStructure = structure;
+    } catch (error: any) {
+      console.error('Failed to load table structure:', error);
+      dataBrowserStore.error = error?.response?.data?.error || 'Failed to load table structure';
+      dataBrowserStore.tableStructure = null;
+    } finally {
+      dataBrowserStore.structureLoading = false;
     }
   },
 
@@ -202,9 +247,104 @@ export const dataBrowserActions = {
     }
   },
 
+  // Data manipulation
+  setTableData: (data: any[]) => {
+    if (dataBrowserStore.tableData) {
+      // Convert the flat object array back to the TableDataResult format
+      const columns = Object.keys(data[0] || {});
+      const rows = data.map(row => columns.map(col => row[col]));
+      
+      dataBrowserStore.tableData = {
+        ...dataBrowserStore.tableData,
+        rows,
+      };
+      dataBrowserStore.isDirty = true;
+    }
+  },
+
   // Error handling
   clearError: () => {
     dataBrowserStore.error = null;
+  },
+
+  // Cell editing operations
+
+  setCellValue: (rowId: string, columnKey: string, newValue: any) => {
+    if (!dataBrowserStore.editingChanges[rowId]) {
+      dataBrowserStore.editingChanges[rowId] = {};
+    }
+    dataBrowserStore.editingChanges[rowId][columnKey] = newValue;
+    dataBrowserStore.isDirty = true;
+  },
+
+  async saveChanges() {
+    if (!dataBrowserStore.selectedDatasourceId || !dataBrowserStore.selectedTable) {
+      return;
+    }
+
+    try {
+      dataBrowserStore.editingInProgress = true;
+      dataBrowserStore.error = null;
+
+      // Save cell edits if any
+      if (Object.keys(dataBrowserStore.editingChanges).length > 0) {
+        const primaryKeyColumn = dataBrowserStore.tableStructure?.primary_keys[0] || "id";
+        
+        await datasourcesApi.updateRows(
+          dataBrowserStore.selectedDatasourceId,
+          dataBrowserStore.selectedTable,
+          {
+            updates: dataBrowserStore.editingChanges,
+            id_column: primaryKeyColumn
+          }
+        );
+      }
+
+      // Save new rows if any
+      if (dataBrowserStore.pendingNewRows.length > 0) {
+        const rowsToInsert = dataBrowserStore.pendingNewRows.map(row => {
+          // Remove temporary fields before inserting
+          const { __tempId, __isNewRow, ...cleanRow } = row;
+          return cleanRow;
+        });
+
+        await datasourcesApi.insertRows(
+          dataBrowserStore.selectedDatasourceId,
+          dataBrowserStore.selectedTable,
+          {
+            rows: rowsToInsert
+          }
+        );
+      }
+
+      // Clear changes after successful save
+      dataBrowserStore.editingChanges = {};
+      dataBrowserStore.pendingNewRows = [];
+      dataBrowserStore.isDirty = false;
+      
+      // Reload data to reflect changes
+      await dataBrowserActions.loadTableData();
+    } catch (error: any) {
+      console.error('Failed to save changes:', error);
+      dataBrowserStore.error = error?.response?.data?.error || 'Failed to save changes';
+    } finally {
+      dataBrowserStore.editingInProgress = false;
+    }
+  },
+
+  discardChanges: () => {
+    dataBrowserStore.editingChanges = {};
+    dataBrowserStore.pendingNewRows = [];
+    dataBrowserStore.isDirty = false;
+  },
+
+  addNewRow: (rowData: any) => {
+    // Generate a temporary ID for the new row
+    const tempId = `new_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const newRow = { ...rowData, __tempId: tempId, __isNewRow: true };
+    
+    dataBrowserStore.pendingNewRows.push(newRow);
+    dataBrowserStore.isDirty = true;
   },
 
   // Reset store
@@ -213,6 +353,7 @@ export const dataBrowserActions = {
     dataBrowserStore.tables = [];
     dataBrowserStore.selectedTable = null;
     dataBrowserStore.tableData = null;
+    dataBrowserStore.tableStructure = null;
     dataBrowserStore.currentPage = 1;
     dataBrowserStore.pageSize = 50;
     dataBrowserStore.sortColumn = null;
@@ -222,5 +363,8 @@ export const dataBrowserActions = {
     dataBrowserStore.queryResults = null;
     dataBrowserStore.error = null;
     dataBrowserStore.isDirty = false;
+    dataBrowserStore.editingChanges = {};
+    dataBrowserStore.editingInProgress = false;
+    dataBrowserStore.pendingNewRows = [];
   },
 };

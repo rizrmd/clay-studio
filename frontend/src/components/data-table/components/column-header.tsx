@@ -31,7 +31,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 
 interface DataTableColumnHeaderProps<TData, TValue>
   extends React.HTMLAttributes<HTMLDivElement> {
@@ -48,6 +48,16 @@ interface DataTableColumnHeaderProps<TData, TValue>
   onPivotToggle?: (columnId: string) => void;
   onAggregationChange?: (columnId: string, aggregation: string) => void;
   currentAggregation?: string;
+  // Server-side distinct values support
+  serverSide?: {
+    enabled: boolean;
+    datasourceId?: string;
+    tableName?: string;
+    onGetDistinctValues?: (
+      column: string,
+      search?: string
+    ) => Promise<string[]>;
+  };
 }
 
 export function DataTableColumnHeader<TData, TValue>({
@@ -64,15 +74,34 @@ export function DataTableColumnHeader<TData, TValue>({
   onPivotToggle,
   onAggregationChange,
   currentAggregation,
+  serverSide,
   className,
 }: DataTableColumnHeaderProps<TData, TValue>) {
+  // Check if column has a custom header renderer
+  const columnDef = column.columnDef as any;
+  const customHeaderRenderer = columnDef?.meta?.headerRenderer;
+
+  // If custom header renderer exists, use it
+  if (customHeaderRenderer) {
+    return customHeaderRenderer();
+  }
   const isFiltered = column.getFilterValue() !== undefined;
   const [filterOpen, setFilterOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+  const [serverValues, setServerValues] = useState<string[]>([]);
+  const [loadingServerValues, setLoadingServerValues] = useState(false);
+  const [hasLoadedServerValues, setHasLoadedServerValues] = useState(false);
 
   // Get unique values for this column
   const uniqueValues = useMemo(() => {
     if (!filterable) return [];
+
+    // Use server-side values if available and enabled
+    if (serverSide?.enabled && hasLoadedServerValues) {
+      return serverValues;
+    }
+
+    // Fallback to client-side values
     const values = new Set<string>();
     table.getCoreRowModel().flatRows.forEach((row) => {
       const value = row.getValue(column.id);
@@ -81,34 +110,123 @@ export function DataTableColumnHeader<TData, TValue>({
       }
     });
     return Array.from(values).sort();
-  }, [filterable, table, column.id]);
+  }, [
+    filterable,
+    table,
+    column.id,
+    serverSide?.enabled,
+    serverValues,
+    hasLoadedServerValues,
+  ]);
 
-  // Filter values based on search term
+  // Load server-side distinct values when filter opens
+  useEffect(() => {
+    if (
+      filterable &&
+      serverSide?.enabled &&
+      serverSide.onGetDistinctValues &&
+      filterOpen &&
+      !hasLoadedServerValues &&
+      !loadingServerValues
+    ) {
+      setLoadingServerValues(true);
+      const promise = serverSide.onGetDistinctValues?.(column.id, searchTerm);
+      if (promise) {
+        promise
+          .then((values) => {
+            setServerValues(values);
+            setHasLoadedServerValues(true);
+          })
+          .catch((error) => {
+            console.error("Failed to load distinct values:", error);
+            // On error, keep server values empty to fallback to client-side
+            setHasLoadedServerValues(true);
+          })
+          .finally(() => {
+            setLoadingServerValues(false);
+          });
+      } else {
+        setLoadingServerValues(false);
+      }
+    }
+  }, [
+    filterable,
+    serverSide,
+    filterOpen,
+    column.id,
+    searchTerm,
+    hasLoadedServerValues,
+    loadingServerValues,
+  ]);
+
+  // Debounced search for server-side values
+  useEffect(() => {
+    if (
+      filterable &&
+      serverSide?.enabled &&
+      serverSide.onGetDistinctValues &&
+      searchTerm &&
+      filterOpen
+    ) {
+      const timeoutId = setTimeout(() => {
+        setLoadingServerValues(true);
+        const promise = serverSide.onGetDistinctValues?.(column.id, searchTerm);
+        if (promise) {
+          promise
+            .then((values) => {
+              setServerValues(values);
+              setHasLoadedServerValues(true);
+            })
+            .catch((error) => {
+              console.error("Failed to search distinct values:", error);
+              setHasLoadedServerValues(true);
+            })
+            .finally(() => {
+              setLoadingServerValues(false);
+            });
+        } else {
+          setLoadingServerValues(false);
+        }
+      }, 300);
+
+      return () => clearTimeout(timeoutId);
+    }
+  }, [filterable, serverSide, searchTerm, filterOpen, column.id]);
+
+  // Filter values based on search term (for client-side filtering when server-side search isn't used)
   const filteredValues = useMemo(() => {
-    if (!searchTerm) return uniqueValues;
+    if (!searchTerm || (serverSide?.enabled && hasLoadedServerValues)) {
+      return uniqueValues;
+    }
     return uniqueValues.filter((value) =>
       value.toLowerCase().includes(searchTerm.toLowerCase())
     );
-  }, [uniqueValues, searchTerm]);
+  }, [uniqueValues, searchTerm, serverSide?.enabled, hasLoadedServerValues]);
 
   if (!sortable && !filterable && !column.getCanHide()) {
-    return <div className={cn("font-medium px-2", className)}>{title}</div>;
+    return (
+      <div className={cn("font-medium px-2 truncate", className)} title={title}>
+        {title}
+      </div>
+    );
   }
 
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col flex-1 justify-stretch gap-1">
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <button
+          <div
             className={cn(
-              "w-full flex items-center justify-between px-0 py-1 text-left hover:bg-muted/50 data-[state=open]:bg-muted",
+              "button w-full cursor-pointer flex items-center justify-between px-0 py-1 text-left hover:bg-muted/50 data-[state=open]:bg-muted data-[state=open]:shadow-inner select-none",
               className
             )}
           >
-            <div className="flex items-center gap-1">
-              <span className="font-medium">{title}</span>
+            <div className="flex items-center gap-1 min-w-0 flex-1">
+              <span className="font-medium truncate" title={title}>
+                {title}
+              </span>
               {isPivotColumn && pivotLevel > 0 && (
-                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400">
+                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400 shrink-0">
                   {pivotLevel === 1
                     ? "1st"
                     : pivotLevel === 2
@@ -127,19 +245,30 @@ export function DataTableColumnHeader<TData, TValue>({
                 <ArrowUp className="h-3 w-3" />
               ) : null}
             </div>
-          </button>
+          </div>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-48">
           {filterable && (
             <>
               <div className="p-1">
-                <Popover open={filterOpen} onOpenChange={setFilterOpen}>
+                <Popover
+                  open={filterOpen}
+                  onOpenChange={(open) => {
+                    setFilterOpen(open);
+                    if (!open) {
+                      // Reset state when filter closes for fresh loading next time
+                      setSearchTerm("");
+                      setServerValues([]);
+                      setHasLoadedServerValues(false);
+                    }
+                  }}
+                >
                   <PopoverTrigger asChild>
-                    <div className="flex">
+                    <div className="flex gap-1">
                       <Button
                         variant="outline"
                         size="sm"
-                        className="w-full h-7 text-xs justify-between"
+                        className="flex-1 h-7 text-xs justify-between min-w-0"
                       >
                         <span className="truncate">
                           {isFiltered
@@ -149,16 +278,15 @@ export function DataTableColumnHeader<TData, TValue>({
                         <Search className="ml-2 h-3 w-3 shrink-0" />
                       </Button>
                       {isFiltered && (
-                        <div className="pl-1">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-7 max-w-0 px-0 min-w-[30px] rounded-sm text-xs"
-                            onClick={() => column.setFilterValue(undefined)}
-                          >
-                            <X className="h-3 w-3" />
-                          </Button>
-                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 px-2 shrink-0 text-xs"
+                          onClick={() => column.setFilterValue(undefined)}
+                          title="Clear filter"
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
                       )}
                     </div>
                   </PopoverTrigger>
@@ -172,7 +300,12 @@ export function DataTableColumnHeader<TData, TValue>({
                       />
                     </div>
                     <div className="max-h-48 overflow-auto">
-                      {filteredValues.length === 0 ? (
+                      {loadingServerValues ? (
+                        <div className="p-2 text-xs text-muted-foreground flex items-center gap-2">
+                          <div className="animate-spin h-3 w-3 border border-primary border-t-transparent rounded-full"></div>
+                          Loading values...
+                        </div>
+                      ) : filteredValues.length === 0 ? (
                         <div className="p-2 text-xs text-muted-foreground">
                           No values found
                         </div>

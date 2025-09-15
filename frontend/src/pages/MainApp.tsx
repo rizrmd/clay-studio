@@ -16,23 +16,35 @@ const DatasourcesMain = lazy(() =>
     default: m.DatasourcesMain,
   }))
 );
-const DataBrowser = lazy(() =>
+const DataBrowserInlineEditing = lazy(() =>
   import("@/components/datasources/browser/data-browser").then((m) => ({
     default: m.DataBrowser,
+  }))
+);
+const QueryEditor = lazy(() =>
+  import("@/components/datasources/browser/query-editor").then((m) => ({
+    default: m.QueryEditor,
   }))
 );
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useSnapshot } from "valtio";
 import { uiStore, uiActions } from "@/lib/store/chat/ui-store";
+import { tabsStore, tabsActions } from "@/lib/store/tabs-store";
+import { dataBrowserStore } from "@/lib/store/data-browser-store";
+import { chatStore } from "@/lib/store/chat/chat-store";
 import { api } from "@/lib/utils/api";
 import { useChat } from "@/lib/hooks/use-chat";
 import { wsService } from "@/lib/services/ws-service";
+import { TabBar } from "@/components/layout/tab-bar";
 
 // Stub implementations
 const useLoggerDebug = () => ({ isDebugMode: false });
 
 export function MainApp() {
   const uiSnapshot = useSnapshot(uiStore);
+  const tabsSnapshot = useSnapshot(tabsStore);
+  const dataBrowserSnapshot = useSnapshot(dataBrowserStore);
+  const chatSnapshot = useSnapshot(chatStore);
   const { projectId, conversationId, datasourceId } = useParams<{
     projectId: string;
     conversationId?: string;
@@ -44,10 +56,20 @@ export function MainApp() {
 
   // Check if we're on the new conversation route
   const isNewRoute = location.pathname.endsWith("/new");
-  // Check if we're on the datasources route
-  const isDatasourcesRoute = location.pathname.includes("/datasources") && !location.pathname.includes("/browse");
   // Check if we're on the data browser route
-  const isDataBrowserRoute = location.pathname.includes("/datasources/") && location.pathname.endsWith("/browse");
+  const isDataBrowserRoute =
+    location.pathname.includes("/datasources/") &&
+    location.pathname.endsWith("/browse");
+  // Check if we're on the query editor route
+  const isQueryEditorRoute =
+    location.pathname.includes("/datasources/") &&
+    location.pathname.endsWith("/query");
+  // Check if we're on the edit datasource route
+  const isDatasourceEditRoute =
+    location.pathname.includes("/datasources/") &&
+    location.pathname.endsWith("/edit");
+  // Check if we're on the new datasource route
+  const isDatasourceNewRoute = location.pathname.endsWith("/datasources/new");
 
   // Enable debug logging hooks
   useLoggerDebug();
@@ -65,9 +87,17 @@ export function MainApp() {
   }, [projectId, conversationId, location.state]);
 
   // Handle redirection when visiting /p/:projectId without conversation ID
-  // Don't redirect if we're on the /new route or datasources route or data browser route
+  // Don't redirect if we're on the /new route or data browser route or query editor route
   useEffect(() => {
-    if (projectId && !conversationId && !isNewRoute && !isDatasourcesRoute && !isDataBrowserRoute) {
+    if (
+      projectId &&
+      !conversationId &&
+      !isNewRoute &&
+      !isDataBrowserRoute &&
+      !isQueryEditorRoute &&
+      !isDatasourceEditRoute &&
+      !isDatasourceNewRoute
+    ) {
       // Try to get the last conversation from localStorage
       const lastConversationKey = `last_conversation_${projectId}`;
       const lastConversationId = localStorage.getItem(lastConversationKey);
@@ -80,7 +110,15 @@ export function MainApp() {
         createNewConversationAndRedirect();
       }
     }
-  }, [projectId, conversationId, navigate, isDatasourcesRoute, isDataBrowserRoute]);
+  }, [
+    projectId,
+    conversationId,
+    navigate,
+    isDataBrowserRoute,
+    isQueryEditorRoute,
+    isDatasourceEditRoute,
+    isDatasourceNewRoute,
+  ]);
 
   useEffect(() => {
     if (projectId) {
@@ -97,9 +135,425 @@ export function MainApp() {
       // Only subscribe if we're not already subscribed to this project/conversation
       if (!wsService.isSubscribed(projectId, conversationId)) {
         wsService.subscribe(projectId, conversationId);
+        // Request conversation messages after subscribing
+        wsService.getConversationMessages(conversationId);
       }
     }
   }, [projectId, conversationId]);
+
+  // Update tab title when selected table changes
+  useEffect(() => {
+    const activeTab = tabsSnapshot.tabs.find(
+      (t) => t.id === tabsSnapshot.activeTabId
+    );
+    if (
+      activeTab &&
+      (activeTab.type === "datasource_table_data" ||
+        activeTab.type === "datasource_table_structure") &&
+      activeTab.metadata.datasourceId === datasourceId &&
+      dataBrowserSnapshot.selectedTable &&
+      dataBrowserSnapshot.selectedTable !== activeTab.metadata.tableName
+    ) {
+      tabsActions.updateTab(activeTab.id, {
+        title: dataBrowserSnapshot.selectedTable,
+        metadata: {
+          ...activeTab.metadata,
+          tableName: dataBrowserSnapshot.selectedTable,
+        },
+      });
+    }
+  }, [
+    dataBrowserSnapshot.selectedTable,
+    tabsSnapshot.activeTabId,
+    datasourceId,
+  ]);
+
+  // Update chat tab title when conversation title changes
+  useEffect(() => {
+    if (conversationId && conversationId !== "new") {
+      const conversation = chatSnapshot.map[conversationId];
+      const activeTab = tabsSnapshot.tabs.find(
+        (t) => t.id === tabsSnapshot.activeTabId
+      );
+
+      if (
+        conversation &&
+        activeTab &&
+        activeTab.type === "chat" &&
+        activeTab.metadata.conversationId === conversationId &&
+        activeTab.title !== conversation.title
+      ) {
+        tabsActions.updateTab(activeTab.id, {
+          title: conversation.title,
+          metadata: {
+            ...activeTab.metadata,
+            conversationTitle: conversation.title,
+          },
+        });
+      }
+    }
+  }, [chatSnapshot.map, conversationId, tabsSnapshot.activeTabId]);
+
+  // Handle tab creation/updates based on URL changes
+  useEffect(() => {
+    if (!projectId) return;
+
+    // Don't interfere during tab removal operations
+    if (tabsSnapshot.isRemovingTab) {
+      return;
+    }
+
+    // Filter persisted tabs for current project
+    const projectTabs = tabsSnapshot.tabs.filter(
+      (t) => t.metadata.projectId === projectId
+    );
+
+    // Check if current active tab already matches the route - if so, don't interfere
+    const currentActiveTab = projectTabs.find(t => t.id === tabsSnapshot.activeTabId);
+    
+    
+    // For edit routes, check if current tab is already correct
+    if (isDatasourceEditRoute && datasourceId && currentActiveTab) {
+      if (currentActiveTab.type === 'datasource_edit' && 
+          currentActiveTab.metadata.datasourceId === datasourceId) {
+        return;
+      }
+    }
+    
+    // For query routes, check if current tab is already correct  
+    if (isQueryEditorRoute && datasourceId && currentActiveTab) {
+      if (currentActiveTab.type === 'datasource_query' && 
+          currentActiveTab.metadata.datasourceId === datasourceId) {
+        return;
+      }
+    }
+
+    // Determine the appropriate tab for the current route
+    let targetTabId: string | null = null;
+    let shouldCreateTab = true;
+
+    if (conversationId && conversationId !== "new") {
+      // Look for existing chat tab with this conversation
+      const existingTab = projectTabs.find(
+        (t) => t.type === "chat" && t.metadata.conversationId === conversationId
+      );
+
+      if (existingTab) {
+        // Update existing tab with current conversation title if available
+        const conversation = chatSnapshot.map[conversationId];
+        if (
+          conversation &&
+          (!existingTab.metadata.conversationTitle ||
+            existingTab.metadata.conversationTitle !== conversation.title)
+        ) {
+          tabsActions.updateTab(existingTab.id, {
+            title: conversation.title,
+            metadata: {
+              ...existingTab.metadata,
+              conversationTitle: conversation.title,
+            },
+          });
+        }
+        targetTabId = existingTab.id;
+        shouldCreateTab = false;
+      } else {
+        // Create new chat tab
+        const conversation = chatSnapshot.map[conversationId];
+        const title = conversation?.title || "Chat";
+        targetTabId = tabsActions.getOrCreateActiveTab(
+          "chat",
+          {
+            conversationId,
+            projectId,
+            conversationTitle: conversation?.title,
+          },
+          title
+        );
+        shouldCreateTab = false;
+      }
+    } else if (isDataBrowserRoute && datasourceId) {
+      // Look for existing data browser tab
+      const existingTab = projectTabs.find(
+        (t) =>
+          (t.type === "datasource_table_data" ||
+            t.type === "datasource_table_structure") &&
+          t.metadata.datasourceId === datasourceId
+      );
+
+      if (existingTab) {
+        // Update existing tab with current table name if available
+        const tableName = dataBrowserSnapshot.selectedTable;
+        if (
+          tableName &&
+          (!existingTab.metadata.tableName ||
+            existingTab.metadata.tableName !== tableName)
+        ) {
+          tabsActions.updateTab(existingTab.id, {
+            title: tableName,
+            metadata: { ...existingTab.metadata, tableName },
+          });
+        }
+        targetTabId = existingTab.id;
+        shouldCreateTab = false;
+      } else {
+        // Create new data browser tab
+        const tableName = dataBrowserSnapshot.selectedTable;
+        const title = tableName ? tableName : "Table Data";
+        targetTabId = tabsActions.getOrCreateActiveTab(
+          "datasource_table_data",
+          {
+            datasourceId,
+            projectId,
+            tableName: tableName || undefined,
+          },
+          title
+        );
+        shouldCreateTab = false;
+      }
+    } else if (isQueryEditorRoute && datasourceId) {
+      // Look for existing query editor tab
+      const existingTab = projectTabs.find(
+        (t) =>
+          t.type === "datasource_query" &&
+          t.metadata.datasourceId === datasourceId
+      );
+
+      if (existingTab) {
+        targetTabId = existingTab.id;
+        shouldCreateTab = false;
+      } else {
+        // Create new query editor tab
+        targetTabId = tabsActions.getOrCreateActiveTab(
+          "datasource_query",
+          {
+            datasourceId,
+            projectId,
+          },
+          "Query Editor"
+        );
+        shouldCreateTab = false;
+      }
+    } else if (isDatasourceEditRoute && datasourceId) {
+      // Look for existing edit datasource tab
+      const existingTab = projectTabs.find(
+        (t) =>
+          t.type === "datasource_edit" &&
+          t.metadata.datasourceId === datasourceId
+      );
+
+      if (existingTab) {
+        targetTabId = existingTab.id;
+        shouldCreateTab = false;
+      } else {
+        // Create new edit datasource tab
+        targetTabId = tabsActions.getOrCreateActiveTab(
+          "datasource_edit",
+          {
+            projectId,
+            datasourceId,
+          },
+          "Edit Datasource"
+        );
+        shouldCreateTab = false;
+      }
+    } else if (isDatasourceNewRoute) {
+      // Look for existing new datasource tab
+      const existingTab = projectTabs.find((t) => t.type === "datasource_new");
+
+      if (existingTab) {
+        targetTabId = existingTab.id;
+        shouldCreateTab = false;
+      } else {
+        // Create new datasource tab
+        targetTabId = tabsActions.getOrCreateActiveTab(
+          "datasource_new",
+          {
+            projectId,
+          },
+          "New Datasource"
+        );
+        shouldCreateTab = false;
+      }
+    } else if (isNewRoute) {
+      // Always create/reuse chat tab for new conversations
+      targetTabId = tabsActions.getOrCreateActiveTab(
+        "chat",
+        {
+          projectId,
+          conversationId: "new",
+        },
+        "New Chat"
+      );
+      shouldCreateTab = false;
+    }
+
+    // If we have persisted tabs but need to create one for current route
+    if (shouldCreateTab && projectTabs.length === 0) {
+      // No tabs exist for this project, create default based on route
+      targetTabId = tabsActions.getOrCreateActiveTab(
+        "chat",
+        {
+          projectId,
+        },
+        "Chat"
+      );
+    }
+
+    // Set the target tab as active if we determined one
+    if (targetTabId && targetTabId !== tabsSnapshot.activeTabId) {
+      tabsActions.setActiveTab(targetTabId);
+    }
+  }, [
+    projectId,
+    conversationId,
+    datasourceId,
+    isDataBrowserRoute,
+    isQueryEditorRoute,
+    isDatasourceEditRoute,
+    isDatasourceNewRoute,
+    isNewRoute,
+    location.pathname,
+    tabsSnapshot.tabs,
+    tabsSnapshot.activeTabId,
+    tabsSnapshot.isRemovingTab,
+  ]);
+
+  // Render content based on active tab
+  const renderTabContent = () => {
+    const activeTab = tabsSnapshot.tabs.find(
+      (t) => t.id === tabsSnapshot.activeTabId
+    );
+    if (!activeTab) {
+      // Fallback to original routing logic when no tabs
+      if (isDataBrowserRoute && datasourceId) {
+        return (
+          <Suspense
+            fallback={<div className="flex-1 animate-pulse bg-gray-50" />}
+          >
+            <DataBrowserInlineEditing
+              datasourceId={datasourceId}
+              onClose={() => navigate(`/p/${projectId}`)}
+            />
+          </Suspense>
+        );
+      } else if (isQueryEditorRoute && datasourceId) {
+        return (
+          <Suspense
+            fallback={<div className="flex-1 animate-pulse bg-gray-50" />}
+          >
+            <QueryEditor datasourceId={datasourceId} />
+          </Suspense>
+        );
+      } else if (isDatasourceEditRoute && datasourceId) {
+        return (
+          <Suspense
+            fallback={<div className="flex-1 animate-pulse bg-gray-50" />}
+          >
+            <DatasourcesMain
+              projectId={projectId!}
+              mode="edit"
+              datasourceId={datasourceId}
+            />
+          </Suspense>
+        );
+      } else if (isDatasourceNewRoute) {
+        return (
+          <Suspense
+            fallback={<div className="flex-1 animate-pulse bg-gray-50" />}
+          >
+            <DatasourcesMain projectId={projectId!} mode="new" />
+          </Suspense>
+        );
+      } else if (isNewRoute) {
+        return (
+          <Suspense
+            fallback={<div className="flex-1 animate-pulse bg-gray-50" />}
+          >
+            <NewChat />
+          </Suspense>
+        );
+      } else {
+        return (
+          <Suspense
+            fallback={<div className="flex-1 animate-pulse bg-gray-50" />}
+          >
+            <Chat />
+          </Suspense>
+        );
+      }
+    }
+
+    // Render based on active tab
+    switch (activeTab.type) {
+      case "chat":
+        return (
+          <Suspense
+            fallback={<div className="flex-1 animate-pulse bg-gray-50" />}
+          >
+            {activeTab.metadata.conversationId === "new" ? <NewChat /> : <Chat />}
+          </Suspense>
+        );
+      case "datasource_table_data":
+        return (
+          <Suspense
+            fallback={<div className="flex-1 animate-pulse bg-gray-50" />}
+          >
+            <DataBrowserInlineEditing
+              datasourceId={activeTab.metadata.datasourceId!}
+              onClose={() => navigate(`/p/${projectId}`)}
+            />
+          </Suspense>
+        );
+      case "datasource_table_structure":
+        return (
+          <Suspense
+            fallback={<div className="flex-1 animate-pulse bg-gray-50" />}
+          >
+            <DataBrowserInlineEditing
+              datasourceId={activeTab.metadata.datasourceId!}
+              mode="structure"
+              onClose={() => navigate(`/p/${projectId}`)}
+            />
+          </Suspense>
+        );
+      case "datasource_query":
+        return (
+          <Suspense
+            fallback={<div className="flex-1 animate-pulse bg-gray-50" />}
+          >
+            <QueryEditor datasourceId={activeTab.metadata.datasourceId!} />
+          </Suspense>
+        );
+      case "datasource_edit":
+        return (
+          <Suspense
+            fallback={<div className="flex-1 animate-pulse bg-gray-50" />}
+          >
+            <DatasourcesMain
+              projectId={projectId!}
+              mode="edit"
+              datasourceId={activeTab.metadata.datasourceId}
+            />
+          </Suspense>
+        );
+      case "datasource_new":
+        return (
+          <Suspense
+            fallback={<div className="flex-1 animate-pulse bg-gray-50" />}
+          >
+            <DatasourcesMain projectId={projectId!} mode="new" />
+          </Suspense>
+        );
+      default:
+        return (
+          <Suspense
+            fallback={<div className="flex-1 animate-pulse bg-gray-50" />}
+          >
+            <Chat />
+          </Suspense>
+        );
+    }
+  };
 
   // Create new conversation immediately instead of using 'new' pseudo-state
   const createNewConversationAndRedirect = async () => {
@@ -177,34 +631,8 @@ export function MainApp() {
         />
       </Suspense>
       <div className="flex flex-1 flex-col min-w-0">
-        {isDataBrowserRoute && datasourceId ? (
-          <Suspense
-            fallback={<div className="flex-1 animate-pulse bg-gray-50" />}
-          >
-            <DataBrowser
-              datasourceId={datasourceId}
-              onClose={() => navigate(`/p/${projectId}/datasources`)}
-            />
-          </Suspense>
-        ) : isDatasourcesRoute ? (
-          <Suspense
-            fallback={<div className="flex-1 animate-pulse bg-gray-50" />}
-          >
-            <DatasourcesMain projectId={projectId!} />
-          </Suspense>
-        ) : isNewRoute ? (
-          <Suspense
-            fallback={<div className="flex-1 animate-pulse bg-gray-50" />}
-          >
-            <NewChat />
-          </Suspense>
-        ) : (
-          <Suspense
-            fallback={<div className="flex-1 animate-pulse bg-gray-50" />}
-          >
-            <Chat />
-          </Suspense>
-        )}
+        <TabBar />
+        <div className="flex-1 overflow-hidden flex flex-col">{renderTabContent()}</div>
       </div>
     </div>
   );

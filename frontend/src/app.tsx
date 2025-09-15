@@ -42,7 +42,7 @@ function App() {
         }
       />
       <Route
-        path="/p/:projectId/datasources"
+        path="/p/:projectId/datasources/:datasourceId/browse"
         element={
           <AppRoute>
             <MainApp />
@@ -50,7 +50,23 @@ function App() {
         }
       />
       <Route
-        path="/p/:projectId/datasources/:datasourceId/browse"
+        path="/p/:projectId/datasources/:datasourceId/query"
+        element={
+          <AppRoute>
+            <MainApp />
+          </AppRoute>
+        }
+      />
+      <Route
+        path="/p/:projectId/datasources/:datasourceId/edit"
+        element={
+          <AppRoute>
+            <MainApp />
+          </AppRoute>
+        }
+      />
+      <Route
+        path="/p/:projectId/datasources/new"
         element={
           <AppRoute>
             <MainApp />

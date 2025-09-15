@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useRef } from "react";
-import { DataTable } from "./data-table-virtual";
+import { DataTable } from "./data-table";
 import { TableColumn, TableConfig } from "./demo-data";
 import { Maximize2, Minimize2, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ interface InteractiveTableProps {
     config?: TableConfig;
   };
   requiresResponse?: boolean;
+  persistenceKey?: string;
 }
 
 export function InteractiveTable({
@@ -23,31 +24,18 @@ export function InteractiveTable({
   title,
   data,
   requiresResponse = false,
+  persistenceKey,
 }: InteractiveTableProps) {
   const [isMaximized, setIsMaximized] = useState(false);
   const tableRef = useRef<any>(null);
 
   // Prepare the data for DataTable component
   const tableData = useMemo(() => {
-    console.log('InteractiveTable - tableData processing:', { 
-      hasData: !!data, 
-      hasRows: !!data?.rows, 
-      rowsLength: data?.rows?.length,
-      rowsType: typeof data?.rows,
-      data 
-    });
     if (!data?.rows) return [];
     return data.rows;
   }, [data?.rows]);
 
   const tableColumns = useMemo(() => {
-    console.log('InteractiveTable - tableColumns processing:', { 
-      hasData: !!data, 
-      hasColumns: !!data?.columns, 
-      columnsLength: data?.columns?.length,
-      columnsType: typeof data?.columns,
-      columns: data?.columns 
-    });
     if (!data?.columns) return [];
     return data.columns;
   }, [data?.columns]);
@@ -143,6 +131,8 @@ export function InteractiveTable({
         globalSearch: false,
         stickyHeader: true,
         export: false,
+        columnBorders: true,
+        columnResize: true,
       },
     };
 
@@ -223,6 +213,7 @@ export function InteractiveTable({
           className={
             isMaximized ? "max-h-[calc(100vh-140px)]" : "max-h-[400px]"
           }
+          persistenceKey={persistenceKey}
           ref={tableRef}
         />
       </div>

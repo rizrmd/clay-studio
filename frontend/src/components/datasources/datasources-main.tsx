@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useSnapshot } from "valtio";
+import { useNavigate } from "react-router-dom";
 import { Plus, Database, Loader2, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -9,17 +10,32 @@ import { datasourcesStore, datasourcesActions } from "@/lib/store/datasources-st
 
 interface DatasourcesMainProps {
   projectId: string;
+  mode?: 'list' | 'edit' | 'new';
+  datasourceId?: string;
 }
 
-export function DatasourcesMain({ projectId }: DatasourcesMainProps) {
-  console.log('DatasourcesMain: Component rendered with projectId:', projectId);
+export function DatasourcesMain({ projectId, mode = 'list', datasourceId }: DatasourcesMainProps) {
   const snapshot = useSnapshot(datasourcesStore);
+  const navigate = useNavigate();
 
   // Load datasources when component mounts
   useEffect(() => {
-    console.log('DatasourcesMain: Loading datasources for project:', projectId);
     loadDatasources();
   }, [projectId]);
+
+  // Handle mode changes
+  useEffect(() => {
+    if (mode === 'new') {
+      datasourcesActions.showForm(); // Set to create new datasource
+    } else if (mode === 'edit' && datasourceId) {
+      const datasource = snapshot.datasources.find(d => d.id === datasourceId);
+      if (datasource) {
+        datasourcesActions.showForm(datasource);
+      }
+    } else if (mode === 'list') {
+      datasourcesActions.hideForm();
+    }
+  }, [mode, datasourceId, snapshot.datasources]);
 
   const loadDatasources = async () => {
     if (!projectId) return;
@@ -27,11 +43,11 @@ export function DatasourcesMain({ projectId }: DatasourcesMainProps) {
   };
 
   const handleCreateNew = () => {
-    datasourcesActions.showForm(); // This will set editingDatasource to null for create mode
+    navigate(`/p/${projectId}/datasources/new`);
   };
 
   const handleEdit = (datasource: any) => {
-    datasourcesActions.showForm(datasource);
+    navigate(`/p/${projectId}/datasources/${datasource.id}/edit`);
   };
 
   const handleDelete = async (datasourceId: string) => {
@@ -54,33 +70,14 @@ export function DatasourcesMain({ projectId }: DatasourcesMainProps) {
     }
   };
 
-  const isShowingForm = snapshot.editingDatasource !== null;
+  // Determine if we should show the form based on mode or internal state
+  const isShowingForm = mode === 'edit' || mode === 'new' || snapshot.editingDatasource !== null;
 
   return (
     <div className="flex flex-col h-full">
       {isShowingForm ? (
         // Form View
         <div className="flex flex-col h-full">
-          {/* Header */}
-          <div className="border-b p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h1 className="text-2xl font-semibold flex items-center gap-2">
-                  <Database className="h-6 w-6" />
-                  {snapshot.editingDatasource ? "Edit Datasource" : "Add New Datasource"}
-                </h1>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Configure your database connection
-                </p>
-              </div>
-              <Button 
-                variant="outline" 
-                onClick={() => datasourcesActions.hideForm()}
-              >
-                Back to List
-              </Button>
-            </div>
-          </div>
 
           {/* Form Content */}
           <div className="flex-1 overflow-y-auto p-4">
@@ -89,10 +86,10 @@ export function DatasourcesMain({ projectId }: DatasourcesMainProps) {
                 projectId={projectId}
                 datasource={snapshot.editingDatasource}
                 onSuccess={() => {
-                  datasourcesActions.hideForm();
+                  navigate(`/p/${projectId}`);
                   loadDatasources(); // Reload the list
                 }}
-                onCancel={() => datasourcesActions.hideForm()}
+                onCancel={() => navigate(`/p/${projectId}`)}
               />
             </div>
           </div>

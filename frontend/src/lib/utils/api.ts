@@ -34,8 +34,10 @@ class ApiClient {
     return response.data;
   }
 
-  async delete<T = any>(url: string, config?: any): Promise<T> {
-    const response = await axios.delete<T>(url, config);
+  async delete<T = any>(url: string, data?: any, config?: any): Promise<T> {
+    // For DELETE requests with data, we need to put the data in the config
+    const deleteConfig = data ? { ...config, data } : config;
+    const response = await axios.delete<T>(url, deleteConfig);
     return response.data;
   }
 

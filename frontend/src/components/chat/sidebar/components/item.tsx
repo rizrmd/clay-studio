@@ -7,8 +7,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { sidebarActions, sidebarStore } from "@/lib/store/chat/sidebar-store";
+import { tabsActions } from "@/lib/store/tabs-store";
 import { cn } from "@/lib/utils";
-import { Edit, MessageSquare, MoreHorizontal, Trash2 } from "lucide-react";
+import { Edit, MessageSquare, MoreHorizontal, Trash2, ExternalLink } from "lucide-react";
 import { useSnapshot } from "valtio";
 import { Conversation } from "../types";
 
@@ -19,6 +20,7 @@ interface ConversationItemProps {
   onRename: (conversation: Conversation) => void;
   onDelete: (conversationId: string) => void;
   href: string;
+  projectId?: string;
 }
 
 export function ConversationItem({
@@ -27,8 +29,19 @@ export function ConversationItem({
   onClick,
   onRename,
   href,
+  projectId,
 }: ConversationItemProps) {
   const sidebarSnapshot = useSnapshot(sidebarStore);
+
+  const handleOpenInNewTab = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (projectId) {
+      tabsActions.openInNewTab('chat', {
+        conversationId: conversation.id,
+        projectId,
+      }, conversation.title || 'Chat');
+    }
+  };
 
   return (
     <a
@@ -131,6 +144,12 @@ export function ConversationItem({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                onClick={handleOpenInNewTab}
+              >
+                <ExternalLink className="h-4 w-4 mr-2" />
+                Open in new Tab
+              </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={(e) => {
                   e.stopPropagation();

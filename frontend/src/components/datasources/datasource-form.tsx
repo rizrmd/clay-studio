@@ -12,7 +12,10 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { datasourcesActions, type Datasource } from "@/lib/store/datasources-store";
+import {
+  datasourcesActions,
+  type Datasource,
+} from "@/lib/store/datasources-store";
 
 interface DatasourceFormProps {
   projectId: string;
@@ -30,15 +33,19 @@ const DATABASE_TYPES = [
   { value: "sqlserver", label: "SQL Server" },
 ] as const;
 
-export function DatasourceForm({ 
-  projectId, 
-  datasource, 
-  onSuccess, 
-  onCancel 
+export function DatasourceForm({
+  projectId,
+  datasource,
+  onSuccess,
+  onCancel,
 }: DatasourceFormProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [testResult, setTestResult] = useState<{success: boolean; message: string; error?: string} | null>(null);
+  const [testResult, setTestResult] = useState<{
+    success: boolean;
+    message: string;
+    error?: string;
+  } | null>(null);
   const [isTesting, setIsTesting] = useState(false);
   const [formData, setFormData] = useState({
     name: "",
@@ -57,27 +64,27 @@ export function DatasourceForm({
   // Initialize form with existing datasource data
   useEffect(() => {
     if (datasource) {
-      console.log('DatasourceForm: Initializing form with datasource:', datasource);
-      console.log('DatasourceForm: datasource.source_type:', datasource.source_type);
-      setFormData(prev => ({
+      setFormData((prev) => ({
         ...prev,
         name: datasource.name,
         source_type: datasource.source_type,
         // Try to parse config to determine if it's URL or individual fields
-        ...(typeof datasource.config === "string" 
-          ? { 
+        ...(typeof datasource.config === "string"
+          ? {
               configType: "url" as const,
-              connectionUrl: datasource.config 
+              connectionUrl: datasource.config,
             }
           : {
               configType: "individual" as const,
               host: (datasource.config as any)?.host || "",
               port: (datasource.config as any)?.port?.toString() || "",
               database: (datasource.config as any)?.database || "",
-              username: (datasource.config as any)?.user || (datasource.config as any)?.username || "",
+              username:
+                (datasource.config as any)?.user ||
+                (datasource.config as any)?.username ||
+                "",
               password: (datasource.config as any)?.password || "",
-            }
-        ),
+            }),
       }));
     }
   }, [datasource]);
@@ -88,15 +95,16 @@ export function DatasourceForm({
 
     try {
       // Prepare config based on selected type
-      const config = formData.configType === "url" 
-        ? formData.connectionUrl
-        : {
-            host: formData.host,
-            port: formData.port ? parseInt(formData.port) : undefined,
-            database: formData.database,
-            user: formData.username,
-            password: formData.password,
-          };
+      const config =
+        formData.configType === "url"
+          ? formData.connectionUrl
+          : {
+              host: formData.host,
+              port: formData.port ? parseInt(formData.port) : undefined,
+              database: formData.database,
+              user: formData.username,
+              password: formData.password,
+            };
 
       const testData = {
         source_type: formData.source_type,
@@ -104,14 +112,16 @@ export function DatasourceForm({
       };
 
       // Test connection with current form data
-      const result = await datasourcesActions.testConnectionWithConfig(testData);
+      const result = await datasourcesActions.testConnectionWithConfig(
+        testData
+      );
       setTestResult(result);
     } catch (err) {
       console.error("Failed to test connection:", err);
       setTestResult({
         success: false,
         message: "Test failed",
-        error: err instanceof Error ? err.message : "Unknown error"
+        error: err instanceof Error ? err.message : "Unknown error",
       });
     } finally {
       setIsTesting(false);
@@ -125,15 +135,16 @@ export function DatasourceForm({
 
     try {
       // Prepare config based on selected type
-      const config = formData.configType === "url" 
-        ? formData.connectionUrl
-        : {
-            host: formData.host,
-            port: formData.port ? parseInt(formData.port) : undefined,
-            database: formData.database,
-            user: formData.username,
-            password: formData.password,
-          };
+      const config =
+        formData.configType === "url"
+          ? formData.connectionUrl
+          : {
+              host: formData.host,
+              port: formData.port ? parseInt(formData.port) : undefined,
+              database: formData.database,
+              user: formData.username,
+              password: formData.password,
+            };
 
       if (datasource) {
         // Update existing datasource
@@ -198,7 +209,9 @@ export function DatasourceForm({
           <Input
             id="name"
             value={formData.name}
-            onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+            onChange={(e) =>
+              setFormData((prev) => ({ ...prev, name: e.target.value }))
+            }
             placeholder="My Database"
             required
           />
@@ -209,11 +222,10 @@ export function DatasourceForm({
           <Select
             value={formData.source_type}
             onValueChange={(value) => {
-              console.log('DatasourceForm: Select onValueChange:', value);
-              setFormData(prev => ({ 
-                ...prev, 
-                source_type: value as Datasource["source_type"] 
-              }))
+              setFormData((prev) => ({
+                ...prev,
+                source_type: value as Datasource["source_type"],
+              }));
             }}
           >
             <SelectTrigger>
@@ -239,10 +251,12 @@ export function DatasourceForm({
                 name="configType"
                 value="url"
                 checked={formData.configType === "url"}
-                onChange={(e) => setFormData(prev => ({ 
-                  ...prev, 
-                  configType: e.target.value as "url" | "individual" 
-                }))}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    configType: e.target.value as "url" | "individual",
+                  }))
+                }
               />
               <span className="text-sm">Connection URL</span>
             </label>
@@ -252,10 +266,12 @@ export function DatasourceForm({
                 name="configType"
                 value="individual"
                 checked={formData.configType === "individual"}
-                onChange={(e) => setFormData(prev => ({ 
-                  ...prev, 
-                  configType: e.target.value as "url" | "individual" 
-                }))}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    configType: e.target.value as "url" | "individual",
+                  }))
+                }
               />
               <span className="text-sm">Individual Fields</span>
             </label>
@@ -270,10 +286,12 @@ export function DatasourceForm({
           <Textarea
             id="connectionUrl"
             value={formData.connectionUrl}
-            onChange={(e) => setFormData(prev => ({ 
-              ...prev, 
-              connectionUrl: e.target.value 
-            }))}
+            onChange={(e) =>
+              setFormData((prev) => ({
+                ...prev,
+                connectionUrl: e.target.value,
+              }))
+            }
             placeholder={getPlaceholderUrl()}
             rows={3}
             required
@@ -290,7 +308,9 @@ export function DatasourceForm({
               <Input
                 id="host"
                 value={formData.host}
-                onChange={(e) => setFormData(prev => ({ ...prev, host: e.target.value }))}
+                onChange={(e) =>
+                  setFormData((prev) => ({ ...prev, host: e.target.value }))
+                }
                 placeholder="localhost"
                 required
               />
@@ -301,8 +321,12 @@ export function DatasourceForm({
                 id="port"
                 type="number"
                 value={formData.port}
-                onChange={(e) => setFormData(prev => ({ ...prev, port: e.target.value }))}
-                placeholder={formData.source_type === "postgresql" ? "5432" : "3306"}
+                onChange={(e) =>
+                  setFormData((prev) => ({ ...prev, port: e.target.value }))
+                }
+                placeholder={
+                  formData.source_type === "postgresql" ? "5432" : "3306"
+                }
               />
             </div>
           </div>
@@ -312,7 +336,9 @@ export function DatasourceForm({
             <Input
               id="database"
               value={formData.database}
-              onChange={(e) => setFormData(prev => ({ ...prev, database: e.target.value }))}
+              onChange={(e) =>
+                setFormData((prev) => ({ ...prev, database: e.target.value }))
+              }
               placeholder="my_database"
               required
             />
@@ -324,7 +350,9 @@ export function DatasourceForm({
               <Input
                 id="username"
                 value={formData.username}
-                onChange={(e) => setFormData(prev => ({ ...prev, username: e.target.value }))}
+                onChange={(e) =>
+                  setFormData((prev) => ({ ...prev, username: e.target.value }))
+                }
                 placeholder="username"
                 autoComplete="username"
               />
@@ -335,7 +363,9 @@ export function DatasourceForm({
                 id="password"
                 type="password"
                 value={formData.password}
-                onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
+                onChange={(e) =>
+                  setFormData((prev) => ({ ...prev, password: e.target.value }))
+                }
                 placeholder="password"
                 autoComplete="current-password"
               />
@@ -346,54 +376,63 @@ export function DatasourceForm({
 
       {/* Test Connection */}
       <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <Label>Test Connection</Label>
-          <Button 
-            type="button" 
-            variant="outline" 
-            onClick={handleTestConnection}
-            disabled={isTesting}
-            className="flex items-center gap-2"
-          >
-            {isTesting ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0" />
-              </svg>
-            )}
-            {isTesting ? "Testing..." : "Test Connection"}
-          </Button>
-        </div>
-        
         {testResult && (
           <Alert variant={testResult.success ? "default" : "destructive"}>
             <AlertDescription>
               <div className="font-medium">
-                {testResult.success ? "✅ Connection successful!" : "❌ Connection failed"}
+                {testResult.success
+                  ? "✅ Connection successful!"
+                  : "❌ Connection failed"}
               </div>
-              <div className="text-sm mt-1">
-                {testResult.message}
-                {testResult.error && (
+              {testResult.error && (
+                <div className="text-sm mt-1">
                   <div className="mt-1 text-xs opacity-75">
                     {testResult.error}
                   </div>
-                )}
-              </div>
+                </div>
+              )}
             </AlertDescription>
           </Alert>
         )}
       </div>
 
       {/* Actions */}
-      <div className="flex gap-3 justify-end">
-        <Button type="button" variant="outline" onClick={onCancel}>
-          Cancel
+      <div className="flex gap-3 justify-between">
+        <Button
+          type="button"
+          variant="outline"
+          onClick={handleTestConnection}
+          disabled={isTesting}
+          className="flex items-center gap-2"
+        >
+          {isTesting ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <svg
+              className="h-4 w-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"
+              />
+            </svg>
+          )}
+          {isTesting ? "Testing..." : "Test Connection"}
         </Button>
-        <Button type="submit" disabled={isLoading}>
-          {isLoading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-          {datasource ? "Update Datasource" : "Create Datasource"}
-        </Button>
+        <div className="flex gap-3 ">
+          <Button type="button" variant="outline" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={isLoading}>
+            {isLoading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+            {datasource ? "Update Datasource" : "Create Datasource"}
+          </Button>
+        </div>
       </div>
     </form>
   );

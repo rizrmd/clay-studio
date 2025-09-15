@@ -211,7 +211,6 @@ export function MessageItem({
               }
               
               if (hasInteraction(dataToCheck)) {
-                console.log('Rendering interaction for tool:', invocation.toolName, 'with data:', dataToCheck);
                 return (
                   <InteractionRenderer
                     key={`interaction-${invocation.id}`}
@@ -219,7 +218,6 @@ export function MessageItem({
                   />
                 );
               } else if (isMcpInteraction) {
-                console.log('MCP interaction tool but no interaction detected:', invocation.toolName, 'data:', dataToCheck);
               }
             }
             return null;
@@ -231,7 +229,6 @@ export function MessageItem({
               const todos = invocation.result?.todos;
               
               if (todos && Array.isArray(todos) && todos.length > 0) {
-                console.log(`Rendering TodoList with todos:`, todos);
                 return (
                   <TodoList
                     key={`todo-${invocation.id}`}
@@ -239,9 +236,6 @@ export function MessageItem({
                   />
                 );
               } else {
-                console.log(`No todos found for invocation ${invocation.id}:`, {
-                  resultTodos: invocation.result?.todos
-                });
               }
             }
             return null;

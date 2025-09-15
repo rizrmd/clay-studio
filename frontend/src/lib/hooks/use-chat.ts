@@ -8,6 +8,7 @@ import type { CONVERSATION_ID, Message, PROJECT_ID } from "../types/chat";
 import type { ServerMessage } from "../types/ws";
 import { stream } from "./chat-streaming";
 import { messageUIActions } from "../store/chat/message-ui-store";
+import { tabsActions, tabsStore } from "../store/tabs-store";
 
 export const useChat = () => {
   const snap = useSnapshot(chatStore);
@@ -74,14 +75,32 @@ export const useChat = () => {
     const handleConversationCreated = (
       message: ServerMessage & { type: "conversation_created" }
     ) => {
+      
       // Add new conversation to store
       chatStore.map[message.conversation.id] = message.conversation;
       if (!chatStore.list.includes(message.conversation.id)) {
-        chatStore.list.push(message.conversation.id);
+        chatStore.list.unshift(message.conversation.id); // Add to beginning instead of end
       }
       // Switch to the new conversation
       chatStore.conversation_id = message.conversation.id;
       messageUIActions.setPreviousConversationId("new");
+
+      // Remove all chat tabs with conversationId="new" since we now have a real conversation
+      const newChatTabs = tabsStore.tabs.filter(t => 
+        t.type === 'chat' && t.metadata.conversationId === 'new'
+      );
+      newChatTabs.forEach(tab => tabsActions.removeTab(tab.id));
+      
+      // Create a proper chat tab for the new conversation
+      tabsActions.addTab({
+        type: "chat",
+        title: message.conversation.title || "New Chat",
+        metadata: {
+          conversationId: message.conversation.id,
+          projectId: chatStore.project_id,
+          conversationTitle: message.conversation.title,
+        },
+      });
 
       if (chatStore.pendingFirstChat) {
         sendMessage(chatStore.pendingFirstChat);
@@ -97,7 +116,7 @@ export const useChat = () => {
       // Update single conversation
       chatStore.map[message.conversation.id] = message.conversation;
       if (!chatStore.list.includes(message.conversation.id)) {
-        chatStore.list.push(message.conversation.id);
+        chatStore.list.unshift(message.conversation.id); // Add to beginning
       }
     };
 
@@ -186,17 +205,8 @@ export const useChat = () => {
       toolUsageId: string;
       conversationId: string;
     }) => {
-      console.log("🔧 Tool started:", message);
-      console.log(
-        "🔧 Current streaming state before:",
-        JSON.stringify(chatStore.streaming, null, 2)
-      );
 
       if (!chatStore.streaming[message.conversationId]) {
-        console.log(
-          "🔧 Creating new streaming state for:",
-          message.conversationId
-        );
         chatStore.streaming[message.conversationId] = {
           messageId: "",
           partialContent: "",
@@ -208,22 +218,15 @@ export const useChat = () => {
       const activeTools =
         chatStore.streaming[message.conversationId].activeTools;
       if (!activeTools.find((t) => t.toolUsageId === message.toolUsageId)) {
-        console.log("🔧 Adding tool to activeTools:", message.tool);
         activeTools.push({
           tool: message.tool,
           toolUsageId: message.toolUsageId,
           startTime: Date.now(),
           status: "active",
         });
-        console.log("🔧 ActiveTools after push:", activeTools);
       } else {
-        console.log("🔧 Tool already exists in activeTools");
       }
 
-      console.log(
-        "🔧 Final streaming state:",
-        JSON.stringify(chatStore.streaming[message.conversationId], null, 2)
-      );
     };
 
     const handleToolCompleted = (message: {
@@ -232,7 +235,6 @@ export const useChat = () => {
       executionTimeMs?: number;
       conversationId: string;
     }) => {
-      console.log("🔧 Tool completed:", message);
       if (chatStore.streaming[message.conversationId]) {
         const activeTools =
           chatStore.streaming[message.conversationId].activeTools;
@@ -246,7 +248,6 @@ export const useChat = () => {
           if (message.executionTimeMs) {
             activeTools[toolIndex].executionTime = message.executionTimeMs;
           }
-          console.log("🔧 Tool marked as completed:", activeTools[toolIndex]);
         }
       }
     };
@@ -382,6 +383,10 @@ export const useChat = () => {
       ? snap.map[snap.conversation_id].messages || []
       : [];
 
+  // Debug logging for conversation changes
+  useEffect(() => {
+  }, [snap.conversation_id, snap.map, currentMessages.length]);
+
   // Helper to get active tools for current conversation
   const currentActiveTools =
     snap.conversation_id && snap.streaming[snap.conversation_id]
@@ -416,10 +421,6 @@ export const useChat = () => {
 
     setProjectId(id: PROJECT_ID) {
       chatStore.project_id = id;
-      // Clear conversations when switching projects to prevent stale data
-      chatStore.list = [];
-      chatStore.map = {};
-      chatStore.conversation_id = "";
     },
 
     setConversationId(id: CONVERSATION_ID) {

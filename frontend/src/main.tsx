@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./app";
 import "./styles/globals.css";
 import "./styles/markdown.css";
+import "react-datasheet-grid/dist/style.css";
 import "./lib/utils/axios"; // Configure axios
 import { initializeApp } from "./lib/store/auth-store";
 

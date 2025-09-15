@@ -140,7 +140,6 @@ export function ChatInput({
     inputActions.setDragging(false);
     inputActions.setUploading(false);
     inputActions.clearUploadProgress();
-    console.log("Manually reset input state");
   };
 
   // Expose reset function to window for debugging (only in development)

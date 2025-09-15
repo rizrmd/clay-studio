@@ -14,6 +14,7 @@ import {
   useLocation,
 } from "react-router-dom";
 import { uiStore, uiActions } from "@/lib/store/chat/ui-store";
+import { tabsActions } from "@/lib/store/tabs-store";
 import { api } from "@/lib/utils/api";
 import { chatStore } from "@/lib/store/chat/chat-store";
 import { ConversationSidebarFooter } from "./components/footer";
@@ -84,37 +85,22 @@ export function ProjectSidebar({
   // Always load conversations when we have a projectId (regardless of route)
   useEffect(() => {
     if (projectId) {
-      console.log("ProjectSidebar: Loading conversations", {
-        projectId,
-        chatProjectId: chat.projectId,
-        conversationListLength: chat.conversationList?.length,
-        isConnected: chat.isConnected,
-      });
 
       // The conversations are managed by the chat hook and wsService
       // This should trigger the conversation list to load
       if (projectId !== chat.projectId) {
-        console.log("ProjectSidebar: Setting project ID");
         chat.setProjectId(projectId);
       }
 
-      // Use REST API to load conversations
-      const loadConversationsViaAPI = async () => {
-        try {
-          console.log(
-            "ProjectSidebar: Loading conversations via API for project:",
-            projectId
-          );
+      // Only load conversations if we don't have any for this project
+      if (chat.conversationList.length === 0) {
+        // Use REST API to load conversations
+        const loadConversationsViaAPI = async () => {
+          try {
 
           const response = await api.get(
             `/conversations?project_id=${projectId}`
           );
-          console.log("ProjectSidebar: API client response:", {
-            response,
-            type: typeof response,
-            isArray: Array.isArray(response),
-            length: Array.isArray(response) ? response.length : "not array",
-          });
 
           // Check if response is valid
           if (!Array.isArray(response)) {
@@ -122,30 +108,38 @@ export function ProjectSidebar({
               "ProjectSidebar: API response is not an array:",
               response
             );
-            console.log("ProjectSidebar: Falling back to WebSocket approach");
 
             // Fallback to WebSocket
             setTimeout(() => {
-              console.log(
-                "ProjectSidebar: WebSocket fallback - calling listConversations"
-              );
               chat.listConversations();
             }, 500);
             return;
           }
 
-          // Update chat store directly
+          // Update chat store directly - preserve existing conversation data with messages
+          const existingConversations = { ...chatStore.map };
+          
+          // Sort conversations by updated_at in descending order (newest first)
+          const sortedConversations = response.sort((a: any, b: any) => 
+            new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+          );
+          chatStore.list = sortedConversations.map((c: any) => c.id);
+          
+          // Clear and rebuild the map, but preserve loaded messages
           chatStore.map = {};
-          chatStore.list = response.map((c: any) => c.id);
-          response.forEach((conversation: any) => {
-            chatStore.map[conversation.id] = conversation;
+          sortedConversations.forEach((conversation: any) => {
+            if (existingConversations[conversation.id] && existingConversations[conversation.id].messages) {
+              // Keep the existing conversation with its loaded messages
+              chatStore.map[conversation.id] = {
+                ...conversation,
+                messages: existingConversations[conversation.id].messages
+              };
+            } else {
+              // Use the conversation from API (no messages loaded yet)
+              chatStore.map[conversation.id] = conversation;
+            }
           });
 
-          console.log(
-            "ProjectSidebar: Chat store updated with",
-            response.length,
-            "conversations"
-          );
         } catch (error) {
           console.error(
             "ProjectSidebar: Failed to load conversations via API:",
@@ -154,13 +148,13 @@ export function ProjectSidebar({
 
           // Fallback to WebSocket on error
           setTimeout(() => {
-            console.log("ProjectSidebar: WebSocket fallback after API error");
             chat.listConversations();
           }, 500);
         }
       };
 
       loadConversationsViaAPI();
+      }
     }
   }, [projectId]);
 
@@ -227,6 +221,44 @@ export function ProjectSidebar({
     }
   };
 
+  const handleQueryClick = (datasourceId: string) => {
+    sidebarActions.selectDatasource(datasourceId);
+    sidebarActions.setMobileMenuOpen(false);
+    if (projectId) {
+      // Find the datasource to get its name
+      const datasource = datasourcesSnapshot.datasources.find(ds => ds.id === datasourceId);
+      const tabTitle = datasource ? `Query: ${datasource.name}` : 'Query Editor';
+      
+      // Create or activate a query tab
+      tabsActions.getOrCreateActiveTab('datasource_query', {
+        datasourceId,
+        projectId,
+      }, tabTitle);
+      
+      // Navigate to the query editor
+      navigate(`/p/${projectId}/datasources/${datasourceId}/query`);
+    }
+  };
+
+  const handleEditClick = (datasourceId: string) => {
+    sidebarActions.selectDatasource(datasourceId);
+    sidebarActions.setMobileMenuOpen(false);
+    if (projectId) {
+      // Find the datasource to get its name
+      const datasource = datasourcesSnapshot.datasources.find(ds => ds.id === datasourceId);
+      const tabTitle = datasource ? `${datasource.name} - Edit` : 'Edit Datasource';
+      
+      // Create or activate an edit tab
+      tabsActions.getOrCreateActiveTab('datasource_edit', {
+        datasourceId,
+        projectId,
+      }, tabTitle);
+      
+      // Navigate to the edit datasource page
+      navigate(`/p/${projectId}/datasources/${datasourceId}/edit`);
+    }
+  };
+
   return (
     <>
       {/* Mobile overlay */}
@@ -290,6 +322,7 @@ export function ProjectSidebar({
                     onConversationClick={handleConversationClick}
                     onRenameConversation={openRenameDialog}
                     onDeleteConversation={handleDeleteConversation}
+                    projectId={projectId}
                   />
                 </AccordionContent>
               </AccordionItem>
@@ -312,6 +345,8 @@ export function ProjectSidebar({
                   <DatasourceList
                     onDatasourceClick={handleDatasourceClick}
                     onTableClick={handleTableClick}
+                    onQueryClick={handleQueryClick}
+                    onEditClick={handleEditClick}
                     activeDatasourceId={
                       uiSnapshot.currentDatasource || undefined
                     }
