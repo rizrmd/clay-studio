@@ -201,7 +201,7 @@ pub fn find_claude_logs_directories(base_path: &Path) -> Result<Vec<PathBuf>, Bo
                     results.push(path);
                 } else {
                     // Recursively search subdirectories, but skip hidden dirs except .claude_logs
-                    if !path.file_name().unwrap().to_string_lossy().starts_with('.') {
+                    if !path.file_name().is_some_and(|name| name.to_string_lossy().starts_with('.')) {
                         search_recursive(&path, results)?;
                     }
                 }
@@ -221,30 +221,32 @@ mod tests {
     use std::fs;
 
     #[test]
+    #[allow(clippy::expect_used)]
     fn test_find_claude_logs_directories() {
-        let temp_dir = TempDir::new().unwrap();
+        let temp_dir = TempDir::new().expect("Failed to create temp directory");
         let base_path = temp_dir.path();
         
         // Create a .claude_logs directory
         let claude_logs_dir = base_path.join("test_client").join(".claude_logs");
-        fs::create_dir_all(&claude_logs_dir).unwrap();
+        fs::create_dir_all(&claude_logs_dir).expect("Failed to create claude logs directory");
         
-        let found_dirs = find_claude_logs_directories(base_path).unwrap();
+        let found_dirs = find_claude_logs_directories(base_path).expect("Failed to find claude logs directories");
         assert_eq!(found_dirs.len(), 1);
         assert_eq!(found_dirs[0], claude_logs_dir);
     }
 
     #[test]
+    #[allow(clippy::expect_used)]
     fn test_reorganize_logs_dry_run() {
-        let temp_dir = TempDir::new().unwrap();
+        let temp_dir = TempDir::new().expect("Failed to create temp directory");
         let logs_dir = temp_dir.path().join(".claude_logs");
-        fs::create_dir_all(&logs_dir).unwrap();
+        fs::create_dir_all(&logs_dir).expect("Failed to create logs directory");
         
         // Create a test log file
         let log_file = logs_dir.join("query_20250902_075519.log");
-        fs::write(&log_file, "test log content").unwrap();
+        fs::write(&log_file, "test log content").expect("Failed to write test log file");
         
-        let (moved, _skipped) = reorganize_claude_logs(&logs_dir, true).unwrap();
+        let (moved, _skipped) = reorganize_claude_logs(&logs_dir, true).expect("Failed to reorganize logs");
         
         // In dry run, nothing should be moved
         assert_eq!(moved, 0);
@@ -253,18 +255,19 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::expect_used)]
     fn test_reorganize_logs_actual() {
-        let temp_dir = TempDir::new().unwrap();
+        let temp_dir = TempDir::new().expect("Failed to create temp directory");
         let logs_dir = temp_dir.path().join(".claude_logs");
-        fs::create_dir_all(&logs_dir).unwrap();
+        fs::create_dir_all(&logs_dir).expect("Failed to create logs directory");
         
         // Create test log files
         let log_file1 = logs_dir.join("query_20250902_075519.log");
         let log_file2 = logs_dir.join("query_20250903_123456_stderr.log");
-        fs::write(&log_file1, "test log content 1").unwrap();
-        fs::write(&log_file2, "test log content 2").unwrap();
+        fs::write(&log_file1, "test log content 1").expect("Failed to write test log file 1");
+        fs::write(&log_file2, "test log content 2").expect("Failed to write test log file 2");
         
-        let (moved, skipped) = reorganize_claude_logs(&logs_dir, false).unwrap();
+        let (moved, skipped) = reorganize_claude_logs(&logs_dir, false).expect("Failed to reorganize logs");
         
         assert_eq!(moved, 2);
         assert_eq!(skipped, 0);
@@ -280,25 +283,26 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::expect_used)]
     fn test_auto_organize_logs() {
-        let temp_dir = TempDir::new().unwrap();
+        let temp_dir = TempDir::new().expect("Failed to create temp directory");
         let logs_dir = temp_dir.path().join(".claude_logs");
-        fs::create_dir_all(&logs_dir).unwrap();
+        fs::create_dir_all(&logs_dir).expect("Failed to create logs directory");
         
         // Create test log files in root directory
         let log_file1 = logs_dir.join("query_20250902_075519.log");
         let log_file2 = logs_dir.join("query_20250903_123456_stderr.log");
-        fs::write(&log_file1, "test log content 1").unwrap();
-        fs::write(&log_file2, "test log content 2").unwrap();
+        fs::write(&log_file1, "test log content 1").expect("Failed to write test log file 1");
+        fs::write(&log_file2, "test log content 2").expect("Failed to write test log file 2");
         
         // Create an already organized file to ensure it's not moved
         let organized_dir = logs_dir.join("2025-08").join("15");
-        fs::create_dir_all(&organized_dir).unwrap();
+        fs::create_dir_all(&organized_dir).expect("Failed to create organized directory");
         let organized_file = organized_dir.join("query_20250815_120000.log");
-        fs::write(&organized_file, "already organized").unwrap();
+        fs::write(&organized_file, "already organized").expect("Failed to write organized file");
         
         // Run auto-organize
-        auto_organize_logs(&logs_dir).unwrap();
+        auto_organize_logs(&logs_dir).expect("Failed to auto-organize logs");
         
         // Check that files were moved to correct locations
         let expected_path1 = logs_dir.join("2025-09").join("02").join("query_20250902_075519.log");
@@ -314,11 +318,12 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::expect_used)]
     fn test_auto_organize_logs_no_directory() {
-        let temp_dir = TempDir::new().unwrap();
+        let temp_dir = TempDir::new().expect("Failed to create temp directory");
         let non_existent_dir = temp_dir.path().join("non_existent");
         
         // Should not error when directory doesn't exist
-        auto_organize_logs(&non_existent_dir).unwrap();
+        auto_organize_logs(&non_existent_dir).expect("Failed to auto-organize logs");
     }
 }

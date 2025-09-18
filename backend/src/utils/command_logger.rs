@@ -112,8 +112,9 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::expect_used)]
     fn test_command_logging() {
-        let temp_dir = TempDir::new().unwrap();
+        let temp_dir = TempDir::new().expect("Failed to create temp directory");
         let working_dir = temp_dir.path();
         
         let client_id = Uuid::new_v4();
@@ -142,7 +143,7 @@ mod tests {
         
         // Check that some log files exist
         let log_files: Vec<_> = fs::read_dir(&log_dir)
-            .unwrap()
+            .expect("Failed to read log directory")
             .filter_map(|entry| entry.ok())
             .filter(|entry| {
                 entry.path().extension()

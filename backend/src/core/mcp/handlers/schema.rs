@@ -3,6 +3,7 @@ use crate::core::mcp::types::*;
 use crate::utils::datasource::create_connector;
 use serde_json::{json, Value};
 
+#[allow(dead_code)]
 impl McpHandlers {
     /// Creates a summary of the schema with just table names and column counts
     fn create_schema_summary(&self, schema: &Value) -> Value {
@@ -58,6 +59,8 @@ impl McpHandlers {
 
             // If specific table is requested, get only that table's schema
             if let Some(table_name) = table_name {
+                // For now, we still need to create a connector for schema operations
+                // as these involve complex queries that vary by database type
                 let connector = create_connector(&source.source_type, &source.connection_config)
                     .await
                     .map_err(|e| format!("Failed to create connector: {}", e))?;
@@ -83,7 +86,7 @@ impl McpHandlers {
 
             // Check if we should use cached schema
             if use_cache {
-                if let Ok(cached_result) = sqlx::query_scalar::<_, Option<String>>(
+                if let Ok(Some(Some(cached_schema_str))) = sqlx::query_scalar::<_, Option<String>>(
                     "SELECT schema_info FROM data_sources WHERE id = $1 AND project_id = $2 AND deleted_at IS NULL"
                 )
                 .bind(datasource_id)
@@ -91,28 +94,27 @@ impl McpHandlers {
                 .fetch_optional(&self.db_pool)
                 .await
                 {
-                    if let Some(Some(cached_schema_str)) = cached_result {
-                        if let Ok(cached_schema) = serde_json::from_str::<Value>(&cached_schema_str) {
-                            // Apply summary mode if requested
-                            if summary_only {
-                                let summary_schema = self.create_schema_summary(&cached_schema);
-                                let response_data = json!({
-                                    "datasource": {
-                                        "id": datasource_id,
-                                        "name": source.name
-                                    },
-                                    "schema": summary_schema,
-                                    "metadata": {
-                                        "from_cache": true,
-                                        "summary_only": true
-                                    }
-                                });
-                                return Ok(serde_json::to_string(&response_data)?);
-                            }
+                    if let Ok(cached_schema) = serde_json::from_str::<Value>(&cached_schema_str) {
+                        // Apply summary mode if requested
+                        if summary_only {
+                            let summary_schema = self.create_schema_summary(&cached_schema);
+                            let response_data = json!({
+                                "datasource": {
+                                    "id": datasource_id,
+                                    "name": source.name
+                                },
+                                "schema": summary_schema,
+                                "metadata": {
+                                    "from_cache": true,
+                                    "summary_only": true
+                                }
+                            });
+                            return Ok(serde_json::to_string(&response_data)?);
+                        }
 
-                            // Apply pagination if requested  
-                            if let Some(limit) = limit {
-                                if let Some(tables) = cached_schema.get("tables").and_then(|v| v.as_object()) {
+                        // Apply pagination if requested  
+                        if let Some(limit) = limit {
+                            if let Some(tables) = cached_schema.get("tables").and_then(|v| v.as_object()) {
                                 let mut paginated_tables = serde_json::Map::new();
                                 for (k, v) in tables.iter().skip(offset).take(limit) {
                                     paginated_tables.insert(k.clone(), v.clone());
@@ -140,27 +142,28 @@ impl McpHandlers {
                                     }
                                 });
                                 return Ok(serde_json::to_string(&response_data)?);
-                                }
                             }
-
-                            // Return full cached schema
-                            let response_data = json!({
-                                "datasource": {
-                                    "id": datasource_id,
-                                    "name": source.name
-                                },
-                                "schema": cached_schema,
-                                "metadata": {
-                                    "from_cache": true
-                                }
-                            });
-                            return Ok(serde_json::to_string(&response_data)?);
                         }
+
+                        // Return full cached schema
+                        let response_data = json!({
+                            "datasource": {
+                                "id": datasource_id,
+                                "name": source.name
+                            },
+                            "schema": cached_schema,
+                            "metadata": {
+                                "from_cache": true
+                            }
+                        });
+                        return Ok(serde_json::to_string(&response_data)?);
                     }
                 }
             }
 
             // Fetch fresh schema from database
+            // For now, we still need to create a connector for schema operations
+            // as these involve complex queries that vary by database type
             let connector = create_connector(&source.source_type, &source.connection_config)
                 .await
                 .map_err(|e| format!("Failed to create connector: {}", e))?;

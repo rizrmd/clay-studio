@@ -4,6 +4,7 @@ pub mod types;
 use chrono::Utc;
 use handlers::McpHandlers;
 use salvo::prelude::*;
+use serde_json::json;
 use sqlx::PgPool;
 use std::io::{self, BufRead, BufReader, Write};
 use tokio::runtime::Runtime;
@@ -98,8 +99,8 @@ impl McpServer {
         let reader = BufReader::new(stdin.lock());
 
         // Set up timeout to avoid hanging indefinitely
-        let mut line_iter = reader.lines();
-        while let Some(line_result) = line_iter.next() {
+        let line_iter = reader.lines();
+        for line_result in line_iter {
             match line_result {
                 Ok(line) => {
                     if line.trim().is_empty() {
@@ -384,16 +385,32 @@ struct CorsMiddleware;
 #[async_trait::async_trait]
 impl Handler for CorsMiddleware {
     async fn handle(&self, _req: &mut Request, _depot: &mut Depot, res: &mut Response, ctrl: &mut FlowCtrl) {
-        res.headers_mut().insert("Access-Control-Allow-Origin", "*".parse().unwrap());
-        res.headers_mut().insert("Access-Control-Allow-Methods", "POST, GET, OPTIONS".parse().unwrap());
-        res.headers_mut().insert("Access-Control-Allow-Headers", "Content-Type".parse().unwrap());
+        if let Ok(value) = "*".parse() {
+            res.headers_mut().insert("Access-Control-Allow-Origin", value);
+        }
+        if let Ok(value) = "POST, GET, OPTIONS".parse() {
+            res.headers_mut().insert("Access-Control-Allow-Methods", value);
+        }
+        if let Ok(value) = "Content-Type".parse() {
+            res.headers_mut().insert("Access-Control-Allow-Headers", value);
+        }
         ctrl.call_next(_req, _depot, res).await;
     }
 }
 
 #[handler]
 async fn handle_mcp_request(req: &mut Request, depot: &mut Depot, res: &mut Response) {
-    let db_pool = depot.get::<PgPool>("db_pool").unwrap().clone();
+    let db_pool = match depot.obtain::<PgPool>() {
+        Ok(pool) => pool.clone(),
+        Err(_) => {
+            tracing::error!("Database pool not found in depot");
+            res.status_code(StatusCode::INTERNAL_SERVER_ERROR);
+            res.render(Json(json!({
+                "error": "Internal server error: Database pool not available"
+            })));
+            return;
+        }
+    };
     
     // Extract client_id and project_id from URL parameters
     let client_id = req.param::<String>("client_id").unwrap_or_else(|| "unknown".to_string());
@@ -443,7 +460,7 @@ async fn handle_mcp_request(req: &mut Request, depot: &mut Depot, res: &mut Resp
         }
     };
 
-    let request_text = String::from_utf8_lossy(&request_body);
+    let request_text = String::from_utf8_lossy(request_body);
     let json_request: JsonRpcRequest = match serde_json::from_str(&request_text) {
         Ok(req) => req,
         Err(e) => {

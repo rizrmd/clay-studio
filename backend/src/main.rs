@@ -1,6 +1,8 @@
 // Forbid unwrap and expect to prevent panics
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
+// Allow dead code during development/refactoring
+#![allow(dead_code)]
 
 mod api;
 mod core;
@@ -16,8 +18,7 @@ use std::time::Duration;
 use tokio::signal;
 
 use crate::api::{
-    admin, auth, client_management, clients, conversations, conversations_forget, datasources, projects, prompt, tool_usage,
-    upload, user_management, websocket,
+    admin, uploads, chat, api_routes,
 };
 use crate::core::sessions::PostgresSessionStore;
 use crate::utils::middleware::{
@@ -135,17 +136,21 @@ async fn bind_with_retry(address: &str, max_retries: u32) -> TcpAcceptor {
 /// Wait for shutdown signal (SIGTERM, SIGINT, or Ctrl+C)
 async fn shutdown_signal() {
     let ctrl_c = async {
-        signal::ctrl_c()
-            .await
-            .expect("Failed to install Ctrl+C handler");
+        if let Err(e) = signal::ctrl_c().await {
+            tracing::error!("Failed to install Ctrl+C handler: {}", e);
+        }
     };
 
     #[cfg(unix)]
     let terminate = async {
-        signal::unix::signal(signal::unix::SignalKind::terminate())
-            .expect("Failed to install signal handler")
-            .recv()
-            .await;
+        match signal::unix::signal(signal::unix::SignalKind::terminate()) {
+            Ok(mut signal) => {
+                signal.recv().await;
+            },
+            Err(e) => {
+                tracing::error!("Failed to install signal handler: {}", e);
+            }
+        }
     };
 
     #[cfg(not(unix))]
@@ -347,96 +352,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .cookie_path("/")
         .same_site_policy(salvo::http::cookie::SameSite::Lax)
         .build()
-        .unwrap();
+        .map_err(|e| {
+            tracing::error!("Failed to build session handler: {}", e);
+            anyhow::anyhow!("Failed to build session handler: {}", e)
+        })?;
 
     // Public routes (no auth required)
     let public_router = Router::new()
         .push(Router::with_path("/health").get(health_check))
-        .push(Router::with_path("/health/database").get(database_health_check))
-        .push(Router::with_path("/auth").push(auth::auth_routes()))
-        .push(Router::new().push(clients::client_routes())) // Allow client creation during initial setup
-        .push(Router::with_path("/debug/connections").get(api::debug::get_active_connections));
+        .push(Router::with_path("/health/database").get(database_health_check));
 
     // WebSocket route (auth checked after connection)
-    let ws_router = Router::new().push(Router::with_path("/ws").get(websocket::handle_websocket));
+    let ws_router = Router::new().push(Router::with_path("/ws").get(chat::websocket::handle_websocket));
 
     // Protected routes (auth required + client scoped)
     let protected_router = Router::new()
         .hoop(auth_required)
         .hoop(client_scoped)
-        .push(Router::with_path("/auth").push(auth::auth_protected_routes()))
-        .push(Router::with_path("/prompt/stream").post(prompt::handle_prompt_stream))
-        .push(
-            Router::with_path("/projects")
-                .get(projects::list_projects)
-                .post(projects::create_project),
-        )
-        .push(
-            Router::with_path("/projects/{project_id}/context").get(projects::get_project_context),
-        )
-        .push(
-            Router::with_path("/projects/{project_id}/queries")
-                .get(projects::list_queries)
-                .post(projects::save_query),
-        )
-        .push(
-            Router::with_path("/projects/{project_id}/claude-md")
-                .get(projects::get_claude_md)
-                .put(projects::save_claude_md)
-                .post(projects::refresh_claude_md),
-        )
-        .push(Router::with_path("/projects/{project_id}").delete(projects::delete_project))
-        // Datasources routes
-        .push(datasources::datasource_routes())
-        // Conversation routes - basic CRUD first
-        .push(conversations::conversation_routes())
-        // Conversation forget routes - more specific paths
-        .push(
-            Router::with_path("/conversations/{conversation_id}/forget-after")
-                .put(conversations_forget::forget_messages_after)
-                .delete(conversations_forget::restore_forgotten_messages)
-                .get(conversations_forget::get_forgotten_status),
-        )
-        .push(
-            Router::with_path("/messages/{message_id}/tool-usages")
-                .get(tool_usage::get_message_tool_usages),
-        )
-        .push(
-            Router::with_path("/messages/{message_id}/tool-usage/{tool_name}")
-                .get(tool_usage::get_tool_usage_by_name),
-        )
-        .push(
-            Router::with_path("/tool-usages/{tool_usage_id}")
-                .get(tool_usage::get_tool_usage_by_id),
-        )
-        .push(Router::with_path("/upload").post(upload::handle_file_upload))
-        .push(Router::with_path("/uploads").get(upload::handle_list_uploads))
-        .push(
-            Router::with_path("/uploads/{file_id}/description")
-                .put(upload::handle_update_file_description),
-        )
-        .push(Router::with_path("/uploads/<id>").delete(upload::handle_delete_upload))
-        .push(
-            Router::with_path("/uploads/{client_id}/{project_id}/{file_name}")
-                .get(upload::handle_file_download),
-        )
-        .push(
-            Router::with_path("/files/excel/{client_id}/{project_id}/{export_id}")
-                .get(upload::handle_excel_download),
-        );
+        // File upload routes with content extraction
+        .push(uploads::upload_routes());
 
     // Admin routes (accessible to admin and root roles)
     let admin_router = Router::new()
         .hoop(admin_required)
-        .push(Router::with_path("/admin").push(client_management::admin_routes()))
-        .push(Router::with_path("/admin").push(user_management::admin_routes()))
-        .push(Router::with_path("/admin").push(admin::admin_router()));
+        .push(Router::with_path("/admin").push(admin::admin_routes()));
 
     // Root routes (accessible only to root role)
     let root_router = Router::new()
-        .hoop(root_required)
-        .push(Router::with_path("/root/clients").push(client_management::root_routes()))
-        .push(Router::with_path("/root/clients").push(user_management::root_routes()));
+        .hoop(root_required);
 
     // API routes with state injection and session handling
     let api_router = Router::new()
@@ -446,7 +389,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .push(ws_router)
         .push(protected_router)
         .push(admin_router)
-        .push(root_router);
+        .push(root_router)
+        .push(api_routes());
 
     // Static file serving for frontend
     let static_path = std::env::var("STATIC_FILES_PATH")
