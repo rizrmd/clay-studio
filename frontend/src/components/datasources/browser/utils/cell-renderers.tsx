@@ -37,7 +37,7 @@ export function createClickableCellRenderer(
 }
 
 export function createReadOnlyCellRenderer() {
-  return (value: any, row: any, column: TableColumn, defaultRenderer: (value: any) => React.ReactNode) => {
+  return (value: any, _row: any, _column: TableColumn, defaultRenderer: (value: any) => React.ReactNode) => {
     return defaultRenderer(value);
   };
 }

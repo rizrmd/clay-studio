@@ -25,6 +25,7 @@ export const chatStore = proxy({
   map: {} as Record<CONVERSATION_ID, Conversation>,
   errors: {} as Record<CONVERSATION_ID, string>,
   streaming: {} as Record<CONVERSATION_ID, StreamingState>,
+  loadingMessages: {} as Record<CONVERSATION_ID, boolean>,
 });
 
 export const setConversationError = (

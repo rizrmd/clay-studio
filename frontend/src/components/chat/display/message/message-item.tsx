@@ -1,7 +1,5 @@
-import { useMemo } from "react";
 import { Message } from "../types";
 import { cn } from "@/lib/utils";
-import { FilePreview } from "@/components/ui/file-preview";
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
 import { ChatToolUsage } from "@/components/chat/display/message/item/tools/chat-tool-usage";
 import {
@@ -9,13 +7,13 @@ import {
   type Animation,
 } from "@/components/chat/display/message/item/chat-bubble-variants";
 import { type ToolInvocation } from "@/components/chat/display/message/item/types";
-import { dataUrlToUint8Array } from "@/components/chat/display/message/item/utils";
 import {
   InteractionRenderer,
   hasInteraction,
 } from "@/components/chat/display/message/item/interaction/interaction-renderer";
 import { TodoList } from "@/components/chat/display/message/item/interaction/todo-list";
 import { parseMcpToolResult } from "@/components/chat/display/tool/tool-call-utils";
+import { FileAttachmentDisplay } from "./file-attachment-display";
 
 export interface MessageItemProps {
   message: Message;
@@ -38,13 +36,30 @@ export function MessageItem({
   activeTools = [],
   isLastMessage = false,
 }: MessageItemProps) {
-  // Convert file attachments to the expected format
+  // Convert file attachments to the expected format with proper download URLs
   const experimental_attachments = message.file_attachments?.map(
-    (attachment) => ({
-      name: attachment.original_name,
-      contentType: attachment.mime_type || "application/octet-stream",
-      url: attachment.file_path,
-    })
+    (attachment) => {
+      // Extract client_id and project_id from file_path
+      // file_path format: .clients/{client_id}/{project_id}/uploads/{file_name}
+      const pathParts = attachment.file_path.split('/');
+      const clientId = pathParts[1]; // clients/{client_id}
+      const projectId = pathParts[2]; // {project_id}
+      const fileName = pathParts[pathParts.length - 1]; // {file_name}
+      
+      const downloadUrl = `/api/uploads/${clientId}/${projectId}/${fileName}`;
+      
+      return {
+        id: attachment.id,
+        name: attachment.original_name,
+        contentType: attachment.mime_type || "application/octet-stream",
+        url: downloadUrl,
+        size: attachment.file_size,
+        description: attachment.description,
+        autoDescription: attachment.auto_description,
+        isTextFile: attachment.is_text_file,
+        preview: attachment.preview,
+      };
+    }
   );
 
   // Convert tool usages to tool invocations
@@ -92,15 +107,8 @@ export function MessageItem({
       : []),
   ];
 
-  const files = useMemo(() => {
-    return experimental_attachments?.map((attachment) => {
-      const dataArray = dataUrlToUint8Array(attachment.url);
-      const file = new File([dataArray], attachment.name ?? "Unknown", {
-        type: attachment.contentType,
-      });
-      return file;
-    });
-  }, [experimental_attachments]);
+  // Don't convert to File objects - we'll display attachment info directly
+  const fileAttachments = experimental_attachments;
 
   const isUser = message.role === "user";
   const createdAt = message.createdAt ? new Date(message.createdAt) : undefined;
@@ -121,11 +129,14 @@ export function MessageItem({
 
   const renderMessage = (className?: string) => (
     <div className={cn(" max-w-full overflow-auto flex flex-col", isUser ? "items-end" : "items-start")}>
-      {files ? (
-        <div className="mb-1 flex flex-wrap gap-2">
-          {files.map((file, index) => {
-            return <FilePreview file={file} key={index} />;
-          })}
+      {fileAttachments && fileAttachments.length > 0 ? (
+        <div className="mb-2 flex flex-wrap gap-2">
+          {fileAttachments.map((attachment, index) => (
+            <FileAttachmentDisplay 
+              key={attachment.id || index} 
+              attachment={attachment}
+            />
+          ))}
         </div>
       ) : null}
 

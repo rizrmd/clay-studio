@@ -10,6 +10,7 @@ interface ConversationListProps {
   onConversationClick: (conversationId: string) => void;
   onRenameConversation: (conversation: Conversation) => void;
   onDeleteConversation: (conversationId: string) => void;
+  onShareConversation: (conversation: Conversation) => void;
   projectId?: string;
 }
 
@@ -18,6 +19,7 @@ export function ConversationList({
   onConversationClick,
   onRenameConversation,
   onDeleteConversation,
+  onShareConversation,
   projectId,
 }: ConversationListProps) {
   const sidebarSnapshot = useSnapshot(sidebarStore);
@@ -72,6 +74,7 @@ export function ConversationList({
             onClick={onConversationClick}
             onRename={onRenameConversation}
             onDelete={onDeleteConversation}
+            onShare={onShareConversation}
             projectId={projectId}
           />
         ))}

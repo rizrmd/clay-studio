@@ -53,19 +53,35 @@ cleanupPort(7680); // backend
 cleanupPort(7690); // frontend
 cleanupPort(7670); // MCP server
 
-// Build MCP server debug binary first
-console.log("🔧 Building MCP server debug binary...");
-const mcpBuildResult = spawnSync({
+// Build MCP server and analysis executor debug binaries in parallel
+console.log("🔧 Building MCP server and analysis executor debug binaries...");
+
+const mcpBuildPromise = spawn({
   cmd: ["cargo", "build", "--bin", "mcp_server"],
   cwd: backendDir,
   stdout: "pipe",
   stderr: "pipe",
-});
+}).exited;
 
-if (mcpBuildResult.exitCode === 0) {
+const analysisBuildPromise = spawn({
+  cmd: ["cargo", "build", "--bin", "analysis_executor"],
+  cwd: backendDir,
+  stdout: "pipe",
+  stderr: "pipe",
+}).exited;
+
+const [mcpExitCode, analysisExitCode] = await Promise.all([mcpBuildPromise, analysisBuildPromise]);
+
+if (mcpExitCode === 0) {
   console.log("✅ MCP server debug binary built successfully");
 } else {
-  console.error("❌ MCP server build failed:", new TextDecoder().decode(mcpBuildResult.stderr));
+  console.error("❌ MCP server build failed with exit code:", mcpExitCode);
+}
+
+if (analysisExitCode === 0) {
+  console.log("✅ Analysis executor debug binary built successfully");
+} else {
+  console.error("❌ Analysis executor build failed with exit code:", analysisExitCode);
 }
 
 // Build and start backend with watching - ignore target directory and only watch src files
@@ -194,8 +210,8 @@ const monitorBackend = async () => {
           // Reset backend running state - let the "listening" detection handle startup
           backendRunning = false;
           
-          // Also rebuild MCP server when backend recompiles
-          console.log("🔧 Rebuilding MCP server debug binary...");
+          // Also rebuild MCP server and analysis executor when backend recompiles (in parallel)
+          console.log("🔧 Rebuilding MCP server and analysis executor debug binaries...");
           try {
             const mcpRebuild = spawn({
               cmd: ["cargo", "build", "--bin", "mcp_server"],
@@ -204,23 +220,34 @@ const monitorBackend = async () => {
               stderr: "pipe",
             });
             
-            // Check if spawn was successful
-            if (mcpRebuild && mcpRebuild.exited) {
-              // Don't await - let it rebuild in background
-              mcpRebuild.exited.then((exitCode) => {
-                if (exitCode === 0) {
-                  console.log("✅ MCP server debug binary rebuilt successfully");
-                } else {
-                  console.error("❌ MCP server rebuild failed with exit code:", exitCode);
-                }
-              }).catch((error) => {
-                console.error("❌ MCP server rebuild error:", error);
-              });
-            } else {
-              console.error("❌ Failed to spawn MCP server rebuild process");
-            }
+            const analysisRebuild = spawn({
+              cmd: ["cargo", "build", "--bin", "analysis_executor"],
+              cwd: backendDir,
+              stdout: "pipe",
+              stderr: "pipe",
+            });
+            
+            // Don't await - let them rebuild in background in parallel
+            Promise.all([
+              mcpRebuild?.exited || Promise.resolve(1),
+              analysisRebuild?.exited || Promise.resolve(1)
+            ]).then(([mcpExitCode, analysisExitCode]) => {
+              if (mcpExitCode === 0) {
+                console.log("✅ MCP server debug binary rebuilt successfully");
+              } else {
+                console.error("❌ MCP server rebuild failed with exit code:", mcpExitCode);
+              }
+              
+              if (analysisExitCode === 0) {
+                console.log("✅ Analysis executor debug binary rebuilt successfully");
+              } else {
+                console.error("❌ Analysis executor rebuild failed with exit code:", analysisExitCode);
+              }
+            }).catch((error) => {
+              console.error("❌ Parallel rebuild error:", error);
+            });
           } catch (error) {
-            console.error("❌ Error starting MCP server rebuild:", error);
+            console.error("❌ Error starting parallel rebuild:", error);
           }
         }
         

@@ -26,6 +26,16 @@ const QueryEditor = lazy(() =>
     default: m.QueryEditor,
   }))
 );
+const AnalysisEditor = lazy(() =>
+  import("@/components/analysis/analysis-editor").then((m) => ({
+    default: m.AnalysisEditor,
+  }))
+);
+const AnalysisList = lazy(() =>
+  import("@/components/analysis/analysis-list").then((m) => ({
+    default: m.AnalysisList,
+  }))
+);
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useSnapshot } from "valtio";
 import { uiStore, uiActions } from "@/lib/store/chat/ui-store";
@@ -45,10 +55,11 @@ export function MainApp() {
   const tabsSnapshot = useSnapshot(tabsStore);
   const dataBrowserSnapshot = useSnapshot(dataBrowserStore);
   const chatSnapshot = useSnapshot(chatStore);
-  const { projectId, conversationId, datasourceId } = useParams<{
+  const { projectId, conversationId, datasourceId, analysisId } = useParams<{
     projectId: string;
     conversationId?: string;
     datasourceId?: string;
+    analysisId?: string;
   }>();
   const navigate = useNavigate();
   const location = useLocation();
@@ -70,6 +81,12 @@ export function MainApp() {
     location.pathname.endsWith("/edit");
   // Check if we're on the new datasource route
   const isDatasourceNewRoute = location.pathname.endsWith("/datasources/new");
+  // Check if we're on the analysis list route
+  const isAnalysisListRoute = location.pathname.endsWith("/analysis");
+  // Check if we're on the new analysis route
+  const isAnalysisNewRoute = location.pathname.includes("/analysis/new");
+  // Check if we're on the analysis view/edit route
+  const isAnalysisViewRoute = location.pathname.includes("/analysis/") && !isAnalysisNewRoute;
 
   // Enable debug logging hooks
   useLoggerDebug();
@@ -96,7 +113,10 @@ export function MainApp() {
       !isDataBrowserRoute &&
       !isQueryEditorRoute &&
       !isDatasourceEditRoute &&
-      !isDatasourceNewRoute
+      !isDatasourceNewRoute &&
+      !isAnalysisListRoute &&
+      !isAnalysisNewRoute &&
+      !isAnalysisViewRoute
     ) {
       // Try to get the last conversation from localStorage
       const lastConversationKey = `last_conversation_${projectId}`;
@@ -118,6 +138,9 @@ export function MainApp() {
     isQueryEditorRoute,
     isDatasourceEditRoute,
     isDatasourceNewRoute,
+    isAnalysisListRoute,
+    isAnalysisNewRoute,
+    isAnalysisViewRoute,
   ]);
 
   useEffect(() => {
@@ -134,6 +157,8 @@ export function MainApp() {
     if (projectId && conversationId && conversationId !== "new") {
       // Only subscribe if we're not already subscribed to this project/conversation
       if (!wsService.isSubscribed(projectId, conversationId)) {
+        // Mark as loading messages
+        chatStore.loadingMessages[conversationId] = true;
         wsService.subscribe(projectId, conversationId);
         // Request conversation messages after subscribing
         wsService.getConversationMessages(conversationId);
@@ -374,6 +399,45 @@ export function MainApp() {
         );
         shouldCreateTab = false;
       }
+    } else if (isAnalysisViewRoute && analysisId) {
+      // Look for existing analysis tab
+      const existingTab = projectTabs.find(
+        (t) => t.type === "analysis" && t.metadata.analysisId === analysisId
+      );
+
+      if (existingTab) {
+        targetTabId = existingTab.id;
+        shouldCreateTab = false;
+      } else {
+        // Create new analysis tab
+        targetTabId = tabsActions.getOrCreateActiveTab(
+          "analysis",
+          {
+            projectId,
+            analysisId,
+          },
+          "Analysis"
+        );
+        shouldCreateTab = false;
+      }
+    } else if (isAnalysisNewRoute) {
+      // Look for existing new analysis tab
+      const existingTab = projectTabs.find((t) => t.type === "analysis");
+
+      if (existingTab) {
+        targetTabId = existingTab.id;
+        shouldCreateTab = false;
+      } else {
+        // Create new analysis tab
+        targetTabId = tabsActions.getOrCreateActiveTab(
+          "analysis",
+          {
+            projectId,
+          },
+          "New Analysis"
+        );
+        shouldCreateTab = false;
+      }
     } else if (isNewRoute) {
       // Always create/reuse chat tab for new conversations
       targetTabId = tabsActions.getOrCreateActiveTab(
@@ -407,10 +471,13 @@ export function MainApp() {
     projectId,
     conversationId,
     datasourceId,
+    analysisId,
     isDataBrowserRoute,
     isQueryEditorRoute,
     isDatasourceEditRoute,
     isDatasourceNewRoute,
+    isAnalysisViewRoute,
+    isAnalysisNewRoute,
     isNewRoute,
     location.pathname,
     tabsSnapshot.tabs,
@@ -462,6 +529,36 @@ export function MainApp() {
             fallback={<div className="flex-1 animate-pulse bg-gray-50" />}
           >
             <DatasourcesMain projectId={projectId!} mode="new" />
+          </Suspense>
+        );
+      } else if (isAnalysisNewRoute) {
+        return (
+          <Suspense
+            fallback={<div className="flex-1 animate-pulse bg-gray-50" />}
+          >
+            <AnalysisEditor 
+              projectId={projectId!}
+              mode="create"
+            />
+          </Suspense>
+        );
+      } else if (isAnalysisViewRoute && analysisId) {
+        return (
+          <Suspense
+            fallback={<div className="flex-1 animate-pulse bg-gray-50" />}
+          >
+            <AnalysisEditor 
+              analysisId={analysisId}
+              projectId={projectId!}
+            />
+          </Suspense>
+        );
+      } else if (isAnalysisListRoute) {
+        return (
+          <Suspense
+            fallback={<div className="flex-1 animate-pulse bg-gray-50" />}
+          >
+            <AnalysisList projectId={projectId!} />
           </Suspense>
         );
       } else if (isNewRoute) {
@@ -542,6 +639,17 @@ export function MainApp() {
             fallback={<div className="flex-1 animate-pulse bg-gray-50" />}
           >
             <DatasourcesMain projectId={projectId!} mode="new" />
+          </Suspense>
+        );
+      case "analysis":
+        return (
+          <Suspense
+            fallback={<div className="flex-1 animate-pulse bg-gray-50" />}
+          >
+            <AnalysisEditor 
+              analysisId={activeTab.metadata.analysisId}
+              projectId={projectId!}
+            />
           </Suspense>
         );
       default:

@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import { useSnapshot } from "valtio";
 import {
   authStore,
@@ -11,13 +10,6 @@ import {
 
 export function useAuth() {
   const snapshot = useSnapshot(authStore);
-
-  // Update registration status when firstClient changes
-  useEffect(() => {
-    if (snapshot.firstClient) {
-      checkRegistrationStatus();
-    }
-  }, [snapshot.firstClient]);
 
   return {
     user: snapshot.user,

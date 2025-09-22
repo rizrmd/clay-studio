@@ -7,6 +7,7 @@ import {
   Terminal,
   Edit, 
   Plus,
+  BarChart3,
   X 
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -20,6 +21,7 @@ const TAB_ICONS: Record<TabType, typeof MessageSquare> = {
   'datasource_edit': Edit,
   'datasource_new': Plus,
   'datasource_list': Database,
+  'analysis': BarChart3,
 };
 
 interface TabItemProps {
@@ -32,66 +34,65 @@ export function TabItem({ tab }: TabItemProps) {
   const isActive = snapshot.activeTabId === tab.id;
   const Icon = TAB_ICONS[tab.type];
 
-  const navigateToTab = (tab: Tab) => {
+  const getTabHref = (tab: Tab): string => {
     const { projectId, conversationId, datasourceId, tableName } = tab.metadata;
     
     switch (tab.type) {
       case 'chat':
         if (conversationId && conversationId !== 'new') {
-          navigate(`/p/${projectId}/c/${conversationId}`);
+          return `/p/${projectId}/c/${conversationId}`;
         } else {
-          navigate(`/p/${projectId}/new`);
+          return `/p/${projectId}/new`;
         }
-        break;
         
       case 'datasource_table_data':
       case 'datasource_table_structure':
         if (datasourceId) {
           const tableParam = tableName ? `?table=${encodeURIComponent(tableName)}` : '';
-          navigate(`/p/${projectId}/datasources/${datasourceId}/browse${tableParam}`);
+          return `/p/${projectId}/datasources/${datasourceId}/browse${tableParam}`;
         }
-        break;
+        return `/p/${projectId}`;
         
       case 'datasource_query':
         if (datasourceId) {
-          // Check if we're already on the correct query route
-          const currentPath = window.location.pathname;
-          const targetPath = `/p/${projectId}/datasources/${datasourceId}/query`;
-          if (currentPath !== targetPath) {
-            navigate(targetPath);
-          }
+          return `/p/${projectId}/datasources/${datasourceId}/query`;
         }
-        break;
+        return `/p/${projectId}`;
         
       case 'datasource_edit':
         if (datasourceId) {
-          // Check if we're already on the correct edit route
-          const currentPath = window.location.pathname;
-          const targetPath = `/p/${projectId}/datasources/${datasourceId}/edit`;
-          if (currentPath !== targetPath) {
-            navigate(targetPath);
-          }
+          return `/p/${projectId}/datasources/${datasourceId}/edit`;
         } else {
-          navigate(`/p/${projectId}`);
+          return `/p/${projectId}`;
         }
-        break;
         
       case 'datasource_new':
-        navigate(`/p/${projectId}/datasources/new`);
-        break;
+        return `/p/${projectId}/datasources/new`;
         
       case 'datasource_list':
-        navigate(`/p/${projectId}`);
-        break;
+        return `/p/${projectId}`;
+        
+      case 'analysis':
+        if (tab.metadata.analysisId) {
+          return `/p/${projectId}/analysis/${tab.metadata.analysisId}`;
+        } else {
+          return `/p/${projectId}/analysis/new`;
+        }
         
       default:
         // Fallback to chat if unknown type
-        navigate(`/p/${projectId}`);
-        break;
+        return `/p/${projectId}`;
     }
   };
 
-  const handleTabClick = () => {
+  const navigateToTab = (tab: Tab) => {
+    const href = getTabHref(tab);
+    navigate(href);
+  };
+
+  const handleTabClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    e.preventDefault(); // Prevent default navigation
+    
     // Set the tab as active
     tabsActions.setActiveTab(tab.id);
     
@@ -132,9 +133,10 @@ export function TabItem({ tab }: TabItemProps) {
   };
 
   return (
-    <div 
+    <a 
+      href={getTabHref(tab)}
       className={cn(
-        "flex items-center gap-2 px-3 py-1.5 rounded-t cursor-pointer min-w-0 group border-b-2 transition-all duration-200",
+        "flex items-center gap-2 px-3 py-1.5 rounded-t cursor-pointer min-w-0 group border-b-2 transition-all duration-200 no-underline",
         isActive 
           ? "bg-background border-b-primary text-primary shadow-sm" 
           : "bg-muted hover:bg-muted/80 border-b-transparent text-muted-foreground hover:text-foreground"
@@ -144,7 +146,7 @@ export function TabItem({ tab }: TabItemProps) {
         if ((e.target as HTMLElement).closest('button')) {
           return;
         }
-        handleTabClick();
+        handleTabClick(e);
       }}
     >
       <Icon className="h-4 w-4 flex-shrink-0" />
@@ -161,6 +163,6 @@ export function TabItem({ tab }: TabItemProps) {
       >
         <X className="h-3 w-3" />
       </button>
-    </div>
+    </a>
   );
 }

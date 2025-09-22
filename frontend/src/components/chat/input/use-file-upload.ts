@@ -5,6 +5,7 @@ interface ComponentFileWithDescription extends File {
   description?: string;
   autoDescription?: string;
   preview?: string;
+  backendId?: string;
 }
 
 
@@ -49,7 +50,8 @@ export function useFileUpload(activeConversationId: string, projectId?: string) 
                 ...file,
                 description: result.description || multimodalInputActions.getFileDescription(activeConversationId, file.name),
                 autoDescription: result.auto_description,
-                preview: multimodalInputActions.getFilePreview(activeConversationId, file.name)
+                preview: multimodalInputActions.getFilePreview(activeConversationId, file.name),
+                backendId: result.id // Add backend ID to uploaded file
               };
               uploadedFilesList.push(uploadedFile);
 
@@ -77,7 +79,7 @@ export function useFileUpload(activeConversationId: string, projectId?: string) 
         const fileWithDesc: StoreFileWithDescription = {
           file,
           description: file.description || '',
-          id: Date.now().toString() + Math.random().toString(36).substring(2, 11)
+          id: file.backendId || Date.now().toString() + Math.random().toString(36).substring(2, 11) // Use backend ID if available
         };
         inputActions.addSelectedFile(fileWithDesc);
       });

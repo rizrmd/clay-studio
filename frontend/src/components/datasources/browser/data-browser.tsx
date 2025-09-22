@@ -16,7 +16,7 @@ import { TableStructureView } from "./table-structure";
 import { cn } from "@/lib/utils";
 import { useLocalStore } from "./hooks/use-local-store";
 import { useServerHandlers } from "./hooks/use-server-handlers";
-import { TabNavigation } from "./components/tab-navigation";
+import { TabNavigation, TabNavigationRef } from "./components/tab-navigation";
 import { DataView } from "./components/data-view";
 import { EditToolbar } from "./components/edit-toolbar";
 import {
@@ -43,6 +43,12 @@ export function DataBrowser({
 }: DataBrowserProps) {
   // Create local store for component state
   const { localStore, localSnapshot } = useLocalStore(mode);
+  
+  // Track initial load to prevent duplicate calls
+  const hasLoadedStructure = useRef(false);
+  const tabNavRef = useRef<TabNavigationRef>(null);
+  const hasLoadedData = useRef(false);
+  const isLoadingTimeout = useRef<NodeJS.Timeout | null>(null);
 
   // Global stores
   const dataBrowserSnapshot = useSnapshot(dataBrowserStore);
@@ -91,6 +97,109 @@ export function DataBrowser({
     }
   }, [localSnapshot.selectedRows, localStore, dataBrowserSnapshot.selectedDatasourceId, dataBrowserSnapshot.selectedTable]);
 
+  // Handle select all rows across all pages  
+  const handleSelectAllRows = useCallback(async () => {
+    if (!dataBrowserSnapshot.selectedDatasourceId || !dataBrowserSnapshot.selectedTable) return;
+    
+    // Set loading state
+    localStore.isSelectingAll = true;
+    
+    // Clear existing selections first
+    localStore.selectedRows = {};
+    
+    try {
+      // For now, use the existing table data endpoint to get all data and extract IDs
+      // This is less efficient but will work reliably
+      console.log('Fetching all table data for row IDs...');
+      
+      const result = await datasourcesApi.getTableData(
+        dataBrowserSnapshot.selectedDatasourceId,
+        dataBrowserSnapshot.selectedTable,
+        {
+          page: 1,
+          limit: Math.min(dataBrowserSnapshot.totalRows, 10000), // Get all rows up to limit
+          sort_column: undefined,
+          sort_direction: undefined,
+          filters: undefined
+        }
+      );
+      
+      console.log('Table data result:', result);
+      
+      // Extract row IDs from the actual data using the same logic as the table
+      console.log('Processing data:', {
+        hasRows: !!result.rows,
+        rowsLength: result.rows?.length,
+        hasColumns: !!result.columns,
+        columnsLength: result.columns?.length,
+        firstRow: result.rows?.[0],
+        columns: result.columns
+      });
+      
+      if (result.rows && Array.isArray(result.rows) && result.rows.length > 0) {
+        result.rows.forEach((row: any, rowIndex: number) => {
+          // Use the same ID extraction logic as the table transformation
+          const firstColumnIndex = 0; // First column usually contains the ID
+          const rowId = Array.isArray(row) ? row[firstColumnIndex] : row?.id || row?.[Object.keys(row)[0]];
+          
+          if (rowIndex < 3) { // Only log first 3 rows to avoid spam
+            console.log(`Row ${rowIndex}: rowId = ${rowId}, row =`, row);
+          }
+          
+          if (rowId != null) {
+            localStore.selectedRows[String(rowId)] = true;
+          }
+        });
+        
+        console.log('Selected rows after processing:', Object.keys(localStore.selectedRows).slice(0, 10));
+      } else {
+        console.warn('No rows to process or rows not in expected format:', result);
+      }
+      
+      // Increment version to force re-render
+      localStore.selectionVersion++;
+      
+      console.log('handleSelectAllRows SUCCESS:', {
+        totalRows: dataBrowserSnapshot.totalRows,
+        fetchedRows: result.rows?.length || 0,
+        selectedCount: Object.keys(localStore.selectedRows).length,
+        selectionVersion: localStore.selectionVersion,
+        firstFewKeys: Object.keys(localStore.selectedRows).slice(0, 10),
+        columns: result.columns
+      });
+    } catch (error) {
+      console.error('Failed to fetch table data for selection:', error);
+      // Fallback to current page selection
+      const currentTableData = dataBrowserSnapshot.tableData;
+      if (currentTableData?.rows) {
+        currentTableData.rows.forEach((row: any) => {
+          // Use the first column value as the ID
+          const rowId = row[0];
+          
+          if (rowId != null) {
+            localStore.selectedRows[String(rowId)] = true;
+          }
+        });
+        
+        localStore.selectionVersion++;
+      }
+    } finally {
+      // Always clear loading state
+      localStore.isSelectingAll = false;
+    }
+  }, [localStore, dataBrowserSnapshot.selectedDatasourceId, dataBrowserSnapshot.selectedTable, dataBrowserSnapshot.totalRows, dataBrowserSnapshot.tableData]);
+
+  // Handle deselect all rows
+  const handleDeselectAllRows = useCallback(() => {
+    // Clear all selections by resetting the object
+    localStore.selectedRows = {};
+    
+    // Increment version to force re-render
+    localStore.selectionVersion++;
+    
+    console.log('Deselected all rows');
+  }, [localStore]);
+
   // Server-side handlers
   const {
     updateStoreForServerSide,
@@ -118,6 +227,9 @@ export function DataBrowser({
 
   useEffect(() => {
     if (datasourceId !== dataBrowserSnapshot.selectedDatasourceId) {
+      // Reset data load flags when datasource changes
+      hasLoadedStructure.current = false;
+      hasLoadedData.current = false;
       dataBrowserActions.selectDatasource(datasourceId);
     }
   }, [datasourceId, dataBrowserSnapshot.selectedDatasourceId]);
@@ -142,12 +254,41 @@ export function DataBrowser({
 
   // Reset to first page when table changes
   useEffect(() => {
-    localStore.currentPage = 1;
-    localStore.sorting = [];
-    localStore.columnFilters = [];
-    localStore.globalFilter = "";
-    localStore.selectedRows = {};
-  }, [dataBrowserSnapshot.selectedTable, localStore]);
+    if (dataBrowserSnapshot.selectedTable) {
+      localStore.currentPage = 1;
+      localStore.sorting = [];
+      localStore.columnFilters = [];
+      localStore.globalFilter = "";
+      localStore.selectedRows = {};
+      // Reset data load flags for new table
+      hasLoadedStructure.current = false;
+      hasLoadedData.current = false;
+    }
+  }, [dataBrowserSnapshot.selectedTable]);
+
+  // Load structure and data in parallel when table is selected
+  useEffect(() => {
+    if (dataBrowserSnapshot.selectedTable && datasourceId && !hasLoadedData.current) {
+      // Clear any existing timeout
+      if (isLoadingTimeout.current) {
+        clearTimeout(isLoadingTimeout.current);
+      }
+      
+      // Set a timeout to prevent rapid duplicate calls
+      isLoadingTimeout.current = setTimeout(() => {
+        // Load structure in parallel
+        if (!hasLoadedStructure.current) {
+          dataBrowserActions.loadTableStructure();
+          hasLoadedStructure.current = true;
+        }
+        
+        // Load data
+        updateStoreForServerSide();
+        hasLoadedData.current = true;
+        isLoadingTimeout.current = null;
+      }, 100);
+    }
+  }, [dataBrowserSnapshot.selectedTable, datasourceId, updateStoreForServerSide]);
 
   // Debounced effect for filter changes
   const filterTimeoutRef = useRef<NodeJS.Timeout>();
@@ -169,7 +310,10 @@ export function DataBrowser({
         }, 300); // 300ms debounce for filters
       } else {
         // Immediate update for non-filter changes (sorting, pagination)
-        updateStoreForServerSide();
+        // Skip if we haven't loaded data yet
+        if (hasLoadedData.current) {
+          updateStoreForServerSide();
+        }
       }
     }
 
@@ -226,10 +370,17 @@ export function DataBrowser({
       <div className="flex-1 flex overflow-hidden">
         {/* Tab Navigation */}
         <TabNavigation
+          ref={tabNavRef}
           localStore={localStore}
-          localSnapshot={localSnapshot}
+          localSnapshot={{
+            ...localSnapshot,
+            isSelectingAll: localSnapshot.isSelectingAll
+          }}
           selectedTable={dataBrowserSnapshot.selectedTable || undefined}
+          totalRows={dataBrowserSnapshot.totalRows}
           onDeleteSelectedRows={handleDeleteSelectedRows}
+          onSelectAllRows={handleSelectAllRows}
+          onDeselectAllRows={handleDeselectAllRows}
         />
 
         {/* Content Area */}
@@ -268,10 +419,10 @@ export function DataBrowser({
                         totalRows={dataBrowserSnapshot.totalRows}
                         onPageChange={handlePageChange}
                         onPageSizeChange={handlePageSizeChange}
+                        onAddNewRow={() => tabNavRef.current?.openAddRowModal()}
                         onServerSortingChange={handleServerSortingChange}
                         onServerFiltersChange={handleServerFiltersChange}
                         onServerGlobalFilterChange={handleServerGlobalFilterChange}
-                        onDeleteSelectedRows={handleDeleteSelectedRows}
                       />
                     </div>
                   </div>

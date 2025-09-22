@@ -122,7 +122,7 @@ export type ClientMessage =
       project_id: string;
       conversation_id: string;
       content: string;
-      uploaded_file_paths?: string[];
+      file_ids?: string[];
     }
   | { type: "create_conversation"; project_id: string; title?: string }
   | { type: "list_conversations"; project_id: string }

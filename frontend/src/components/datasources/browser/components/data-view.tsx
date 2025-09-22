@@ -1,4 +1,4 @@
-import { useMemo, useCallback, useState } from "react";
+import React, { useMemo, useCallback } from "react";
 import { useSnapshot } from "valtio";
 import { cn } from "@/lib/utils";
 import { DataTable } from "@/components/data-table/data-table";
@@ -9,7 +9,8 @@ import { mapDbTypeToDisplayType, getColumnWidth, analyzeColumnContent } from "..
 import { enhanceColumnsWithCellRenderers } from "../utils/cell-renderers";
 import { dataBrowserStore, dataBrowserActions } from "@/lib/store/data-browser-store";
 import { datasourcesApi } from "@/lib/api/datasources";
-import { CheckSquare, Square, Minus } from "lucide-react";
+import { CheckSquare, Square, Minus, Plus } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 interface DataViewProps {
   localSnapshot: {
@@ -20,6 +21,7 @@ interface DataViewProps {
     globalFilter: string;
     isServerLoading: boolean;
     selectedRows: Record<string, boolean>;
+    selectionVersion: number;
   };
   localStore: any;
   tableStructure: any;
@@ -27,10 +29,10 @@ interface DataViewProps {
   totalRows: number;
   onPageChange: (page: number) => void;
   onPageSizeChange: (newPageSize: number) => void;
+  onAddNewRow: () => void;
   onServerSortingChange: (newSorting: any) => void;
   onServerFiltersChange: (newFilters: any) => void;
   onServerGlobalFilterChange: (newGlobalFilter: string) => void;
-  onDeleteSelectedRows: () => void;
 }
 
 export const DataView = ({
@@ -41,12 +43,24 @@ export const DataView = ({
   totalRows,
   onPageChange,
   onPageSizeChange,
+  onAddNewRow,
   onServerSortingChange,
   onServerFiltersChange,
   onServerGlobalFilterChange,
-  onDeleteSelectedRows,
 }: DataViewProps) => {
   const dataBrowserSnapshot = useSnapshot(dataBrowserStore);
+  
+  // Create a local snapshot to ensure reactivity
+  const localStoreSnapshot = useSnapshot(localStore);
+  
+  // Debug: Log when selectedRows changes
+  React.useEffect(() => {
+    console.log('DataView: selectedRows changed:', {
+      count: Object.keys(localStoreSnapshot.selectedRows).length,
+      keys: Object.keys(localStoreSnapshot.selectedRows).slice(0, 5),
+      version: localStoreSnapshot.selectionVersion
+    });
+  }, [localStoreSnapshot.selectedRows, localStoreSnapshot.selectionVersion]);
 
   // Row selection handlers
   const handleRowSelect = useCallback((rowId: string, isSelected: boolean) => {
@@ -63,13 +77,17 @@ export const DataView = ({
       return [];
     }
 
-    const { columns: dataColumns, rows } = tableData;
+    const { columns: dataColumns, data: rows = [] } = tableData || {};
     const structureColumns = tableStructure.columns;
 
     // Transform existing data
     const transformedData = rows.map((row: any, rowIndex: number) => {
-      const rowObject: Record<string, any> = { id: rowIndex };
-
+      // Calculate the absolute row index accounting for pagination
+      const absoluteRowIndex = ((localSnapshot.currentPage - 1) * localSnapshot.pageSize) + rowIndex;
+      const rowObject: Record<string, any> = { 
+        __rowIndex: absoluteRowIndex // Use a different property for our sequential index
+      };
+      
       // Map data based on structure column order, not data column order
       structureColumns.forEach((structureColumn: any) => {
         // Find the corresponding index in the data columns
@@ -82,11 +100,21 @@ export const DataView = ({
         }
       });
 
+      // Set the row ID - use the database ID if available, otherwise use our sequential index
+      const dbIdColumn = structureColumns.find((col: any) => col.name === 'id');
+      if (dbIdColumn && rowObject.id) {
+        // Use the actual database ID
+        rowObject.id = rowObject.id;
+      } else {
+        // Use our sequential index as fallback
+        rowObject.id = absoluteRowIndex;
+      }
+
       return rowObject;
     });
 
     // Add pending new rows at the beginning
-    const newRows = dataBrowserSnapshot.pendingNewRows.map((newRow, index) => {
+    const newRows = (dataBrowserSnapshot.pendingNewRows || []).map((newRow, index) => {
       const rowObject: Record<string, any> = { 
         id: newRow.__tempId,
         __isNewRow: true,
@@ -102,7 +130,7 @@ export const DataView = ({
     });
 
     return [...newRows, ...transformedData];
-  }, [tableData, tableStructure, dataBrowserSnapshot.pendingNewRows]);
+  }, [tableData, tableStructure, dataBrowserSnapshot.pendingNewRows, localSnapshot.currentPage, localSnapshot.pageSize]);
 
   const handleSelectAll = useCallback((isSelected: boolean) => {
     if (isSelected) {
@@ -146,7 +174,8 @@ export const DataView = ({
   );
 
   // Generate columns for DataTable using table structure as source of truth
-  const baseColumns = useMemo((): TableColumn[] => {
+  // Force recreation when selection changes - include selectionVersion to ensure updates
+  const baseColumns = React.useMemo((): TableColumn[] => {
     if (!tableStructure?.columns.length) {
       return [];
     }
@@ -162,8 +191,8 @@ export const DataView = ({
       sortable: false,
       filterable: false,
       headerRenderer: () => {
-        const isAllSelected = allTableData.length > 0 && allTableData.every(row => localSnapshot.selectedRows[String(row.id)]);
-        const isSomeSelected = allTableData.some(row => localSnapshot.selectedRows[String(row.id)]);
+        const isAllSelected = allTableData.length > 0 && allTableData.every(row => Boolean(localStoreSnapshot.selectedRows[String(row.id)]));
+        const isSomeSelected = allTableData.some(row => Boolean(localStoreSnapshot.selectedRows[String(row.id)]));
         
         return (
           <div 
@@ -181,11 +210,18 @@ export const DataView = ({
         );
       },
       cellRenderer: (_value: any, row: any, _column: any, _defaultRenderer: any) => {
-        const rowId = String(row.id);
-        const isSelected = localSnapshot.selectedRows[rowId];
+        // row object structure in DataTable has the actual data in row, not row.original
+        const rowId = String(row.id !== undefined ? row.id : row._id);
+        // Use local snapshot created in this component
+        const isSelected = Boolean(localStoreSnapshot.selectedRows[rowId]);
         
         // Get the current row index within the table data
         const rowIndexInCurrentPage = allTableData.findIndex(r => String(r.id) === rowId);
+        
+        // Check selection state for this row
+        if (rowIndexInCurrentPage < 3) { // Only log first 3 rows to avoid spam
+          console.log('cellRenderer row:', rowId, 'isSelected:', isSelected, 'has key:', String(rowId) in localStoreSnapshot.selectedRows);
+        }
         // Calculate the actual row index accounting for pagination
         const actualRowIndex = ((localSnapshot.currentPage - 1) * localSnapshot.pageSize) + rowIndexInCurrentPage + 1;
         
@@ -248,18 +284,17 @@ export const DataView = ({
     });
     
     return [rowIndexColumn, ...dataColumns];
-  }, [tableStructure, tableData, localSnapshot.selectedRows, handleRowSelect]);
+  }, [tableStructure, tableData, localStoreSnapshot.selectedRows, localStoreSnapshot.selectionVersion, handleRowSelect, handleSelectAll, allTableData, localSnapshot.currentPage, localSnapshot.pageSize]);
 
   // Enhance columns with cell renderers for edit functionality
-  const columns = useMemo(() => {
-    return enhanceColumnsWithCellRenderers(baseColumns, {
-      isEditable: true, // Always editable with click-to-edit
-      onCellEdit: (rowId: string, columnKey: string, newValue: any) => {
-        dataBrowserActions.setCellValue(rowId, columnKey, newValue);
-      },
-      editingDisabled: dataBrowserSnapshot.editingInProgress,
-    });
-  }, [baseColumns, dataBrowserSnapshot.editingInProgress]);
+  // Re-create columns when selection changes to ensure cellRenderers have latest state
+  const columns = React.useMemo(() => enhanceColumnsWithCellRenderers(baseColumns, {
+    isEditable: true, // Always editable with click-to-edit
+    onCellEdit: (rowId: string, columnKey: string, newValue: any) => {
+      dataBrowserActions.setCellValue(rowId, columnKey, newValue);
+    },
+    editingDisabled: dataBrowserSnapshot.editingInProgress,
+  }), [baseColumns, dataBrowserSnapshot.editingInProgress]);
 
   if (!tableStructure) {
     return (
@@ -295,6 +330,9 @@ export const DataView = ({
     );
   }
 
+  // Check if data is empty
+  const hasData = allTableData.length > 0;
+
   return (
     <div className="h-full flex flex-col">
       <div className="flex-1 overflow-hidden relative">
@@ -306,100 +344,123 @@ export const DataView = ({
             </div>
           </div>
         )}
-        <DataTable
-          columns={columns}
-          data={allTableData}
-          customSelectedRows={localSnapshot.selectedRows}
-          persistenceKey={`datasource-${dataBrowserSnapshot.selectedDatasourceId}-table-${dataBrowserSnapshot.selectedTable}`}
-          config={{
-            features: {
-              sort: true,
-              filter: true,
-              globalSearch: true,
-              columnVisibility: true,
-              rowSelection: false,
-              pivot: false,
-            },
-            initialState: {
-              columnVisibility: {},
-              sorting: localSnapshot.sorting.map((sort) => ({
-                column: sort.id,
-                direction: sort.desc ? ("desc" as const) : ("asc" as const),
-              })),
-              filters: localSnapshot.columnFilters.map((filter) => ({
-                column: filter.id,
-                value: filter.value,
-              })),
-              globalFilter: localSnapshot.globalFilter,
-            },
-          }}
-          serverSide={{
-            enabled: true,
-            onSortingChange: onServerSortingChange,
-            onFiltersChange: onServerFiltersChange,
-            onGlobalFilterChange: onServerGlobalFilterChange,
-            onGetDistinctValues: handleGetDistinctValues,
-            totalRows: totalRows,
-          }}
-          className={cn(
-            "h-full -ml-[1px] -mt-[1px]",
-            css`
-              td {
-                white-space: nowrap !important;
-                overflow: hidden !important;
-                text-overflow: ellipsis !important;
-                max-width: 200px !important;
-              }
-              th {
-                white-space: nowrap !important;
-                overflow: hidden !important;
-                text-overflow: ellipsis !important;
-                padding: 0 !important;
+        {hasData ? (
+          <DataTable
+            columns={[...columns]}
+            data={allTableData}
+            customSelectedRows={localStoreSnapshot.selectedRows}
+            persistenceKey={`datasource-${dataBrowserSnapshot.selectedDatasourceId}-table-${dataBrowserSnapshot.selectedTable}`}
+            config={{
+              features: {
+                sort: true,
+                filter: true,
+                globalSearch: true,
+                columnVisibility: true,
+                rowSelection: false,
+                pivot: false,
+              },
+              initialState: {
+                columnVisibility: {},
+                sorting: localSnapshot.sorting.map((sort) => ({
+                  column: sort.id,
+                  direction: sort.desc ? ("desc" as const) : ("asc" as const),
+                })),
+                filters: localSnapshot.columnFilters.map((filter) => ({
+                  column: filter.id,
+                  value: filter.value,
+                })),
+                globalFilter: localSnapshot.globalFilter,
+              },
+            }}
+            serverSide={{
+              enabled: true,
+              onSortingChange: onServerSortingChange,
+              onFiltersChange: onServerFiltersChange,
+              onGlobalFilterChange: onServerGlobalFilterChange,
+              onGetDistinctValues: handleGetDistinctValues,
+              totalRows: totalRows,
+            }}
+            className={cn(
+              "h-full -ml-[1px] -mt-[1px]",
+              css`
+                td {
+                  white-space: nowrap !important;
+                  overflow: hidden !important;
+                  text-overflow: ellipsis !important;
+                  max-width: 200px !important;
+                }
+                th {
+                  white-space: nowrap !important;
+                  overflow: hidden !important;
+                  text-overflow: ellipsis !important;
+                  padding: 0 !important;
 
-                .th-l2 > div {
-                  height: 40px;
-                  > .button {
+                  .th-l2 > div {
                     height: 40px;
+                    > .button {
+                      height: 40px;
+                    }
                   }
                 }
-              }
-              table {
-                table-layout: fixed !important;
-              }
-              tr {
-                height: 40px !important;
-              }
-              tbody tr:hover .row-hover\\:hidden {
-                display: none !important;
-              }
-              tbody tr:hover .row-hover\\:flex {
-                display: flex !important;
-              }
-              tbody tr[data-selected="true"] {
-                background-color: rgb(239 246 255) !important;
-              }
-              tbody tr[data-selected="true"]:hover {
-                background-color: rgb(219 234 254) !important;
-              }
-              @media (prefers-color-scheme: dark) {
+                table {
+                  table-layout: fixed !important;
+                }
+                tr {
+                  height: 40px !important;
+                }
+                tbody tr:hover .row-hover\\:hidden {
+                  display: none !important;
+                }
+                tbody tr:hover .row-hover\\:flex {
+                  display: flex !important;
+                }
                 tbody tr[data-selected="true"] {
-                  background-color: rgb(30 58 138 / 0.3) !important;
+                  background-color: rgb(239 246 255) !important;
                 }
                 tbody tr[data-selected="true"]:hover {
-                  background-color: rgb(30 58 138 / 0.5) !important;
+                  background-color: rgb(219 234 254) !important;
                 }
-              }
-            `
-          )}
-        />
+                @media (prefers-color-scheme: dark) {
+                  tbody tr[data-selected="true"] {
+                    background-color: rgb(30 58 138 / 0.3) !important;
+                  }
+                  tbody tr[data-selected="true"]:hover {
+                    background-color: rgb(30 58 138 / 0.5) !important;
+                  }
+                }
+              `
+            )}
+          />
+        ) : (
+          <div className="flex items-center justify-center h-full">
+            <div className="text-center space-y-4">
+              <div>
+                <p className="text-muted-foreground">No data available</p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  This table is empty
+                </p>
+              </div>
+              <Button
+                onClick={onAddNewRow}
+                className="gap-2"
+                variant="default"
+              >
+                <Plus className="h-4 w-4" />
+                Add New Row
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
-      <PaginationControls
-        currentPage={localSnapshot.currentPage}
-        pageSize={localSnapshot.pageSize}
-        totalItems={totalRows || allTableData.length}
-        onPageChange={onPageChange}
-        onPageSizeChange={onPageSizeChange}
-      />
+      {hasData && (
+        <PaginationControls
+          currentPage={localSnapshot.currentPage}
+          pageSize={localSnapshot.pageSize}
+          totalItems={totalRows || allTableData.length}
+          onPageChange={onPageChange}
+          onPageSizeChange={onPageSizeChange}
+        />
+      )}
     </div>
   );
 };

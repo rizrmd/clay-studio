@@ -12,6 +12,8 @@ import { ProjectsPage } from "./pages/Projects";
 import { RootDashboard } from "./pages/RootDashboard";
 import { SetupPage } from "./pages/SetupPage";
 import { WipTablePage } from "./pages/WipTable";
+import { EmbedView } from "./pages/EmbedView";
+import { EmbedDemo } from "./pages/EmbedDemo";
 
 function App() {
   return (
@@ -74,6 +76,30 @@ function App() {
         }
       />
       <Route
+        path="/p/:projectId/analysis"
+        element={
+          <AppRoute>
+            <MainApp />
+          </AppRoute>
+        }
+      />
+      <Route
+        path="/p/:projectId/analysis/new"
+        element={
+          <AppRoute>
+            <MainApp />
+          </AppRoute>
+        }
+      />
+      <Route
+        path="/p/:projectId/analysis/:analysisId"
+        element={
+          <AppRoute>
+            <MainApp />
+          </AppRoute>
+        }
+      />
+      <Route
         path="/projects"
         element={
           <AppRoute>
@@ -115,6 +141,9 @@ function App() {
           </AdminRoute>
         }
       />
+      {/* Embed routes - public, no auth required */}
+      <Route path="/embed/:shareToken" element={<EmbedView />} />
+      <Route path="/embed-demo" element={<EmbedDemo />} />
       <Route path="/wip-table" element={<WipTablePage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

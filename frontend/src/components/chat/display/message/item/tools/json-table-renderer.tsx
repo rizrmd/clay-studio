@@ -1,4 +1,3 @@
-import * as React from "react";
 import { useState } from "react";
 import {
   Dialog,
@@ -17,11 +16,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
 import { ChevronDown, ChevronRight, Eye, Copy, Check } from "lucide-react";
 
 interface JsonTableRendererProps {
@@ -148,34 +142,35 @@ function ExpandableValueModal({ value, keyName }: { value: any; keyName: string 
   );
 }
 
-function NestedJsonRenderer({ data, depth = 0 }: { data: any; depth?: number }) {
-  const [isOpen, setIsOpen] = useState(false);
+// Unused component - keeping for potential future use
+// function _NestedJsonRenderer({ data }: { data: any }) {
+//   const [isOpen, setIsOpen] = useState(false);
 
-  if (data === null || data === undefined) {
-    return <span className="text-muted-foreground">null</span>;
-  }
+//   if (data === null || data === undefined) {
+//     return <span className="text-muted-foreground">null</span>;
+//   }
 
-  if (typeof data === "string" || typeof data === "number" || typeof data === "boolean") {
-    return <span>{String(data)}</span>;
-  }
+//   if (typeof data === "string" || typeof data === "number" || typeof data === "boolean") {
+//     return <span>{String(data)}</span>;
+//   }
 
-  if (Array.isArray(data) || typeof data === "object") {
-    return (
-      <Button variant="ghost" className="h-auto p-1 text-xs" onClick={() => setIsOpen(!isOpen)}>
-        {isOpen ? (
-          <ChevronDown className="h-3 w-3" />
-        ) : (
-          <ChevronRight className="h-3 w-3" />
-        )}
-        <Badge variant="secondary" className="ml-1 text-xs">
-          {Array.isArray(data) ? `Array[${data.length}]` : `Object{${Object.keys(data).length}}`}
-        </Badge>
-      </Button>
-    );
-  }
+//   if (Array.isArray(data) || typeof data === "object") {
+//     return (
+//       <Button variant="ghost" className="h-auto p-1 text-xs" onClick={() => setIsOpen(!isOpen)}>
+//         {isOpen ? (
+//           <ChevronDown className="h-3 w-3" />
+//         ) : (
+//           <ChevronRight className="h-3 w-3" />
+//         )}
+//         <Badge variant="secondary" className="ml-1 text-xs">
+//           {Array.isArray(data) ? `Array[${data.length}]` : `Object{${Object.keys(data).length}}`}
+//         </Badge>
+//       </Button>
+//     );
+//   }
 
-  return <span>{String(data)}</span>;
-}
+//   return <span>{String(data)}</span>;
+// }
 
 function TableRowWithExpansion({ item, index }: { item: JsonValue; index: number }) {
   const [isExpanded, setIsExpanded] = useState(false);

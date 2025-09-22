@@ -9,7 +9,8 @@ export type TabType =
   | 'datasource_query'
   | 'datasource_edit' 
   | 'datasource_new'
-  | 'datasource_list';
+  | 'datasource_list'
+  | 'analysis';
 
 export interface Tab {
   id: string;
@@ -23,6 +24,8 @@ export interface Tab {
     tableName?: string;
     projectId: string;
     query?: string;
+    analysisId?: string;
+    analysisTitle?: string;
   };
 }
 
@@ -268,6 +271,22 @@ export const tabsActions = {
       }
     }
     
+    // For analysis tabs, look for specific analysis match first
+    if (type === 'analysis' && metadata.analysisId) {
+      const existingAnalysisTab = tabsStore.tabs.find(t => 
+        t.type === 'analysis' && t.metadata.analysisId === metadata.analysisId
+      );
+      if (existingAnalysisTab) {
+        // Update metadata and title if needed
+        existingAnalysisTab.metadata = { ...existingAnalysisTab.metadata, ...metadata };
+        if (title) {
+          existingAnalysisTab.title = title;
+        }
+        tabsActions.setActiveTab(existingAnalysisTab.id);
+        return existingAnalysisTab.id;
+      }
+    }
+    
     // Check if there's already an active tab of this type (fallback for general types)
     const activeTabId = tabsStore.activeTabByType[type];
     if (activeTabId) {
@@ -305,7 +324,7 @@ export const tabsActions = {
   getDefaultTitle: (type: TabType, metadata: Tab['metadata']): string => {
     switch (type) {
       case 'chat':
-        return metadata.conversationTitle || metadata.conversationId === 'new' ? 'New Chat' : 'Chat';
+        return metadata.conversationTitle || metadata.conversationId === 'new' ? 'New Chat' : 'Chat...';
       case 'datasource_table_data':
         return metadata.tableName || 'Table Data';
       case 'datasource_table_structure':
@@ -318,6 +337,8 @@ export const tabsActions = {
         return 'New Datasource';
       case 'datasource_list':
         return 'Datasources';
+      case 'analysis':
+        return metadata.analysisTitle || 'Analysis';
       default:
         return 'Tab';
     }

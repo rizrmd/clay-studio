@@ -5,7 +5,7 @@ import { MessageItem } from "./message-item";
 import { TypingIndicator } from "@/components/ui/typing-indicator";
 
 export const MessageList = () => {
-  const { currentMessages, isStreaming, conversationId, currentActiveTools } = useChat();
+  const { currentMessages, isStreaming, conversationId, currentActiveTools, isLoadingMessages } = useChat();
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const endOfMessagesRef = useRef<HTMLDivElement>(null);
 
@@ -17,6 +17,16 @@ export const MessageList = () => {
   useEffect(() => {
     endOfMessagesRef.current?.scrollIntoView({ behavior: "instant" });
   }, [conversationId]);
+
+  if (isLoadingMessages) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <div className="text-center text-muted-foreground">
+          <TypingIndicator />
+        </div>
+      </div>
+    );
+  }
 
   if (!currentMessages || currentMessages.length === 0) {
     return (

@@ -9,7 +9,11 @@
     "deploy": "bun run scripts/deploy.ts",
     "sqlx:prepare": "cd backend && cargo sqlx prepare",
     "sqlx:check": "cd backend && cargo sqlx prepare --check",
-    "check": "cd backend && cargo check && cd ../frontend && npm run typecheck"
+    "check": "cd backend && cargo check && cd ../frontend && npm run typecheck",
+    "analysis:executor": "bash scripts/start-analysis-executor.sh",
+    "analysis:executor:release": "bash scripts/start-analysis-executor.sh --release",
+    "analysis:build": "cd backend && cargo build --bin analysis_executor",
+    "analysis:build:release": "cd backend && cargo build --release --bin analysis_executor"
   },
   "devDependencies": {
     "@types/bun": "latest"

@@ -42,7 +42,7 @@ export function EditableCell({
   }, [isEditing]);
 
   const handleSave = () => {
-    let processedValue = editValue;
+    let processedValue: any = editValue;
 
     // Type conversion based on data type
     switch (dataType) {
@@ -97,7 +97,7 @@ export function EditableCell({
           return String(val);
         }
       case "boolean":
-        return val ? "true" : "false";
+        return String(val);
       case "number":
         return typeof val === "number" ? val.toLocaleString() : String(val);
       default:

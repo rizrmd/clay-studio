@@ -154,14 +154,14 @@ class WebSocketService extends EventEmitter {
     projectId: string,
     conversationId: string,
     content: string,
-    uploadedFilePaths?: string[]
+    fileIds?: string[]
   ): void {
     const message: ClientMessage = {
       type: "send_message",
       project_id: projectId,
       conversation_id: conversationId,
       content,
-      uploaded_file_paths: uploadedFilePaths,
+      file_ids: fileIds,
     };
 
     this.sendMessage(message);

@@ -21,7 +21,9 @@ export function DataRow({
   config,
   customSelectedRows,
 }: DataRowProps) {
-  const isCustomSelected = customSelectedRows?.[String(row.original?.id)];
+  // Try multiple ways to get the row ID
+  const rowId = row.original?.id ?? row.original?._id ?? row.id;
+  const isCustomSelected = customSelectedRows?.[String(rowId)];
   
   return (
     <tr

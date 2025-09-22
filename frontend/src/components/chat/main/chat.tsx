@@ -4,7 +4,9 @@ import { ChatSkeleton, MessageList } from "../display";
 import { MultimodalInput } from "../input";
 import { uiStore, uiActions } from "@/lib/store/chat/ui-store";
 import { chatInputStore, chatInputActions } from "@/lib/store/chat-input-store";
+import { inputStore } from "@/lib/store/chat/input-store";
 import { useChat } from "@/lib/hooks/use-chat";
+import { useFileUpload } from "../input/use-file-upload";
 import { FileText, PanelLeftOpen, PanelLeftClose } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -12,6 +14,7 @@ export function Chat() {
   // UI state and navigation
   const uiSnapshot = useSnapshot(uiStore, { sync: true });
   const chatInputSnapshot = useSnapshot(chatInputStore);
+  const inputSnapshot = useSnapshot(inputStore);
 
   // Current conversation info
   const projectId = uiSnapshot.currentProject;
@@ -30,6 +33,9 @@ export function Chat() {
     isStreaming,
     // testToolEvents: _testToolEvents, // Keep for potential future debug use
   } = useChat();
+
+  // File upload functionality
+  const { uploadFiles } = useFileUpload(conversationId || "", projectId || undefined);
 
   // Debug logging for conversation data
   useEffect(() => {
@@ -52,9 +58,30 @@ export function Chat() {
     const allFiles = [...(files || []), ...chatInputSnapshot.pendingFiles];
     chatInputActions.clearPendingFiles();
 
-    // Convert File objects to file paths/names for the WebSocket API
-    const fileNames = allFiles.map((f) => f.name);
-    sendMessage(message, fileNames.length > 0 ? fileNames : undefined);
+    // Collect file IDs from already selected files
+    const initialFileIds: string[] = inputSnapshot.selectedFiles.map(f => f.id);
+    let fileIds: string[] = [...initialFileIds];
+
+    // Upload new files if any and get their IDs
+    if (allFiles.length > 0) {
+      try {
+        await uploadFiles(allFiles);
+        // After upload, get the newly added file IDs
+        // The upload adds files to inputStore.selectedFiles
+        // Get the updated snapshot and filter for new files
+        const updatedSelectedFiles = inputStore.selectedFiles;
+        const newFileIds = updatedSelectedFiles
+          .filter(f => !initialFileIds.includes(f.id))
+          .map(f => f.id);
+        fileIds = [...initialFileIds, ...newFileIds];
+      } catch (error) {
+        console.error('Failed to upload files:', error);
+        // Still send message without files if upload fails
+      }
+    }
+
+    // Send message with file IDs (if any)
+    sendMessage(message, fileIds.length > 0 ? fileIds : undefined);
   };
 
   // Drag and drop handlers

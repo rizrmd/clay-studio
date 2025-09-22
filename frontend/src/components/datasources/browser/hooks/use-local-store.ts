@@ -11,7 +11,9 @@ export interface DataBrowserLocalStore {
   columnFilters: ColumnFiltersState;
   globalFilter: string;
   isServerLoading: boolean;
+  isSelectingAll: boolean;
   selectedRows: Record<string, boolean>;
+  selectionVersion: number;
 }
 
 const createLocalStore = (mode: "data" | "structure"): DataBrowserLocalStore =>
@@ -23,7 +25,9 @@ const createLocalStore = (mode: "data" | "structure"): DataBrowserLocalStore =>
     columnFilters: [],
     globalFilter: "",
     isServerLoading: false,
+    isSelectingAll: false,
     selectedRows: {},
+    selectionVersion: 0,
   });
 
 export const useLocalStore = (mode: "data" | "structure" = "data") => {

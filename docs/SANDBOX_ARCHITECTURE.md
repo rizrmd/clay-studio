@@ -268,6 +268,12 @@ ctx.datasource.api_service.get(endpoint)
 // Call other analyses
 await ctx.runAnalysis(analysisId, parameters)
 
+// Access MCP data analysis tools (only mcp__data-analysis tools available)
+await ctx.mcp.callTool('mcp__data-analysis__datasource_query', parameters)
+await ctx.mcp.callTool('mcp__data-analysis__schema_get', parameters)
+await ctx.mcp.listTools()  // Lists available data analysis tools
+await ctx.mcp.getToolSchema(toolName)
+
 // Utilities
 ctx.log(...args)           // Debug output
 await ctx.sleep(ms)         // Rate limiting
@@ -307,6 +313,44 @@ ctx.metadata = {
     set: (key, value) => {},  // Store metadata
     get: (key) => {}          // Retrieve metadata
 }
+```
+
+### MCP Tool Integration
+Access data analysis tools through MCP (Model Context Protocol):
+
+```javascript
+// Only mcp__data-analysis tools are available in sandbox
+ctx.mcp = {
+    // Call MCP data analysis tool
+    callTool: async (toolName, parameters) => {},
+    
+    // List available MCP tools
+    listTools: async () => [],
+    
+    // Get schema for a specific tool
+    getToolSchema: async (toolName) => {},
+    
+    // Check if a tool is available
+    hasTool: (toolName) => boolean
+}
+
+// Example: Using available MCP tools for datasource management
+await ctx.mcp.callTool('mcp__data-analysis__datasource_add', {
+    name: 'new_analytics_db',
+    source_type: 'postgresql',
+    config: 'postgres://user:pass@host:port/db'
+});
+
+await ctx.mcp.callTool('mcp__data-analysis__datasource_query', {
+    datasource_id: 'analytics_db_id',
+    query: 'SELECT * FROM users LIMIT 100',
+    limit: 100
+});
+
+await ctx.mcp.callTool('mcp__data-analysis__schema_get', {
+    datasource_id: 'analytics_db_id',
+    table_name: 'users'
+});
 ```
 
 ### Polars DataFrame Integration
@@ -1099,6 +1143,119 @@ export default {
         return { 
             processed_files: results.length,
             regional_summary: totals
+        };
+    }
+}
+```
+
+### MCP Datasource Management Pattern
+Using MCP tools for dynamic datasource management within analyses:
+
+```javascript
+export default {
+    title: "Dynamic multi-datasource analysis with MCP",
+    dependencies: {
+        datasources: ["postgres_main"]
+    },
+    
+    run: async function(ctx, params) {
+        // Dynamically add a new datasource during analysis
+        const newDatasourceResult = await ctx.mcp.callTool('mcp__data-analysis__datasource_add', {
+            name: `temp_analysis_${Date.now()}`,
+            source_type: 'postgresql',
+            config: params.additional_db_url
+        });
+        
+        const tempDatasourceId = JSON.parse(newDatasourceResult).datasource_id;
+        
+        // Test connection to ensure it's working
+        const connectionTest = await ctx.mcp.callTool('mcp__data-analysis__connection_test', {
+            datasource_id: tempDatasourceId
+        });
+        
+        if (!JSON.parse(connectionTest).success) {
+            throw new Error('Failed to connect to additional datasource');
+        }
+        
+        // Inspect the new datasource schema
+        const schemaInspection = await ctx.mcp.callTool('mcp__data-analysis__datasource_inspect', {
+            datasource_id: tempDatasourceId
+        });
+        
+        const schemaInfo = JSON.parse(schemaInspection);
+        
+        // Get detailed schema for specific tables
+        const userTableSchema = await ctx.mcp.callTool('mcp__data-analysis__schema_get', {
+            datasource_id: tempDatasourceId,
+            table_name: 'users',
+            use_cache: false
+        });
+        
+        // Search for tables containing 'transaction' in the name
+        const transactionTables = await ctx.mcp.callTool('mcp__data-analysis__schema_search', {
+            datasource_id: tempDatasourceId,
+            search_term: 'transaction'
+        });
+        
+        // Query data from the new datasource
+        const userData = await ctx.mcp.callTool('mcp__data-analysis__datasource_query', {
+            datasource_id: tempDatasourceId,
+            query: 'SELECT id, email, created_at FROM users WHERE created_at >= $1',
+            limit: 1000
+        });
+        
+        const users = JSON.parse(userData).data;
+        
+        // Query main datasource for comparison
+        const mainUsers = await ctx.datasource.postgres_main.query(
+            "SELECT id, email, created_at FROM users WHERE created_at >= $1", 
+            [params.start_date]
+        );
+        
+        // Cross-datasource analysis using DuckDB
+        await ctx.duckdb.load('temp_datasource', 
+            `SELECT * FROM (${JSON.stringify(users)}) AS temp_users`, 
+            'temp_users');
+        await ctx.duckdb.load('postgres_main', 
+            `SELECT * FROM (${JSON.stringify(mainUsers)}) AS main_users`, 
+            'main_users');
+        
+        const crossAnalysis = await ctx.duckdb.query(`
+            SELECT 
+                'main' as source, COUNT(*) as user_count, MIN(created_at) as earliest, MAX(created_at) as latest
+            FROM main_users
+            UNION ALL
+            SELECT 
+                'temp' as source, COUNT(*) as user_count, MIN(created_at) as earliest, MAX(created_at) as latest  
+            FROM temp_users
+        `);
+        
+        // Get statistics about the temp datasource
+        const datasourceStats = await ctx.mcp.callTool('mcp__data-analysis__schema_stats', {
+            datasource_id: tempDatasourceId
+        });
+        
+        // Clean up: Remove temporary datasource
+        await ctx.mcp.callTool('mcp__data-analysis__datasource_remove', {
+            datasource_id: tempDatasourceId
+        });
+        
+        return {
+            schema_discovery: {
+                total_tables: schemaInfo.table_count,
+                transaction_tables: JSON.parse(transactionTables).tables,
+                user_table_columns: JSON.parse(userTableSchema).columns?.length || 0
+            },
+            data_comparison: {
+                cross_analysis: crossAnalysis,
+                temp_datasource_stats: JSON.parse(datasourceStats)
+            },
+            users_analyzed: {
+                main_db_count: mainUsers.length,
+                temp_db_count: users.length,
+                total_processed: mainUsers.length + users.length
+            },
+            cleanup_status: "Temporary datasource removed successfully"
         };
     }
 }

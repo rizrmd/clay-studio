@@ -203,7 +203,7 @@ export function NewRowModal({ isOpen, onClose }: NewRowModalProps) {
   const renderInput = (column: any) => {
     const value = formData[column.name];
     const error = errors[column.name];
-    const isRequired = column.nullable === false;
+    // const _isRequired = column.nullable === false;
     const isNullable = column.nullable !== false;
 
     // For nullable columns, show a checkbox to set null
@@ -331,7 +331,7 @@ export function NewRowModal({ isOpen, onClose }: NewRowModalProps) {
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="min-w-[80vw] min-h-[80vh] flex flex-col">
+      <DialogContent className="min-w-[80vw] h-[80vh] max-h-[80vh] flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Plus className="h-5 w-5" />
@@ -339,8 +339,8 @@ export function NewRowModal({ isOpen, onClose }: NewRowModalProps) {
           </DialogTitle>
         </DialogHeader>
 
-        <div className="relative overflow-auto flex-1">
-          <div className="absolute inset-0 left-2 right-5 grid md:grid-cols-2 gap-x-6 gap-y-4 ">
+        <div className="flex-1 overflow-y-auto px-2 py-2">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-6">
             {dataBrowserSnapshot.tableStructure.columns
               .filter(
                 (column: any) =>
@@ -350,7 +350,7 @@ export function NewRowModal({ isOpen, onClose }: NewRowModalProps) {
                   )
               )
               .map((column: any) => (
-                <div key={column.name} className="space-y-2">
+                <div key={column.name} className="space-y-2 min-h-fit">
                   <Label
                     htmlFor={column.name}
                     className="text-sm font-medium flex items-center gap-1"

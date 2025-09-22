@@ -9,7 +9,7 @@ import {
 import { sidebarActions, sidebarStore } from "@/lib/store/chat/sidebar-store";
 import { tabsActions } from "@/lib/store/tabs-store";
 import { cn } from "@/lib/utils";
-import { Edit, MessageSquare, MoreHorizontal, Trash2, ExternalLink } from "lucide-react";
+import { Edit, MessageSquare, MoreHorizontal, Trash2, ExternalLink, Share2 } from "lucide-react";
 import { useSnapshot } from "valtio";
 import { Conversation } from "../types";
 
@@ -19,6 +19,7 @@ interface ConversationItemProps {
   onClick: (conversationId: string) => void;
   onRename: (conversation: Conversation) => void;
   onDelete: (conversationId: string) => void;
+  onShare: (conversation: Conversation) => void;
   href: string;
   projectId?: string;
 }
@@ -28,6 +29,7 @@ export function ConversationItem({
   isActive,
   onClick,
   onRename,
+  onShare,
   href,
   projectId,
 }: ConversationItemProps) {
@@ -149,6 +151,15 @@ export function ConversationItem({
               >
                 <ExternalLink className="h-4 w-4 mr-2" />
                 Open in new Tab
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onShare(conversation);
+                }}
+              >
+                <Share2 className="h-4 w-4 mr-2" />
+                Share
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={(e) => {

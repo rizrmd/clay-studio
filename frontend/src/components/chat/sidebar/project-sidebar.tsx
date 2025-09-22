@@ -5,7 +5,7 @@ import {
   datasourcesActions,
 } from "@/lib/store/datasources-store";
 import { cn } from "@/lib/utils";
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useSnapshot } from "valtio";
 import {
   useNavigate,
@@ -15,6 +15,7 @@ import {
 } from "react-router-dom";
 import { uiStore, uiActions } from "@/lib/store/chat/ui-store";
 import { tabsActions } from "@/lib/store/tabs-store";
+import { analysisStore, analysisActions, type Analysis } from "@/lib/store/analysis-store";
 import { api } from "@/lib/utils/api";
 import { chatStore } from "@/lib/store/chat/chat-store";
 import { ConversationSidebarFooter } from "./components/footer";
@@ -22,6 +23,8 @@ import { ConversationSidebarHeader } from "./components/header";
 import { ConversationList } from "./components/list";
 import { DatasourceList } from "./components/datasource-list";
 import { MobileMenuToggle } from "./components/toggle";
+import { ShareProjectDialog } from "@/components/share/ShareProjectDialog";
+import { AnalysisList } from "./components/analysis-list";
 import {
   Accordion,
   AccordionItem,
@@ -29,6 +32,7 @@ import {
   AccordionContent,
 } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
+import { Share2 } from "lucide-react";
 
 interface ProjectSidebarProps {
   isCollapsed: boolean;
@@ -44,9 +48,12 @@ export function ProjectSidebar({
   currentConversationId,
   onConversationSelect,
 }: ProjectSidebarProps) {
+  const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
+  const [shareConversationIds, setShareConversationIds] = useState<string[]>();
   const sidebarSnapshot = useSnapshot(sidebarStore);
   const datasourcesSnapshot = useSnapshot(datasourcesStore);
   const uiSnapshot = useSnapshot(uiStore);
+  const analysisSnapshot = useSnapshot(analysisStore);
   const { deleteConversation, bulkDeleteConversations } = useChat();
   const navigate = useNavigate();
   const chat = useChat();
@@ -71,14 +78,19 @@ export function ProjectSidebar({
     uiActions.setCurrentTable(tableFromUrl);
   }, [tableFromUrl]);
 
-  // Set accordion to show datasources when on a datasource browse route
+  // Check if we're on an analysis route
+  const isOnAnalysisRoute = location.pathname.includes("/analysis");
+
+  // Set accordion based on current route
   useEffect(() => {
-    if (isOnDatasourceBrowseRoute) {
+    if (isOnAnalysisRoute) {
+      sidebarActions.setAccordionValue(["analysis"]);
+    } else if (isOnDatasourceBrowseRoute) {
       sidebarActions.setAccordionValue(["datasources"]);
     } else {
       sidebarActions.setAccordionValue(["conversations"]);
     }
-  }, [isOnDatasourceBrowseRoute]);
+  }, [isOnAnalysisRoute, isOnDatasourceBrowseRoute]);
 
   // Load datasources when on a datasource browse route (removed - consolidated below)
 
@@ -191,6 +203,17 @@ export function ProjectSidebar({
     // Implementation for profile
   };
 
+  const handleShare = () => {
+    setShareConversationIds(undefined);
+    setIsShareDialogOpen(true);
+  };
+
+  const handleShareConversation = (conversation: any) => {
+    // For individual conversation sharing, we'll pre-select it in the dialog
+    setShareConversationIds([conversation.id]);
+    setIsShareDialogOpen(true);
+  };
+
   // Load datasources when needed (either on datasource routes or when sidebar is expanded)
   useEffect(() => {
     if (projectId && (isOnDatasourceBrowseRoute || !isCollapsed)) {
@@ -200,6 +223,27 @@ export function ProjectSidebar({
       }
     }
   }, [projectId]);
+
+  // Load analyses when needed
+  useEffect(() => {
+    if (projectId && (location.pathname.includes("/analysis") || !isCollapsed)) {
+      if ((!analysisSnapshot.analyses || !analysisSnapshot.analyses.length) && !analysisSnapshot.isLoading) {
+        const loadAnalyses = async () => {
+          analysisActions.setLoading(true);
+          try {
+            const response = await api.get(`/projects/${projectId}/analysis`);
+            analysisActions.setAnalyses(response.data);
+          } catch (error) {
+            console.error('Failed to load analyses:', error);
+            analysisActions.setError('Failed to load analyses');
+          } finally {
+            analysisActions.setLoading(false);
+          }
+        };
+        loadAnalyses();
+      }
+    }
+  }, [projectId, location.pathname, isCollapsed]);
 
   const handleDatasourceClick = (datasourceId: string) => {
     sidebarActions.selectDatasource(datasourceId);
@@ -259,6 +303,53 @@ export function ProjectSidebar({
     }
   };
 
+  const handleAnalysisClick = (analysisId: string) => {
+    sidebarActions.setMobileMenuOpen(false);
+    if (projectId) {
+      // Find the analysis to get its name
+      const analysis = analysisSnapshot.analyses?.find(a => a.id === analysisId);
+      const tabTitle = analysis ? analysis.name : 'Analysis';
+      
+      // Create or activate an analysis tab
+      tabsActions.getOrCreateActiveTab('analysis', {
+        analysisId,
+        analysisTitle: tabTitle,
+        projectId,
+      }, tabTitle);
+      
+      // Navigate to the analysis page
+      navigate(`/p/${projectId}/analysis/${analysisId}`);
+    }
+  };
+
+  const handleRunAnalysis = async (analysisId: string) => {
+    sidebarActions.setMobileMenuOpen(false);
+    if (projectId) {
+      // Find the analysis to get its details
+      const analysis = analysisSnapshot.analyses?.find(a => a.id === analysisId);
+      if (!analysis) return;
+      
+      // Execute the analysis
+      analysisActions.setActiveAnalysis(analysisId);
+      
+      try {
+        // Call API to execute the analysis
+        const response = await api.post(`/analysis/${analysisId}/execute`, {
+          project_id: projectId,
+        });
+        
+        // Update the job status
+        analysisActions.updateJob(analysisId, response.data.job);
+        
+        // Navigate to results view
+        navigate(`/p/${projectId}/analysis/${analysisId}/results`);
+      } catch (error) {
+        console.error('Failed to run analysis:', error);
+        analysisActions.setError('Failed to run analysis');
+      }
+    }
+  };
+
   return (
     <>
       {/* Mobile overlay */}
@@ -307,13 +398,36 @@ export function ProjectSidebar({
                 className="flex flex-col data-[state=open]:flex-1"
               >
                 <AccordionTrigger className="py-2 px-3 hover:no-underline hover:bg-accent/50 flex-shrink-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium">Conversations</span>
-                    <Badge variant="secondary" className="text-xs px-1.5 py-0">
-                      {typeof chat.conversationList?.length === "number"
-                        ? chat.conversationList?.length
-                        : "..."}
-                    </Badge>
+                  <div className="flex items-center justify-between w-full">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium">Conversations</span>
+                      <Badge variant="secondary" className="text-xs px-1.5 py-0">
+                        {typeof chat.conversationList?.length === "number"
+                          ? chat.conversationList?.length
+                          : "..."}
+                      </Badge>
+                    </div>
+                    {!sidebarSnapshot.isDeleteMode && (
+                      <div
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleShare();
+                        }}
+                        className="p-1 hover:bg-accent/50 rounded-sm cursor-pointer"
+                        title="Share Project"
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            handleShare();
+                          }
+                        }}
+                      >
+                        <Share2 size={14} />
+                      </div>
+                    )}
                   </div>
                 </AccordionTrigger>
                 <AccordionContent className="!p-0 flex flex-col flex-1 min-h-0">
@@ -322,6 +436,7 @@ export function ProjectSidebar({
                     onConversationClick={handleConversationClick}
                     onRenameConversation={openRenameDialog}
                     onDeleteConversation={handleDeleteConversation}
+                    onShareConversation={handleShareConversation}
                     projectId={projectId}
                   />
                 </AccordionContent>
@@ -343,6 +458,7 @@ export function ProjectSidebar({
                 </AccordionTrigger>
                 <AccordionContent className="!p-0 flex flex-col flex-1 min-h-0 h-full">
                   <DatasourceList
+                    projectId={projectId}
                     onDatasourceClick={handleDatasourceClick}
                     onTableClick={handleTableClick}
                     onQueryClick={handleQueryClick}
@@ -351,6 +467,35 @@ export function ProjectSidebar({
                       uiSnapshot.currentDatasource || undefined
                     }
                     activeTableName={uiSnapshot.currentTable || undefined}
+                  />
+                </AccordionContent>
+              </AccordionItem>
+
+              <AccordionItem
+                value="analysis"
+                className="flex flex-col data-[state=open]:flex-1"
+              >
+                <AccordionTrigger className="py-2 px-3 hover:no-underline hover:bg-accent/50 flex-shrink-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium">Analysis</span>
+                    <Badge variant="secondary" className="text-xs px-1.5 py-0">
+                      {analysisSnapshot.isLoading
+                        ? "..."
+                        : analysisSnapshot.analyses?.length || 0}
+                    </Badge>
+                  </div>
+                </AccordionTrigger>
+                <AccordionContent className="!p-0 flex flex-col flex-1 min-h-0 h-full">
+                  <AnalysisList
+                    analyses={(analysisSnapshot.analyses || []) as Analysis[]}
+                    onAnalysisClick={handleAnalysisClick}
+                    onRunAnalysis={handleRunAnalysis}
+                    onAddNew={() => {
+                      // Navigate to chat to create a new analysis
+                      navigate(`/p/${projectId}/new`);
+                      // TODO: Open analysis creation dialog or set focus to chat input
+                    }}
+                    activeAnalysisId={analysisSnapshot.activeAnalysisId || undefined}
                   />
                 </AccordionContent>
               </AccordionItem>
@@ -375,6 +520,19 @@ export function ProjectSidebar({
 
       {/* Mobile menu toggle button */}
       <MobileMenuToggle />
+      
+      {/* Share Project Dialog */}
+      {projectId && (
+        <ShareProjectDialog
+          isOpen={isShareDialogOpen}
+          onClose={() => {
+            setIsShareDialogOpen(false);
+            setShareConversationIds(undefined);
+          }}
+          projectId={projectId}
+          preSelectedConversations={shareConversationIds}
+        />
+      )}
     </>
   );
 }

@@ -19,6 +19,8 @@ import {
   datasourceUIActions,
 } from "@/lib/store/datasource-ui-store";
 import { css } from "goober";
+import { useNavigate } from "react-router-dom";
+import { tabsActions } from "@/lib/store/tabs-store";
 
 interface DatasourceListProps {
   projectId?: string;
@@ -315,6 +317,7 @@ function DatasourceItem({
 }
 
 export function DatasourceList({
+  projectId,
   onDatasourceClick,
   onTableClick,
   onQueryClick,
@@ -323,6 +326,7 @@ export function DatasourceList({
   activeTableName,
 }: DatasourceListProps) {
   const datasourcesSnapshot = useSnapshot(datasourcesStore);
+  const navigate = useNavigate();
 
   if (datasourcesSnapshot.isLoading) {
     return (
@@ -350,7 +354,26 @@ export function DatasourceList({
           No datasources yet
         </p>
         <p className="text-xs text-muted-foreground text-center">
-          Add one to get started
+          Use{" "}
+          <Button
+            variant="link"
+            className="text-xs p-0 h-auto text-primary underline"
+            onClick={() => {
+              if (projectId) {
+                // Create a new chat tab
+                tabsActions.openInNewTab('chat', {
+                  projectId,
+                  conversationId: 'new',
+                }, 'New Chat');
+                
+                // Navigate to the new route
+                navigate(`/p/${projectId}/new`);
+              }
+            }}
+          >
+            chat
+          </Button>{" "}
+          to add new datasource
         </p>
       </div>
     );
@@ -372,6 +395,30 @@ export function DatasourceList({
           }
         />
       ))}
+      <div className="p-2 border-t">
+        <p className="text-xs text-muted-foreground text-center">
+          Use{" "}
+          <Button
+            variant="link"
+            className="text-xs p-0 h-auto text-primary underline"
+            onClick={() => {
+              if (projectId) {
+                // Create a new chat tab
+                tabsActions.openInNewTab('chat', {
+                  projectId,
+                  conversationId: 'new',
+                }, 'New Chat');
+                
+                // Navigate to the new route
+                navigate(`/p/${projectId}/new`);
+              }
+            }}
+          >
+            chat
+          </Button>{" "}
+          to add new datasource
+        </p>
+      </div>
     </div>
   );
 }

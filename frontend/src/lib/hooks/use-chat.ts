@@ -20,6 +20,9 @@ export const useChat = () => {
     const handleConversationMessages = (
       message: ServerMessage & { type: "conversation_messages" }
     ) => {
+      // Clear loading state for this conversation
+      chatStore.loadingMessages[message.conversation_id] = false;
+      
       // Check if conversation exists in store
       let conversation = chatStore.map[message.conversation_id];
 
@@ -405,6 +408,7 @@ export const useChat = () => {
     // Status
     isConnected: wsService.isConnected(),
     isStreaming: wsService.isStreaming(snap.conversation_id || ""),
+    isLoadingMessages: snap.conversation_id ? snap.loadingMessages[snap.conversation_id] || false : false,
 
     // Actions
     sendMessage,

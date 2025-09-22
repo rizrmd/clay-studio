@@ -43,6 +43,18 @@ export interface DistinctValuesResult {
   readonly execution_time_ms: number;
 }
 
+export interface RowIdsRequest {
+  id_column?: string;
+  limit?: number;
+}
+
+export interface RowIdsResult {
+  readonly row_ids: readonly string[];
+  readonly count: number;
+  readonly id_column: string;
+  readonly execution_time_ms: number;
+}
+
 export interface DeleteRowsRequest {
   row_ids: string[];
   id_column?: string;
@@ -90,7 +102,7 @@ export interface TableDataResult {
   readonly columns: readonly string[];
   readonly rows: readonly (readonly string[])[];
   readonly row_count: number;
-  readonly total_rows: number;
+  readonly total: number;
   readonly execution_time_ms: number;
   readonly page: number;
   readonly page_size: number;
@@ -180,6 +192,11 @@ export const datasourcesApi = {
   // Get distinct values for a column
   getDistinctValues: async (datasourceId: string, tableName: string, data: DistinctValuesRequest): Promise<DistinctValuesResult> => {
     return api.post(`/datasources/${datasourceId}/tables/${tableName}/distinct`, data);
+  },
+
+  // Get all row IDs for a table (for bulk selection)
+  getTableRowIds: async (datasourceId: string, tableName: string, data: RowIdsRequest): Promise<RowIdsResult> => {
+    return api.post(`/datasources/${datasourceId}/tables/${tableName}/row-ids`, data);
   },
 
   // Delete rows from a table
