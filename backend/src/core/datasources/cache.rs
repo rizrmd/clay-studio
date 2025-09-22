@@ -9,9 +9,11 @@ use uuid::Uuid;
 #[derive(Clone, Debug)]
 pub struct CachedDatasource {
     pub id: String,
+    pub name: String,
     pub datasource_type: String,
     pub connection_config: Value,
     pub user_id: Uuid,
+    pub project_id: String,
     pub cached_at: Instant,
 }
 
@@ -28,13 +30,19 @@ pub struct DatasourceCache {
     ttl: Duration,
 }
 
-impl DatasourceCache {
-    pub fn new() -> Self {
+impl Default for DatasourceCache {
+    fn default() -> Self {
         Self {
             cache: Arc::new(RwLock::new(HashMap::new())),
             stats: Arc::new(RwLock::new(DatasourceCacheStats::default())),
             ttl: Duration::from_secs(300), // 5 minutes TTL
         }
+    }
+}
+
+impl DatasourceCache {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub async fn get(&self, datasource_id: &str, user_id: &str) -> Option<CachedDatasource> {
@@ -56,7 +64,7 @@ impl DatasourceCache {
     }
 
     pub async fn set(&self, datasource: CachedDatasource) {
-        let cache_key = format!("{}:{}", datasource.id, datasource.user_id.to_string());
+        let cache_key = format!("{}:{}", datasource.id, datasource.user_id);
         let mut cache = self.cache.write().await;
         cache.insert(cache_key, datasource);
     }

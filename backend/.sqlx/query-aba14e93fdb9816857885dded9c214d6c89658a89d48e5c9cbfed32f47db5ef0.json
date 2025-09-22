@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT aj.id, aj.analysis_id, aj.status, aj.parameters, aj.result, \n               aj.error_message, aj.created_at, aj.started_at, aj.completed_at,\n               a.title as analysis_title\n        FROM analysis_jobs aj\n        LEFT JOIN analyses a ON aj.analysis_id = a.id\n        WHERE aj.id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "analysis_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "status",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "parameters",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 4,
+        "name": "result",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "error_message",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "started_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "completed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "analysis_title",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "aba14e93fdb9816857885dded9c214d6c89658a89d48e5c9cbfed32f47db5ef0"
+}

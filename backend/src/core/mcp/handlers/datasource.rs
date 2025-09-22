@@ -1,4 +1,5 @@
 use super::base::McpHandlers;
+use crate::core::datasources::shared_service;
 use crate::core::mcp::types::*;
 use crate::utils::datasource::create_connector;
 use chrono::Utc;
@@ -7,6 +8,7 @@ use sqlx::Row;
 use uuid;
 
 impl McpHandlers {
+    #[allow(dead_code)]
     pub async fn add_datasource(
         &self,
         args: &serde_json::Map<String, Value>,
@@ -28,9 +30,7 @@ impl McpHandlers {
             let parsed_config = self.parse_connection_config(config, source_type)?;
 
             // Test the connection before adding
-            let mut connector = create_connector(source_type, &parsed_config).await
-                .map_err(|e| format!("Failed to create connector: {}", e))?;
-            if let Err(e) = connector.test_connection().await {
+            if let Err(e) = shared_service::test_datasource_connection(source_type, &parsed_config).await {
                 return Err(format!("Connection test failed: {}", e).into());
             }
 
@@ -78,42 +78,32 @@ impl McpHandlers {
         }).await
     }
 
+    #[allow(dead_code)]
     pub async fn list_datasources(
         &self,
         _args: &serde_json::Map<String, Value>,
     ) -> Result<String, JsonRpcError> {
         self.execute_db_operation("list_datasources", async {
-            let data_sources = sqlx::query(
-                "SELECT id, name, source_type, created_at FROM data_sources 
-                 WHERE project_id = $1 AND deleted_at IS NULL 
-                 ORDER BY created_at DESC"
-            )
-            .bind(&self.project_id)
-            .fetch_all(&self.db_pool)
-            .await?;
+            let datasources = shared_service::list_datasources_for_project(
+                &self.project_id, 
+                &self.db_pool
+            ).await.map_err(|e| format!("Failed to list datasources: {}", e))?;
 
-            let datasources: Vec<Value> = data_sources.iter().map(|ds| {
-                let id: String = ds.get("id");
-                let name: String = ds.get("name");
-                let source_type: String = ds.get("source_type");
-                let created_at: chrono::DateTime<Utc> = ds.get("created_at");
-                
-                json!({
-                    "id": id,
-                    "name": name,
-                    "source_type": source_type,
-                    "created_at": created_at.to_rfc3339()
-                })
-            }).collect();
-
+            let count = datasources.len();
             let response_data = json!({
-                "datasources": datasources,
-                "count": datasources.len()
+                "datasources": datasources.into_iter().map(|ds| json!({
+                    "id": ds.id,
+                    "name": ds.name,
+                    "source_type": ds.source_type,
+                    "created_at": ds.created_at.map(|dt| dt.to_rfc3339()).unwrap_or_else(|| chrono::Utc::now().to_rfc3339())
+                })).collect::<Vec<Value>>(),
+                "count": count
             });
             Ok(serde_json::to_string(&response_data)?)
         }).await
     }
 
+    #[allow(dead_code)]
     pub async fn remove_datasource(
         &self,
         args: &serde_json::Map<String, Value>,
@@ -180,6 +170,7 @@ impl McpHandlers {
         }).await
     }
 
+    #[allow(dead_code)]
     pub async fn datasource_update(
         &self,
         args: &serde_json::Map<String, Value>,
@@ -290,6 +281,7 @@ impl McpHandlers {
         }).await
     }
 
+    #[allow(dead_code)]
     pub async fn test_connection(
         &self,
         args: &serde_json::Map<String, Value>,
@@ -338,6 +330,7 @@ impl McpHandlers {
         .await
     }
 
+    #[allow(dead_code)]
     pub async fn get_datasource_detail(
         &self,
         args: &serde_json::Map<String, Value>,
@@ -420,6 +413,7 @@ impl McpHandlers {
         }).await
     }
 
+    #[allow(dead_code)]
     pub async fn query_datasource(
         &self,
         args: &serde_json::Map<String, Value>,
@@ -435,42 +429,42 @@ impl McpHandlers {
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| "Missing required parameter: query".to_string())?;
 
-            // Get limit parameter (default to 100, max 1000)
-            let limit = args
-                .get("limit")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(100)
-                .min(1000) as usize;
+            // Note: limit parameter is not used when pooling as the pooling mechanism handles limits internally
 
-            // Get connector
-            let source = self.get_datasource_connector(datasource_id).await?;
-            let connector = create_connector(&source.source_type, &source.connection_config)
-                .await
-                .map_err(|e| format!("Failed to create connector: {}", e))?;
+            // Get datasource info first for the response
+            let datasource = shared_service::get_datasource_with_validation(
+                datasource_id,
+                &self.project_id,
+                &self.db_pool
+            ).await.map_err(|e| format!("Failed to get datasource: {}", e))?;
 
-            // Execute query
-            let result = connector
-                .execute_query(query, limit as i32)
-                .await
-                .map_err(|e| format!("Query execution failed: {}", e))?;
+            // Execute query using shared service with connection pooling
+            let result = shared_service::execute_query_on_datasource(
+                datasource_id,
+                &self.project_id,
+                query,
+                &self.db_pool
+            ).await.map_err(|e| format!("Query execution failed: {}", e))?;
 
             // Return JSON result with metadata
             let response_data = json!({
                 "datasource": {
                     "id": datasource_id,
-                    "name": source.name
+                    "name": datasource.name
                 },
                 "query": query,
                 "execution_time_ms": result.get("execution_time_ms"),
                 "columns": result.get("columns"),
                 "rows": result.get("rows"),
-                "row_count": result.get("row_count")
+                "row_count": result.get("row_count"),
+                "using_connection_pool": true
             });
             Ok(serde_json::to_string(&response_data)?)
         })
         .await
     }
 
+    #[allow(dead_code)]
     pub async fn inspect_datasource(
         &self,
         args: &serde_json::Map<String, Value>,
@@ -486,6 +480,7 @@ impl McpHandlers {
         .await
     }
 
+    #[allow(dead_code)]
     pub async fn inspect_datasource_internal(
         &self,
         datasource_id: &str,

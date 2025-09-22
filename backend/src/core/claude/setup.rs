@@ -341,8 +341,9 @@ impl ClaudeSetup {
                     drop(session_guard); // Release lock before expect call
                     
                     let mut session_guard = session_arc.blocking_lock();
-                    match session_guard.as_mut().unwrap().expect(ExpectRegex(".+")) {
-                        Ok(output) => {
+                    if let Some(session) = session_guard.as_mut() {
+                        match session.expect(ExpectRegex(".+")) {
+                            Ok(output) => {
                             let output_str = String::from_utf8_lossy(output.as_bytes()).to_string();
                             
                             // Log the output with more detail for debugging
@@ -485,7 +486,9 @@ impl ClaudeSetup {
                             // Handle interactive prompts automatically
                             if output_str.contains("Press Enter to retry") || output_str.contains("Port 54545 is already in use") {
                                 info!("Detected port conflict prompt, sending Enter to retry");
-                                let _ = session_guard.as_mut().unwrap().send_line("");
+                                if let Some(session) = session_guard.as_mut() {
+                                    let _ = session.send_line("");
+                                }
                                 drop(session_guard);
                                 continue;
                             }
@@ -522,6 +525,7 @@ impl ClaudeSetup {
                             // No match or timeout, continue
                             std::thread::sleep(std::time::Duration::from_millis(100));
                         }
+                    }
                     }
                 } else {
                     break;
@@ -687,19 +691,16 @@ impl ClaudeSetup {
         drop(guard);
 
         // If no in-memory token, check database
-        if let Ok(row) = sqlx::query("SELECT claude_token FROM clients WHERE id = $1")
+        if let Ok(Some(row)) = sqlx::query("SELECT claude_token FROM clients WHERE id = $1")
             .bind(self.client_id)
             .fetch_optional(db_pool)
             .await
         {
-            if let Some(row) = row {
-                let db_token: Option<String> = row.get("claude_token");
-                if let Some(token) = db_token {
-                    // Cache the token in memory for future use
-                    let mut guard = self.oauth_token.lock().await;
-                    *guard = Some(token.clone());
-                    return Some(token);
-                }
+            if let Some(token) = row.get::<Option<String>, _>("claude_token") {
+                // Cache the token in memory for future use
+                let mut guard = self.oauth_token.lock().await;
+                *guard = Some(token.clone());
+                return Some(token);
             }
         }
 

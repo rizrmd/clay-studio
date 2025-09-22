@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT \n            error_message,\n            COUNT(*) as occurrence_count\n        FROM analysis_jobs\n        WHERE analysis_id = $1 AND status = 'failed' AND created_at >= NOW() - INTERVAL '1 day' * $2\n        GROUP BY error_message\n        ORDER BY occurrence_count DESC\n        LIMIT 10\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "error_message",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "occurrence_count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Float8"
+      ]
+    },
+    "nullable": [
+      true,
+      null
+    ]
+  },
+  "hash": "06953ef69c894f787bee14ffa51558e923b01c481d6e385ba7613ffe6a6b1c1e"
+}

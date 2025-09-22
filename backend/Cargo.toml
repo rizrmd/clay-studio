@@ -16,6 +16,10 @@ path = "src/main.rs"
 name = "mcp_server"
 path = "src/bin/mcp_server.rs"
 
+[[bin]]
+name = "analysis_executor"
+path = "src/bin/analysis_executor.rs"
+
 
 [workspace]
 members = [".", "migration"]
@@ -41,6 +45,7 @@ lazy_static = "1.4"
 futures-util = "0.3"
 thiserror = "2"
 reqwest = { version = "0.12", features = ["stream", "json"] }
+url = "2.5"
 bcrypt = "0.15"
 salvo-session = "0.78"
 async-session = "3"
@@ -58,6 +63,22 @@ tokio-util = { version = "0.7", features = ["compat"] }
 oracle = "0.6"
 rust_xlsxwriter = "0.70"
 rust_decimal = "1.37.2"
+# Analysis sandbox dependencies
+quickjs_runtime = "0.10"
+polars = { version = "0.44", features = ["lazy", "sql", "temporal", "strings"] }
+cron = "0.12"
+tempfile = "3.12"
+sha2 = "0.10"
+hex = "0.4"
+flate2 = "1.0"
+zip = "2.1"
+# System monitoring dependencies
+sysinfo = "0.30"
+
+# Document parsing dependencies
+calamine = "0.26"          # Excel file parsing (.xlsx, .xls, .ods)
+docx-rs = "0.4"           # Word document parsing (.docx) 
+pdf-extract = "0.7"       # PDF text extraction
 
 [dev-dependencies]
 sea-orm-cli = { version = "1.1", default-features = false, features = ["runtime-tokio-rustls", "codegen"] }

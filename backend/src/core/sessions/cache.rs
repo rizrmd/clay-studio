@@ -60,12 +60,18 @@ impl CacheStats {
     }
 }
 
-impl SessionCache {
-    pub fn new() -> Self {
+impl Default for SessionCache {
+    fn default() -> Self {
         Self {
             cache: Arc::new(RwLock::new(HashMap::new())),
             stats: Arc::new(RwLock::new(CacheStats::default())),
         }
+    }
+}
+
+impl SessionCache {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Get a session from cache, returns None if not cached or expired

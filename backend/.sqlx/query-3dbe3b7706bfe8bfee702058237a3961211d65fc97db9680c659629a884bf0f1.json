@@ -1,0 +1,44 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT aj.id, aj.analysis_id, aj.parameters, a.script_content, a.project_id\n            FROM analysis_jobs aj\n            JOIN analyses a ON aj.analysis_id = a.id\n            WHERE aj.status = 'pending'\n            ORDER BY aj.created_at ASC\n            LIMIT 5\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "analysis_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "parameters",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 3,
+        "name": "script_content",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "project_id",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "3dbe3b7706bfe8bfee702058237a3961211d65fc97db9680c659629a884bf0f1"
+}

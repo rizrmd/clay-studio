@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT cron_expression, timezone FROM analysis_schedules WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "cron_expression",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "timezone",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "d91973ceee52aef79c7148794d4e043db6088db1e65080587b30482f544d7617"
+}

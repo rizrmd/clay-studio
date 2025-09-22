@@ -1,10 +1,11 @@
 // Clay Studio Backend Library
 // Exposes the Claude SDK and other modules for external use
 
-// Allow unwrap and expect temporarily for development
-// TODO: Fix all unwrap/expect usage for production
-#![allow(clippy::unwrap_used)]
-#![allow(clippy::expect_used)]
+// Warn on unwrap and expect usage to encourage proper error handling
+#![warn(clippy::unwrap_used)]
+#![warn(clippy::expect_used)]
+// Allow dead code during development/refactoring
+#![allow(dead_code)]
 
 pub mod api;
 pub mod core;

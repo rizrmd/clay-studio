@@ -61,7 +61,12 @@ impl McpHandlers {
                     }
                 }
             });
-            return Ok(serde_json::to_string(&error_response).unwrap());
+            return serde_json::to_string(&error_response)
+                .map_err(|e| JsonRpcError {
+                    code: INTERNAL_ERROR,
+                    message: format!("Failed to serialize error response: {}", e),
+                    data: None,
+                });
         }
 
         // Validate each sheet
@@ -80,10 +85,28 @@ impl McpHandlers {
                         "headers": ["Header1", "Header2"]
                     }
                 });
-                return Ok(serde_json::to_string(&error_response).unwrap());
+                return serde_json::to_string(&error_response)
+                .map_err(|e| JsonRpcError {
+                    code: INTERNAL_ERROR,
+                    message: format!("Failed to serialize error response: {}", e),
+                    data: None,
+                });
             }
 
-            let sheet_obj = sheet.as_object().unwrap();
+            let sheet_obj = match sheet.as_object() {
+                Some(obj) => obj,
+                None => {
+                    let error_response = json!({
+                        "error": "Invalid sheet format - must be object"
+                    });
+                    return serde_json::to_string(&error_response)
+                        .map_err(|e| JsonRpcError {
+                            code: INTERNAL_ERROR,
+                            message: format!("Failed to serialize error response: {}", e),
+                            data: None,
+                        });
+                }
+            };
             if !sheet_obj.contains_key("name") || !sheet_obj.contains_key("data") {
                 let error_response = json!({
                     "status": "error",
@@ -99,7 +122,12 @@ impl McpHandlers {
                         "headers": ["ID", "Name", "Email"]
                     }
                 });
-                return Ok(serde_json::to_string(&error_response).unwrap());
+                return serde_json::to_string(&error_response)
+                .map_err(|e| JsonRpcError {
+                    code: INTERNAL_ERROR,
+                    message: format!("Failed to serialize error response: {}", e),
+                    data: None,
+                });
             }
 
             if !sheet_obj["data"].is_array() {
@@ -116,7 +144,12 @@ impl McpHandlers {
                         ]
                     }
                 });
-                return Ok(serde_json::to_string(&error_response).unwrap());
+                return serde_json::to_string(&error_response)
+                .map_err(|e| JsonRpcError {
+                    code: INTERNAL_ERROR,
+                    message: format!("Failed to serialize error response: {}", e),
+                    data: None,
+                });
             }
         }
 
@@ -152,9 +185,25 @@ impl McpHandlers {
 
         // Process each sheet
         for sheet_value in sheets {
-            let sheet_obj = sheet_value.as_object().unwrap();
-            let sheet_name = sheet_obj.get("name").unwrap().as_str().unwrap();
-            let data = sheet_obj.get("data").unwrap().as_array().unwrap();
+            let sheet_obj = sheet_value.as_object().ok_or_else(|| JsonRpcError {
+                code: INTERNAL_ERROR,
+                message: "Invalid sheet object".to_string(),
+                data: None,
+            })?;
+            let sheet_name = sheet_obj.get("name")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| JsonRpcError {
+                    code: INTERNAL_ERROR,
+                    message: "Sheet name must be a string".to_string(),
+                    data: None,
+                })?;
+            let data = sheet_obj.get("data")
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| JsonRpcError {
+                    code: INTERNAL_ERROR,
+                    message: "Sheet data must be an array".to_string(),
+                    data: None,
+                })?;
             let headers = sheet_obj.get("headers").and_then(|h| h.as_array());
 
             // Create worksheet
@@ -312,7 +361,7 @@ impl McpHandlers {
                                 // Convert other types to string
                                 if let Some(ref format) = data_format {
                                     worksheet
-                                        .write_string_with_format(row_idx, col_idx as u16, &cell_value.to_string(), format)
+                                        .write_string_with_format(row_idx, col_idx as u16, cell_value.to_string(), format)
                                         .map_err(|e| JsonRpcError {
                                             code: INTERNAL_ERROR,
                                             message: format!("Failed to write cell: {}", e),
@@ -320,7 +369,7 @@ impl McpHandlers {
                                         })?;
                                 } else {
                                     worksheet
-                                        .write_string(row_idx, col_idx as u16, &cell_value.to_string())
+                                        .write_string(row_idx, col_idx as u16, cell_value.to_string())
                                         .map_err(|e| JsonRpcError {
                                             code: INTERNAL_ERROR,
                                             message: format!("Failed to write cell: {}", e),
@@ -496,7 +545,12 @@ impl McpHandlers {
             }
         });
 
-        Ok(serde_json::to_string(&response).unwrap())
+        serde_json::to_string(&response)
+            .map_err(|e| JsonRpcError {
+                code: INTERNAL_ERROR,
+                message: format!("Failed to serialize response: {}", e),
+                data: None,
+            })
     }
 
     pub async fn cleanup_old_excel_files(
@@ -626,8 +680,7 @@ fn parse_color(color_str: &str) -> Option<Color> {
         "cyan" => Some(Color::Cyan),
         _ => {
             // Try to parse hex color (#RRGGBB or #RGB)
-            if color_str.starts_with('#') {
-                let hex = &color_str[1..];
+            if let Some(hex) = color_str.strip_prefix('#') {
                 if hex.len() == 6 {
                     if let Ok(rgb) = u32::from_str_radix(hex, 16) {
                         return Some(Color::RGB(rgb));

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM analysis_schedules WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a54697ad7c5d16aecf8fbb2778298f04fbc75c2fb3d9edcbf41a060223e1fccc"
+}

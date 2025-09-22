@@ -1,0 +1,71 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id, analysis_id, cron_expression, timezone, enabled, created_at, updated_at, last_run_at, next_run_at\n        FROM analysis_schedules \n        WHERE analysis_id = $1 AND ($2 = false OR enabled = true)\n        ORDER BY created_at DESC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "analysis_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "cron_expression",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "timezone",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "last_run_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "next_run_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "76ac329b6c8be92c3d320ae7b54bc131fcff3a6c8aa53b1d4090949fd577717a"
+}

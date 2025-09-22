@@ -1,15 +1,25 @@
-pub mod admin;
+// Clean API organization without confusing _domain naming
+
+// Core business modules  
 pub mod auth;
-pub mod chat_ws;
-pub mod client_management;
-pub mod clients;
-pub mod conversations;
-pub mod conversations_forget;
-pub mod datasources;
-pub mod debug;
 pub mod projects;
-pub mod prompt;
-pub mod tool_usage;
-pub mod upload;
-pub mod user_management;
-pub mod websocket;
+pub mod chat;
+
+// Supporting modules
+pub mod admin;
+pub mod uploads;
+
+// Re-exports for common functionality
+pub use chat::websocket;
+
+use salvo::prelude::*;
+
+/// Main API router that combines all modules
+pub fn api_routes() -> Router {
+    Router::new()
+        .push(auth::auth_routes())
+        .push(projects::project_routes())
+        .push(chat::chat_routes())
+        .push(admin::admin_routes())
+        .push(uploads::upload_routes())
+}

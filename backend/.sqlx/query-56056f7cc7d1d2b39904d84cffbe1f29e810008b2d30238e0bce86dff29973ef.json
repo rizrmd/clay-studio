@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO analysis_schedules (id, analysis_id, cron_expression, timezone, enabled, created_at, updated_at, next_run_at)\n        VALUES ($1, $2, $3, $4, $5, NOW(), NOW(), $6)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Varchar",
+        "Varchar",
+        "Bool",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "56056f7cc7d1d2b39904d84cffbe1f29e810008b2d30238e0bce86dff29973ef"
+}

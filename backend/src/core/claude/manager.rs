@@ -23,7 +23,13 @@ static SDK_INSTANCES: LazyLock<StdMutex<HashMap<Uuid, Arc<ClaudeSDK>>>> =
 
 impl ClaudeManager {
     fn get_or_create_client(client_id: Uuid) -> Arc<ClaudeSetup> {
-        let mut clients = CLIENT_INSTANCES.lock().expect("CLIENT_INSTANCES mutex poisoned");
+        let mut clients = match CLIENT_INSTANCES.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                tracing::error!("CLIENT_INSTANCES mutex poisoned, recovering");
+                poisoned.into_inner()
+            }
+        };
         if let Some(client) = clients.get(&client_id) {
             client.clone()
         } else {
@@ -34,13 +40,25 @@ impl ClaudeManager {
     }
 
     pub fn get_client_setup(client_id: Uuid) -> Option<Arc<ClaudeSetup>> {
-        let clients = CLIENT_INSTANCES.lock().expect("CLIENT_INSTANCES mutex poisoned");
+        let clients = match CLIENT_INSTANCES.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                tracing::error!("CLIENT_INSTANCES mutex poisoned, recovering");
+                poisoned.into_inner()
+            }
+        };
         clients.get(&client_id).cloned()
     }
 
     #[allow(dead_code)]
     pub fn is_input_ready(client_id: Uuid) -> bool {
-        let clients = CLIENT_INSTANCES.lock().expect("CLIENT_INSTANCES mutex poisoned");
+        let clients = match CLIENT_INSTANCES.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                tracing::error!("CLIENT_INSTANCES mutex poisoned, recovering");
+                poisoned.into_inner()
+            }
+        };
         if let Some(client) = clients.get(&client_id) {
             client.is_input_ready()
         } else {
@@ -77,7 +95,13 @@ impl ClaudeManager {
 
     #[allow(dead_code)]
     pub fn get_or_create_sdk(client_id: Uuid, oauth_token: Option<String>) -> Arc<ClaudeSDK> {
-        let mut sdks = SDK_INSTANCES.lock().expect("SDK_INSTANCES mutex poisoned");
+        let mut sdks = match SDK_INSTANCES.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                tracing::error!("SDK_INSTANCES mutex poisoned, recovering");
+                poisoned.into_inner()
+            }
+        };
         if let Some(sdk) = sdks.get(&client_id) {
             sdk.clone()
         } else {

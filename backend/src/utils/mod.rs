@@ -1,13 +1,16 @@
 pub mod auth;
 pub mod claude_md_template;
 pub mod command_logger;
+pub mod common;
 pub mod config;
+pub mod content_extractor;
 pub mod datasource;
 pub mod db;
 pub mod domain;
 pub mod error;
 pub mod log_organizer;
 pub mod mcp_tools;
+pub mod message_files;
 pub mod middleware;
 pub mod state;
 

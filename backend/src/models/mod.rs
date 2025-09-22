@@ -1,3 +1,4 @@
+pub mod analysis;
 pub mod client;
 pub mod client_config;
 pub mod conversation;
@@ -6,11 +7,14 @@ pub mod file_upload;
 pub mod message;
 pub mod message_role;
 pub mod project;
+pub mod project_share;
 pub mod session;
 pub mod tool;
 pub mod tool_usage;
 pub mod user;
 
+#[allow(unused_imports)]
+pub use analysis::*;
 #[allow(unused_imports)]
 pub use client::*;
 #[allow(unused_imports)]

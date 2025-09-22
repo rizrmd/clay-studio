@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO analysis_jobs (id, analysis_id, parameters, status, created_at)\n            VALUES ($1, $2, $3, 'pending', NOW())\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9ba520077911fb4df8f64e39864eaf91bc2764f3f02e060b84e12a1149e77f8f"
+}

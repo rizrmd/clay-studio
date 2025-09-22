@@ -1,3 +1,4 @@
+use crate::core::analysis::AnalysisService;
 use crate::core::sessions::PostgresSessionStore;
 use crate::models::{client::Client, tool_usage::ToolUsage, Message};
 use crate::utils::db;
@@ -5,6 +6,7 @@ use crate::utils::Config;
 use chrono::{DateTime, Utc};
 use sea_orm::DatabaseConnection;
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
+use std::path::PathBuf;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -75,6 +77,7 @@ pub struct AppState {
     pub active_claude_streams: Arc<RwLock<HashMap<String, StreamingState>>>,
     pub conversation_cache: Arc<RwLock<HashMap<String, ConversationCache>>>,
     pub session_store: PostgresSessionStore,
+    pub analysis_service: AnalysisService,
 }
 
 impl AppState {
@@ -89,13 +92,10 @@ impl AppState {
         let db_arc = Arc::new(db);
         let session_store = PostgresSessionStore::new(db_arc.clone());
 
-        // Warm up datasource connection pools to avoid slow first requests
-        use crate::utils::datasource::get_pool_manager;
-        let pool_manager = get_pool_manager().await;
-        match pool_manager.warm_up_pools(&db_pool).await {
-            Ok(count) => info!("🔥 Successfully warmed up {} connection pools", count),
-            Err(e) => warn!("⚠️ Pool warm-up failed: {}", e),
-        }
+        // Initialize analysis service
+        let data_dir = PathBuf::from("./analysis_data");
+        tokio::fs::create_dir_all(&data_dir).await?;
+        let analysis_service = AnalysisService::new(db_pool.clone());
 
         Ok(AppState {
             db: db_arc,
@@ -105,6 +105,7 @@ impl AppState {
             active_claude_streams: Arc::new(RwLock::new(HashMap::new())),
             conversation_cache: Arc::new(RwLock::new(HashMap::new())),
             session_store,
+            analysis_service,
         })
     }
 

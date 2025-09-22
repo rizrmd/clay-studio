@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT status, result, error_message FROM analysis_jobs WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "status",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "result",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 2,
+        "name": "error_message",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "46f5500d92472907d3288ddc35aecbffde14d1a13edd4ac86de9bc18c4ecf2c5"
+}

@@ -20,7 +20,12 @@ impl McpHandlers {
                         "options": ["PostgreSQL", "MySQL", "SQLite", "Oracle"]
                     }
                 });
-                return Ok(serde_json::to_string(&response).unwrap());
+                return serde_json::to_string(&response)
+                    .map_err(|e| JsonRpcError {
+                        code: INTERNAL_ERROR,
+                        message: format!("Failed to serialize response: {}", e),
+                        data: None,
+                    });
             }
         };
 
@@ -35,7 +40,12 @@ impl McpHandlers {
                     "options": ["Export data", "Create chart", "Run analysis"]
                 }
             });
-            return Ok(serde_json::to_string(&response).unwrap());
+            return serde_json::to_string(&response)
+                .map_err(|e| JsonRpcError {
+                    code: INTERNAL_ERROR,
+                    message: format!("Failed to serialize response: {}", e),
+                    data: None,
+                });
         }
 
         // Validate options if provided
@@ -55,7 +65,12 @@ impl McpHandlers {
                         "options": ["Bar Chart", "Line Chart", "Pie Chart", "Scatter Plot"]
                     }
                 });
-                return Ok(serde_json::to_string(&response).unwrap());
+                return serde_json::to_string(&response)
+                    .map_err(|e| JsonRpcError {
+                        code: INTERNAL_ERROR,
+                        message: format!("Failed to serialize response: {}", e),
+                        data: None,
+                    });
             }
 
             // Check for empty option values
@@ -69,7 +84,12 @@ impl McpHandlers {
                         "options": ["Continue", "Cancel", "Save and exit"]
                     }
                 });
-                return Ok(serde_json::to_string(&response).unwrap());
+                return serde_json::to_string(&response)
+                    .map_err(|e| JsonRpcError {
+                        code: INTERNAL_ERROR,
+                        message: format!("Failed to serialize response: {}", e),
+                        data: None,
+                    });
             }
         }
 
@@ -86,6 +106,11 @@ impl McpHandlers {
             }
         });
 
-        Ok(serde_json::to_string(&response).unwrap())
+        serde_json::to_string(&response)
+            .map_err(|e| JsonRpcError {
+                code: INTERNAL_ERROR,
+                message: format!("Failed to serialize response: {}", e),
+                data: None,
+            })
     }
 }
