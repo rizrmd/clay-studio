@@ -128,16 +128,21 @@ export function DataBrowser({
       
       // Extract row IDs from the actual data using the same logic as the table
       console.log('Processing data:', {
+        hasData: !!(result as any).data,
+        dataLength: (result as any).data?.length,
         hasRows: !!result.rows,
         rowsLength: result.rows?.length,
         hasColumns: !!result.columns,
         columnsLength: result.columns?.length,
-        firstRow: result.rows?.[0],
+        firstRow: (result as any).data?.[0] || result.rows?.[0],
         columns: result.columns
       });
       
-      if (result.rows && Array.isArray(result.rows) && result.rows.length > 0) {
-        result.rows.forEach((row: any, rowIndex: number) => {
+      // Try both data and rows properties (API inconsistency)
+      const dataArray = (result as any).data || result.rows;
+      
+      if (dataArray && Array.isArray(dataArray) && dataArray.length > 0) {
+        dataArray.forEach((row: any, rowIndex: number) => {
           // Use the same ID extraction logic as the table transformation
           const firstColumnIndex = 0; // First column usually contains the ID
           const rowId = Array.isArray(row) ? row[firstColumnIndex] : row?.id || row?.[Object.keys(row)[0]];
@@ -153,7 +158,13 @@ export function DataBrowser({
         
         console.log('Selected rows after processing:', Object.keys(localStore.selectedRows).slice(0, 10));
       } else {
-        console.warn('No rows to process or rows not in expected format:', result);
+        console.warn('No data to process or data not in expected format:', {
+          result,
+          hasData: !!(result as any).data,
+          hasRows: !!result.rows,
+          dataLength: (result as any).data?.length,
+          rowsLength: result.rows?.length
+        });
       }
       
       // Increment version to force re-render
@@ -161,7 +172,7 @@ export function DataBrowser({
       
       console.log('handleSelectAllRows SUCCESS:', {
         totalRows: dataBrowserSnapshot.totalRows,
-        fetchedRows: result.rows?.length || 0,
+        fetchedRows: (result as any).data?.length || result.rows?.length || 0,
         selectedCount: Object.keys(localStore.selectedRows).length,
         selectionVersion: localStore.selectionVersion,
         firstFewKeys: Object.keys(localStore.selectedRows).slice(0, 10),

@@ -6,10 +6,12 @@ import {
   Trash2,
   Loader2,
   CheckCheck,
+  Edit,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DataBrowserLocalStore } from "../hooks/use-local-store";
 import { NewRowModal } from "./new-row-modal";
+import { EditSelectedModal } from "./edit-selected-modal";
 import {
   Tooltip,
   TooltipContent,
@@ -63,10 +65,17 @@ export const TabNavigation = forwardRef<TabNavigationRef, TabNavigationProps>(
     ref
   ) => {
     const [isNewRowModalOpen, setIsNewRowModalOpen] = useState(false);
+    const [isEditSelectedModalOpen, setIsEditSelectedModalOpen] = useState(false);
 
     const handleAddRowClick = () => {
       if (selectedTable) {
         setIsNewRowModalOpen(true);
+      }
+    };
+
+    const handleEditSelectedClick = () => {
+      if (selectedTable && Object.keys(localSnapshot.selectedRows).length > 0) {
+        setIsEditSelectedModalOpen(true);
       }
     };
 
@@ -116,6 +125,32 @@ export const TabNavigation = forwardRef<TabNavigationRef, TabNavigationProps>(
             </Tooltip>
             {selectedRowsCount > 0 && (
               <>
+                {/* Edit Button */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      className={cn(
+                        "p-3 transition-colors flex flex-col items-center gap-1 relative",
+                        "border-transparent text-blue-600 hover:text-blue-600 hover:bg-blue-600/10"
+                      )}
+                      onClick={handleEditSelectedClick}
+                    >
+                      <div className="relative">
+                        <Edit className="h-4 w-4" />
+                        <div className="absolute -bottom-2 -right-2 bg-blue-600 text-white rounded-full min-w-[16px] h-4 text-xs flex items-center justify-center px-1">
+                          {selectedRowsCount}
+                        </div>
+                      </div>
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">
+                    <p>
+                      Edit {selectedRowsCount} selected row
+                      {selectedRowsCount !== 1 ? "s" : ""}
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+
                 {/* Delete Button */}
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -192,6 +227,13 @@ export const TabNavigation = forwardRef<TabNavigationRef, TabNavigationProps>(
           <NewRowModal
             isOpen={isNewRowModalOpen}
             onClose={() => setIsNewRowModalOpen(false)}
+          />
+          
+          <EditSelectedModal
+            isOpen={isEditSelectedModalOpen}
+            onClose={() => setIsEditSelectedModalOpen(false)}
+            selectedRowIds={Object.keys(localSnapshot.selectedRows)}
+            selectedRows={localSnapshot.selectedRows}
           />
         </div>
       </TooltipProvider>

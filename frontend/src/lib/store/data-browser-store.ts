@@ -390,6 +390,11 @@ export const dataBrowserActions = {
     dataBrowserStore.isDirty = true;
   },
 
+  // Refresh table data (alias for loadTableData)
+  refreshTableData: () => {
+    return dataBrowserActions.loadTableData();
+  },
+
   // Reset store
   reset: () => {
     dataBrowserStore.selectedDatasourceId = null;
