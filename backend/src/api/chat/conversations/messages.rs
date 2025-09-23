@@ -81,8 +81,8 @@ pub async fn get_conversation_messages(
                         message_id: usage_row.try_get("message_id").unwrap_or_default(),
                         tool_name: usage_row.try_get("tool_name").unwrap_or_default(),
                         tool_use_id: usage_row.try_get("tool_use_id").ok(),
-                        parameters: None, // Exclude parameters from conversation messages
-                        output: None, // Exclude output from conversation messages
+                        parameters: usage_row.try_get("parameters").ok(),
+                        output: usage_row.try_get("output").ok(),
                         execution_time_ms: usage_row.try_get("execution_time_ms").ok(),
                         created_at: created_at.map(|dt| dt.to_rfc3339()),
                     });

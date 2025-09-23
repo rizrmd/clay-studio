@@ -287,16 +287,13 @@ impl AppState {
                 if !tool_rows.is_empty() {
                     let mut usages = Vec::new();
                     for tool_row in tool_rows {
-                        let tool_name: String = tool_row.get("tool_name");
-                        // Don't filter MCP interaction tools and TodoWrite - they need their output for rendering
-                        let should_preserve = tool_name.starts_with("mcp__interaction__") || tool_name == "TodoWrite";
                         usages.push(ToolUsage {
                             id: tool_row.get("id"),
                             message_id: tool_row.get("message_id"),
-                            tool_name,
+                            tool_name: tool_row.get("tool_name"),
                             tool_use_id: tool_row.get("tool_use_id"),
-                            parameters: if should_preserve { tool_row.get("parameters") } else { None },
-                            output: if should_preserve { tool_row.get("output") } else { None },
+                            parameters: tool_row.get("parameters"),
+                            output: tool_row.get("output"),
                             execution_time_ms: tool_row.get("execution_time_ms"),
                             created_at: tool_row
                                 .get::<Option<DateTime<Utc>>, _>("created_at")

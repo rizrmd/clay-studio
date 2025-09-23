@@ -441,6 +441,26 @@ pub async fn handle_chat_message_ws(
                             ),
                         );
 
+                        // Create tool usage record in database immediately to avoid 404 errors
+
+                        // Save initial tool usage to database immediately
+                        if let Err(e) = sqlx::query(
+                            "INSERT INTO tool_usages (id, message_id, tool_name, tool_use_id, parameters, output, execution_time_ms, created_at)
+                             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"
+                        )
+                        .bind(tool_usage_id)
+                        .bind(&message_id.to_string())
+                        .bind(&tool)
+                        .bind(&tool_use_id)
+                        .bind(&args)
+                        .bind(Option::<serde_json::Value>::None) // output starts as null
+                        .bind(Option::<i64>::None) // execution_time_ms starts as null
+                        .bind(Utc::now())
+                        .execute(&db_pool)
+                        .await {
+                            tracing::error!("Failed to create initial tool usage record: {}", e);
+                        }
+
                         // Store tool use event for replay on reconnection
                         {
                             let mut streams = active_claude_streams.write().await;
@@ -472,6 +492,18 @@ pub async fn handle_chat_message_ws(
                             pending_tools.remove(&tool)
                         {
                             let execution_time = start_time.elapsed().as_millis() as u64;
+
+                            // Update the existing tool usage record with the result
+                            if let Err(e) = sqlx::query(
+                                "UPDATE tool_usages SET output = $1, execution_time_ms = $2 WHERE id = $3"
+                            )
+                            .bind(&result)
+                            .bind(execution_time as i64)
+                            .bind(tool_usage_id)
+                            .execute(&db_pool)
+                            .await {
+                                tracing::error!("Failed to update tool usage record: {}", e);
+                            }
 
                             // Store tool complete event for replay on reconnection
                             {
