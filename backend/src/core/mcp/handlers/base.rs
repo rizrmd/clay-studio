@@ -512,6 +512,7 @@ impl McpHandlers {
             // For now, return the existing schema info
             // In the future, we can implement schema refresh logic
             let result = json!({
+                "status": "success",
                 "datasource_id": datasource_id,
                 "name": name,
                 "source_type": source_type,
@@ -530,69 +531,352 @@ impl McpHandlers {
 
     pub async fn handle_show_table(
         &self, 
-        _arguments: Option<&serde_json::Value>
+        arguments: Option<&serde_json::Value>
     ) -> Result<serde_json::Value, JsonRpcError> {
-        Err(JsonRpcError {
-            code: -32601,
-            message: "Method not implemented yet".to_string(),
-            data: None,
-        })
+        let args = arguments
+            .and_then(|v| v.as_object())
+            .ok_or_else(|| JsonRpcError {
+                code: INVALID_PARAMS,
+                message: "Invalid arguments".to_string(),
+                data: None,
+            })?;
+
+        // Get required data parameter
+        let data = args.get("data")
+            .ok_or_else(|| JsonRpcError {
+                code: INVALID_PARAMS,
+                message: "Missing required parameter: data".to_string(),
+                data: None,
+            })?;
+
+        // Validate data has required structure
+        let columns = data.get("columns")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| JsonRpcError {
+                code: INVALID_PARAMS,
+                message: "Missing or invalid 'columns' in data".to_string(),
+                data: None,
+            })?;
+
+        let rows = data.get("rows")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| JsonRpcError {
+                code: INVALID_PARAMS,
+                message: "Missing or invalid 'rows' in data".to_string(),
+                data: None,
+            })?;
+
+        // Get optional title
+        let title = args.get("title")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Table");
+
+        // Create response
+        Ok(json!({
+            "status": "success",
+            "display_type": "table",
+            "title": title,
+            "data": {
+                "columns": columns,
+                "rows": rows,
+                "row_count": rows.len(),
+                "column_count": columns.len()
+            },
+            "message": "Table data prepared for display"
+        }))
     }
 
     pub async fn handle_show_chart(
         &self, 
-        _arguments: Option<&serde_json::Value>
+        arguments: Option<&serde_json::Value>
     ) -> Result<serde_json::Value, JsonRpcError> {
-        Err(JsonRpcError {
-            code: -32601,
-            message: "Method not implemented yet".to_string(),
-            data: None,
-        })
+        let args = arguments
+            .and_then(|v| v.as_object())
+            .ok_or_else(|| JsonRpcError {
+                code: INVALID_PARAMS,
+                message: "Invalid arguments".to_string(),
+                data: None,
+            })?;
+
+        // Get required parameters
+        let data = args.get("data")
+            .ok_or_else(|| JsonRpcError {
+                code: INVALID_PARAMS,
+                message: "Missing required parameter: data".to_string(),
+                data: None,
+            })?;
+
+        let chart_type = args.get("chart_type")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| JsonRpcError {
+                code: INVALID_PARAMS,
+                message: "Missing required parameter: chart_type".to_string(),
+                data: None,
+            })?;
+
+        // Validate chart type
+        let valid_types = ["line", "bar", "pie", "donut", "area", "scatter", "bubble", "heatmap", "radar", "polar"];
+        if !valid_types.contains(&chart_type) {
+            return Err(JsonRpcError {
+                code: INVALID_PARAMS,
+                message: format!("Invalid chart_type '{}'. Must be one of: {:?}", chart_type, valid_types),
+                data: None,
+            });
+        }
+
+        // Validate data structure based on chart type
+        match chart_type {
+            "pie" | "donut" => {
+                // Pie/donut charts need labels and values
+                let labels = data.get("labels").and_then(|v| v.as_array());
+                let values = data.get("values").and_then(|v| v.as_array());
+                
+                if labels.is_none() || values.is_none() {
+                    return Err(JsonRpcError {
+                        code: INVALID_PARAMS,
+                        message: format!("{} chart requires 'labels' and 'values' arrays in data", chart_type),
+                        data: None,
+                    });
+                }
+            },
+            _ => {
+                // Other charts need categories and series
+                let categories = data.get("categories").and_then(|v| v.as_array());
+                let series = data.get("series").and_then(|v| v.as_array());
+                
+                if categories.is_none() || series.is_none() {
+                    return Err(JsonRpcError {
+                        code: INVALID_PARAMS,
+                        message: format!("{} chart requires 'categories' and 'series' arrays in data", chart_type),
+                        data: None,
+                    });
+                }
+            }
+        }
+
+        // Get optional title
+        let title = args.get("title")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Chart");
+
+        // Create response
+        Ok(json!({
+            "status": "success",
+            "display_type": "chart",
+            "chart_type": chart_type,
+            "title": title,
+            "data": data,
+            "message": format!("{} chart data prepared for display", chart_type)
+        }))
     }
 
 
     pub async fn handle_schema_get(
         &self, 
-        _arguments: &serde_json::Map<String, serde_json::Value>
+        arguments: &serde_json::Map<String, serde_json::Value>
     ) -> Result<String, JsonRpcError> {
-        Err(JsonRpcError {
-            code: -32601,
-            message: "Schema methods not implemented yet".to_string(),
-            data: None,
-        })
+        // Use the existing get_schema method from schema.rs
+        self.get_schema(arguments).await
     }
 
     pub async fn handle_schema_search(
         &self, 
-        _arguments: &serde_json::Map<String, serde_json::Value>
+        arguments: &serde_json::Map<String, serde_json::Value>
     ) -> Result<String, JsonRpcError> {
-        Err(JsonRpcError {
-            code: -32601,
-            message: "Schema methods not implemented yet".to_string(),
+        let datasource_id = arguments.get("datasource_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| JsonRpcError {
+                code: INVALID_PARAMS,
+                message: "Missing required parameter: datasource_id".to_string(),
+                data: None,
+            })?;
+
+        let search_term = arguments.get("search_term")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| JsonRpcError {
+                code: INVALID_PARAMS,
+                message: "Missing required parameter: search_term".to_string(),
+                data: None,
+            })?;
+
+        // Get cached schema and search through it
+        let row = sqlx::query(
+            "SELECT schema_info FROM data_sources WHERE id = $1 AND project_id = $2 AND deleted_at IS NULL"
+        )
+        .bind(datasource_id)
+        .bind(&self.project_id)
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(|e| JsonRpcError {
+            code: INTERNAL_ERROR,
+            message: format!("Database error: {}", e),
             data: None,
-        })
+        })?;
+
+        let mut results = Vec::new();
+        if let Some(row) = row {
+            if let Some(schema_info) = row.get::<Option<Value>, _>("schema_info") {
+                let search_lower = search_term.to_lowercase();
+                
+                // Search through tables
+                if let Some(tables) = schema_info.get("tables").and_then(|t| t.as_object()) {
+                    for (table_name, table_data) in tables {
+                        // Check if table name matches
+                        if table_name.to_lowercase().contains(&search_lower) {
+                            results.push(json!({
+                                "type": "table",
+                                "name": table_name,
+                                "match_in": "table_name"
+                            }));
+                        }
+                        
+                        // Search in columns
+                        if let Some(columns) = table_data.as_array() {
+                            for column in columns {
+                                if let Some(col_name) = column.get("name").and_then(|n| n.as_str()) {
+                                    if col_name.to_lowercase().contains(&search_lower) {
+                                        results.push(json!({
+                                            "type": "column",
+                                            "table": table_name,
+                                            "column": col_name,
+                                            "data_type": column.get("type"),
+                                            "match_in": "column_name"
+                                        }));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let result = json!({
+            "status": "success",
+            "datasource_id": datasource_id,
+            "search_term": search_term,
+            "results": results,
+            "count": results.len()
+        });
+        
+        Ok(serde_json::to_string(&result).unwrap())
     }
 
     pub async fn handle_schema_related(
         &self, 
-        _arguments: &serde_json::Map<String, serde_json::Value>
+        arguments: &serde_json::Map<String, serde_json::Value>
     ) -> Result<String, JsonRpcError> {
-        Err(JsonRpcError {
-            code: -32601,
-            message: "Schema methods not implemented yet".to_string(),
-            data: None,
-        })
+        let datasource_id = arguments.get("datasource_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| JsonRpcError {
+                code: INVALID_PARAMS,
+                message: "Missing required parameter: datasource_id".to_string(),
+                data: None,
+            })?;
+
+        let table_name = arguments.get("table_name")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| JsonRpcError {
+                code: INVALID_PARAMS,
+                message: "Missing required parameter: table_name".to_string(),
+                data: None,
+            })?;
+
+        // For now, return a simplified response
+        // Full implementation would query foreign keys and relationships
+        let result = json!({
+            "status": "success",
+            "datasource_id": datasource_id,
+            "table_name": table_name,
+            "relationships": [
+                // This would be populated with actual foreign key relationships
+                // by querying information_schema or equivalent
+            ],
+            "message": "Relationship detection requires database-specific implementation"
+        });
+        
+        Ok(serde_json::to_string(&result).unwrap())
     }
 
     pub async fn handle_schema_stats(
         &self, 
-        _arguments: &serde_json::Map<String, serde_json::Value>
+        arguments: &serde_json::Map<String, serde_json::Value>
     ) -> Result<String, JsonRpcError> {
-        Err(JsonRpcError {
-            code: -32601,
-            message: "Schema methods not implemented yet".to_string(),
+        let datasource_id = arguments.get("datasource_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| JsonRpcError {
+                code: INVALID_PARAMS,
+                message: "Missing required parameter: datasource_id".to_string(),
+                data: None,
+            })?;
+
+        // Get schema info from cache
+        let row = sqlx::query(
+            "SELECT name, source_type, schema_info FROM data_sources WHERE id = $1 AND project_id = $2 AND deleted_at IS NULL"
+        )
+        .bind(datasource_id)
+        .bind(&self.project_id)
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(|e| JsonRpcError {
+            code: INTERNAL_ERROR,
+            message: format!("Database error: {}", e),
             data: None,
-        })
+        })?;
+
+        if let Some(row) = row {
+            let name: String = row.get("name");
+            let source_type: String = row.get("source_type");
+            let schema_info = row.get::<Option<Value>, _>("schema_info");
+
+            let mut table_count = 0;
+            let mut total_columns = 0;
+            let mut table_stats = Vec::new();
+
+            if let Some(schema) = schema_info {
+                if let Some(tables) = schema.get("tables").and_then(|t| t.as_object()) {
+                    table_count = tables.len();
+                    
+                    for (table_name, table_data) in tables {
+                        let column_count = if let Some(columns) = table_data.as_array() {
+                            columns.len()
+                        } else if let Some(columns) = table_data.get("columns").and_then(|v| v.as_array()) {
+                            columns.len()
+                        } else {
+                            0
+                        };
+                        
+                        total_columns += column_count;
+                        
+                        table_stats.push(json!({
+                            "table_name": table_name,
+                            "column_count": column_count
+                        }));
+                    }
+                }
+            }
+
+            let result = json!({
+                "status": "success",
+                "datasource_id": datasource_id,
+                "datasource_name": name,
+                "source_type": source_type,
+                "stats": {
+                    "table_count": table_count,
+                    "total_columns": total_columns,
+                    "average_columns_per_table": if table_count > 0 { total_columns as f64 / table_count as f64 } else { 0.0 },
+                    "tables": table_stats
+                }
+            });
+            
+            Ok(serde_json::to_string(&result).unwrap())
+        } else {
+            Err(JsonRpcError {
+                code: INVALID_PARAMS,
+                message: format!("Datasource {} not found", datasource_id),
+                data: None,
+            })
+        }
     }
 
     // Datasource handler methods
@@ -663,7 +947,14 @@ impl McpHandlers {
             }));
         }
 
-        Ok(serde_json::to_string(&datasource_list).unwrap_or_else(|_| "[]".to_string()))
+        // Wrap the array in an object to match expected format
+        let result = json!({
+            "datasources": datasource_list,
+            "count": datasource_list.len(),
+            "status": "success"
+        });
+
+        Ok(serde_json::to_string(&result).unwrap_or_else(|_| r#"{"datasources":[],"count":0,"status":"error"}"#.to_string()))
     }
 
     pub async fn handle_datasource_remove(
@@ -903,6 +1194,7 @@ impl McpHandlers {
             let schema_info: Option<Value> = row.get("schema_info");
 
             let detail = json!({
+                "status": "success",
                 "id": id,
                 "name": name,
                 "source_type": source_type,

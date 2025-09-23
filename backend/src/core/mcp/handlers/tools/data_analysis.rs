@@ -482,123 +482,124 @@ pub fn get_data_analysis_tools() -> Vec<Tool> {
                 "required": ["job_id"]
             }),
         },
-        Tool {
-            name: "schedule_create".to_string(),
-            description: "Create a scheduled execution for an analysis".to_string(),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "analysis_id": {
-                        "type": "string",
-                        "description": "ID of the analysis to schedule"
-                    },
-                    "cron_expression": {
-                        "type": "string",
-                        "description": "Cron expression for schedule (e.g., '0 9 * * *' for daily at 9 AM)"
-                    },
-                    "timezone": {
-                        "type": "string",
-                        "default": "UTC",
-                        "description": "Timezone for the schedule (default: UTC)"
-                    },
-                    "parameters": {
-                        "type": "object",
-                        "description": "Default parameters for scheduled executions",
-                        "additionalProperties": true
-                    },
-                    "enabled": {
-                        "type": "boolean",
-                        "default": true,
-                        "description": "Whether the schedule is enabled (default: true)"
-                    }
-                },
-                "required": ["analysis_id", "cron_expression"]
-            }),
-        },
-        Tool {
-            name: "schedule_list".to_string(),
-            description: "List scheduled analyses".to_string(),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "analysis_id": {
-                        "type": "string",
-                        "description": "Optional: filter schedules by analysis ID"
-                    },
-                    "enabled_only": {
-                        "type": "boolean",
-                        "default": true,
-                        "description": "Whether to list only enabled schedules (default: true)"
-                    }
-                },
-                "additionalProperties": false
-            }),
-        },
-        Tool {
-            name: "schedule_update".to_string(),
-            description: "Update a scheduled analysis".to_string(),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "schedule_id": {
-                        "type": "string",
-                        "description": "ID of the schedule to update"
-                    },
-                    "cron_expression": {
-                        "type": "string",
-                        "description": "New cron expression"
-                    },
-                    "timezone": {
-                        "type": "string",
-                        "description": "New timezone"
-                    },
-                    "enabled": {
-                        "type": "boolean",
-                        "description": "Whether the schedule should be enabled"
-                    },
-                    "parameters": {
-                        "type": "object",
-                        "description": "New default parameters",
-                        "additionalProperties": true
-                    }
-                },
-                "required": ["schedule_id"]
-            }),
-        },
-        Tool {
-            name: "schedule_delete".to_string(),
-            description: "Delete a scheduled analysis".to_string(),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "schedule_id": {
-                        "type": "string",
-                        "description": "ID of the schedule to delete"
-                    }
-                },
-                "required": ["schedule_id"]
-            }),
-        },
-        Tool {
-            name: "monitoring_status".to_string(),
-            description: "Get system monitoring and health status".to_string(),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "include_metrics": {
-                        "type": "boolean",
-                        "default": true,
-                        "description": "Include performance metrics (default: true)"
-                    },
-                    "include_system_health": {
-                        "type": "boolean", 
-                        "default": true,
-                        "description": "Include system health info (default: true)"
-                    }
-                },
-                "additionalProperties": false
-            }),
-        },
+        // Schedule tools - not implemented yet, requires database migrations
+        // Tool {
+        //     name: "schedule_create".to_string(),
+        //     description: "Create a scheduled execution for an analysis".to_string(),
+        //     input_schema: json!({
+        //         "type": "object",
+        //         "properties": {
+        //             "analysis_id": {
+        //                 "type": "string",
+        //                 "description": "ID of the analysis to schedule"
+        //             },
+        //             "cron_expression": {
+        //                 "type": "string",
+        //                 "description": "Cron expression for schedule (e.g., '0 9 * * *' for daily at 9 AM)"
+        //             },
+        //             "timezone": {
+        //                 "type": "string",
+        //                 "default": "UTC",
+        //                 "description": "Timezone for the schedule (default: UTC)"
+        //             },
+        //             "parameters": {
+        //                 "type": "object",
+        //                 "description": "Default parameters for scheduled executions",
+        //                 "additionalProperties": true
+        //             },
+        //             "enabled": {
+        //                 "type": "boolean",
+        //                 "default": true,
+        //                 "description": "Whether the schedule is enabled (default: true)"
+        //             }
+        //         },
+        //         "required": ["analysis_id", "cron_expression"]
+        //     }),
+        // },
+        // Tool {
+        //     name: "schedule_list".to_string(),
+        //     description: "List scheduled analyses".to_string(),
+        //     input_schema: json!({
+        //         "type": "object",
+        //         "properties": {
+        //             "analysis_id": {
+        //                 "type": "string",
+        //                 "description": "Optional: filter schedules by analysis ID"
+        //             },
+        //             "enabled_only": {
+        //                 "type": "boolean",
+        //                 "default": true,
+        //                 "description": "Whether to list only enabled schedules (default: true)"
+        //             }
+        //         },
+        //         "additionalProperties": false
+        //     }),
+        // },
+        // Tool {
+        //     name: "schedule_update".to_string(),
+        //     description: "Update a scheduled analysis".to_string(),
+        //     input_schema: json!({
+        //         "type": "object",
+        //         "properties": {
+        //             "schedule_id": {
+        //                 "type": "string",
+        //                 "description": "ID of the schedule to update"
+        //             },
+        //             "cron_expression": {
+        //                 "type": "string",
+        //                 "description": "New cron expression"
+        //             },
+        //             "timezone": {
+        //                 "type": "string",
+        //                 "description": "New timezone"
+        //             },
+        //             "enabled": {
+        //                 "type": "boolean",
+        //                 "description": "Whether the schedule should be enabled"
+        //             },
+        //             "parameters": {
+        //                 "type": "object",
+        //                 "description": "New default parameters",
+        //                 "additionalProperties": true
+        //             }
+        //         },
+        //         "required": ["schedule_id"]
+        //     }),
+        // },
+        // Tool {
+        //     name: "schedule_delete".to_string(),
+        //     description: "Delete a scheduled analysis".to_string(),
+        //     input_schema: json!({
+        //         "type": "object",
+        //         "properties": {
+        //             "schedule_id": {
+        //                 "type": "string",
+        //                 "description": "ID of the schedule to delete"
+        //             }
+        //         },
+        //         "required": ["schedule_id"]
+        //     }),
+        // },
+        // Tool {
+        //     name: "monitoring_status".to_string(),
+        //     description: "Get system monitoring and health status".to_string(),
+        //     input_schema: json!({
+        //         "type": "object",
+        //         "properties": {
+        //             "include_metrics": {
+        //                 "type": "boolean",
+        //                 "default": true,
+        //                 "description": "Include performance metrics (default: true)"
+        //             },
+        //             "include_system_health": {
+        //                 "type": "boolean", 
+        //                 "default": true,
+        //                 "description": "Include system health info (default: true)"
+        //             }
+        //         },
+        //         "additionalProperties": false
+        //     }),
+        // },
     ]
 }
 
@@ -613,11 +614,10 @@ pub fn is_data_analysis_tool(tool_name: &str) -> bool {
         "analysis_create" | "analysis_list" | "analysis_get" | "analysis_update" | "analysis_delete" |
         "analysis_run" | "analysis_validate" |
         // Job management tools  
-        "job_list" | "job_get" | "job_cancel" | "job_result" |
-        // Schedule management tools
-        "schedule_create" | "schedule_list" | "schedule_update" | "schedule_delete" |
-        // Monitoring tools
-        "monitoring_status"
+        "job_list" | "job_get" | "job_cancel" | "job_result"
+        // Schedule and monitoring tools removed - not implemented
+        // "schedule_create" | "schedule_list" | "schedule_update" | "schedule_delete" |
+        // "monitoring_status"
     )
 }
 
@@ -796,22 +796,22 @@ pub async fn handle_tool_call(
             handle_job_result(handlers, arguments).await
         },
         // Schedule management tools
-        "schedule_create" => {
-            handle_schedule_create(handlers, arguments).await
-        },
-        "schedule_list" => {
-            handle_schedule_list(handlers, arguments).await
-        },
-        "schedule_update" => {
-            handle_schedule_update(handlers, arguments).await
-        },
-        "schedule_delete" => {
-            handle_schedule_delete(handlers, arguments).await
-        },
-        // Monitoring tools
-        "monitoring_status" => {
-            handle_monitoring_status(handlers, arguments).await
-        },
+        // Schedule and monitoring tools removed - not implemented
+        // "schedule_create" => {
+        //     handle_schedule_create(handlers, arguments).await
+        // },
+        // "schedule_list" => {
+        //     handle_schedule_list(handlers, arguments).await
+        // },
+        // "schedule_update" => {
+        //     handle_schedule_update(handlers, arguments).await
+        // },
+        // "schedule_delete" => {
+        //     handle_schedule_delete(handlers, arguments).await
+        // },
+        // "monitoring_status" => {
+        //     handle_monitoring_status(handlers, arguments).await
+        // },
         _ => Err(JsonRpcError {
             code: METHOD_NOT_FOUND,
             message: format!("Unknown data analysis tool: {}", tool_name),
@@ -979,45 +979,203 @@ async fn handle_analysis_get(
     handlers: &McpHandlers,
     arguments: Option<&Value>
 ) -> Result<Value, JsonRpcError> {
-    let _ = (handlers, arguments);
-    Err(JsonRpcError {
+    let args = arguments
+        .and_then(|v| v.as_object())
+        .ok_or_else(|| JsonRpcError {
+            code: INVALID_PARAMS,
+            message: "Invalid arguments".to_string(),
+            data: None,
+        })?;
+
+    let analysis_id = args.get("analysis_id")
+        .and_then(|v| v.as_str())
+        .and_then(|s| uuid::Uuid::parse_str(s).ok())
+        .ok_or_else(|| JsonRpcError {
+            code: INVALID_PARAMS,
+            message: "Invalid or missing analysis_id".to_string(),
+            data: None,
+        })?;
+
+    // Query the analysis
+    let row = sqlx::query!(
+        r#"
+        SELECT 
+            id,
+            title,
+            script_content,
+            metadata,
+            created_at,
+            updated_at,
+            is_active
+        FROM analyses 
+        WHERE id = $1 AND project_id = $2
+        "#,
+        analysis_id,
+        handlers.project_id
+    )
+    .fetch_optional(&handlers.db_pool)
+    .await
+    .map_err(|e| JsonRpcError {
         code: INTERNAL_ERROR,
-        message: "Analysis management not yet implemented - requires database migrations".to_string(),
-        data: Some(json!({
-            "hint": "Run database migrations first: sqlx migrate run --source ./migrations",
-            "status": "analysis_system_not_initialized"
-        })),
-    })
+        message: format!("Database error: {}", e),
+        data: None,
+    })?;
+
+    if let Some(record) = row {
+        Ok(json!({
+            "status": "success",
+            "analysis": {
+                "id": record.id,
+                "title": record.title,
+                "script_content": record.script_content,
+                "metadata": record.metadata,
+                "created_at": record.created_at,
+                "updated_at": record.updated_at,
+                "is_active": record.is_active
+            }
+        }))
+    } else {
+        Err(JsonRpcError {
+            code: INVALID_PARAMS,
+            message: format!("Analysis {} not found", analysis_id),
+            data: None,
+        })
+    }
 }
 
 async fn handle_analysis_update(
     handlers: &McpHandlers,
     arguments: Option<&Value>
 ) -> Result<Value, JsonRpcError> {
-    let _ = (handlers, arguments);
-    Err(JsonRpcError {
+    let args = arguments
+        .and_then(|v| v.as_object())
+        .ok_or_else(|| JsonRpcError {
+            code: INVALID_PARAMS,
+            message: "Invalid arguments".to_string(),
+            data: None,
+        })?;
+
+    let analysis_id = args.get("analysis_id")
+        .and_then(|v| v.as_str())
+        .and_then(|s| uuid::Uuid::parse_str(s).ok())
+        .ok_or_else(|| JsonRpcError {
+            code: INVALID_PARAMS,
+            message: "Invalid or missing analysis_id".to_string(),
+            data: None,
+        })?;
+
+    // Build dynamic update query
+    let title = args.get("title").and_then(|v| v.as_str());
+    let script_content = args.get("script_content").and_then(|v| v.as_str());
+
+    if title.is_none() && script_content.is_none() {
+        return Err(JsonRpcError {
+            code: INVALID_PARAMS,
+            message: "No fields to update. Provide at least one of: title, script_content".to_string(),
+            data: None,
+        });
+    }
+
+    // Update the analysis
+    let result = sqlx::query!(
+        r#"
+        UPDATE analyses 
+        SET 
+            title = COALESCE($3, title),
+            script_content = COALESCE($4, script_content),
+            updated_at = NOW()
+        WHERE id = $1 AND project_id = $2
+        RETURNING id, title
+        "#,
+        analysis_id,
+        handlers.project_id,
+        title,
+        script_content
+    )
+    .fetch_optional(&handlers.db_pool)
+    .await
+    .map_err(|e| JsonRpcError {
         code: INTERNAL_ERROR,
-        message: "Analysis management not yet implemented - requires database migrations".to_string(),
-        data: Some(json!({
-            "hint": "Run database migrations first: sqlx migrate run --source ./migrations",
-            "status": "analysis_system_not_initialized"
-        })),
-    })
+        message: format!("Database error: {}", e),
+        data: None,
+    })?;
+
+    if let Some(record) = result {
+        Ok(json!({
+            "status": "success",
+            "message": "Analysis updated successfully",
+            "analysis": {
+                "id": record.id,
+                "title": record.title
+            }
+        }))
+    } else {
+        Err(JsonRpcError {
+            code: INVALID_PARAMS,
+            message: format!("Analysis {} not found or no permission", analysis_id),
+            data: None,
+        })
+    }
 }
 
 async fn handle_analysis_delete(
     handlers: &McpHandlers,
     arguments: Option<&Value>
 ) -> Result<Value, JsonRpcError> {
-    let _ = (handlers, arguments);
-    Err(JsonRpcError {
+    let args = arguments
+        .and_then(|v| v.as_object())
+        .ok_or_else(|| JsonRpcError {
+            code: INVALID_PARAMS,
+            message: "Invalid arguments".to_string(),
+            data: None,
+        })?;
+
+    let analysis_id = args.get("analysis_id")
+        .and_then(|v| v.as_str())
+        .and_then(|s| uuid::Uuid::parse_str(s).ok())
+        .ok_or_else(|| JsonRpcError {
+            code: INVALID_PARAMS,
+            message: "Invalid or missing analysis_id".to_string(),
+            data: None,
+        })?;
+
+    // Soft delete by marking as inactive
+    let result = sqlx::query!(
+        r#"
+        UPDATE analyses 
+        SET 
+            is_active = false,
+            updated_at = NOW()
+        WHERE id = $1 AND project_id = $2 AND is_active = true
+        RETURNING id, title
+        "#,
+        analysis_id,
+        handlers.project_id
+    )
+    .fetch_optional(&handlers.db_pool)
+    .await
+    .map_err(|e| JsonRpcError {
         code: INTERNAL_ERROR,
-        message: "Analysis management not yet implemented - requires database migrations".to_string(),
-        data: Some(json!({
-            "hint": "Run database migrations first: sqlx migrate run --source ./migrations",
-            "status": "analysis_system_not_initialized"
-        })),
-    })
+        message: format!("Database error: {}", e),
+        data: None,
+    })?;
+
+    if let Some(record) = result {
+        Ok(json!({
+            "status": "success",
+            "message": "Analysis deleted (marked as inactive)",
+            "analysis": {
+                "id": record.id,
+                "title": record.title
+            }
+        }))
+    } else {
+        Err(JsonRpcError {
+            code: INVALID_PARAMS,
+            message: format!("Analysis {} not found or already deleted", analysis_id),
+            data: None,
+        })
+    }
 }
 
 async fn handle_analysis_run(
@@ -1081,15 +1239,102 @@ async fn handle_analysis_validate(
     handlers: &McpHandlers,
     arguments: Option<&Value>
 ) -> Result<Value, JsonRpcError> {
-    let _ = (handlers, arguments);
-    Err(JsonRpcError {
-        code: INTERNAL_ERROR,
-        message: "Analysis management not yet implemented - requires database migrations".to_string(),
-        data: Some(json!({
-            "hint": "Run database migrations first: sqlx migrate run --source ./migrations",
-            "status": "analysis_system_not_initialized"
-        })),
-    })
+    let args = arguments
+        .and_then(|v| v.as_object())
+        .ok_or_else(|| JsonRpcError {
+            code: INVALID_PARAMS,
+            message: "Invalid arguments".to_string(),
+            data: None,
+        })?;
+
+    let analysis_id = args.get("analysis_id")
+        .and_then(|v| v.as_str())
+        .and_then(|s| uuid::Uuid::parse_str(s).ok())
+        .ok_or_else(|| JsonRpcError {
+            code: INVALID_PARAMS,
+            message: "Invalid or missing analysis_id".to_string(),
+            data: None,
+        })?;
+
+    // Optionally get script content to validate (if not provided, use the stored script)
+    let script_content = if let Some(content) = args.get("script_content").and_then(|v| v.as_str()) {
+        content.to_string()
+    } else {
+        // Fetch the script from database
+        let row = sqlx::query!(
+            r#"
+            SELECT script_content 
+            FROM analyses 
+            WHERE id = $1 AND project_id = $2
+            "#,
+            analysis_id,
+            handlers.project_id
+        )
+        .fetch_optional(&handlers.db_pool)
+        .await
+        .map_err(|e| JsonRpcError {
+            code: INTERNAL_ERROR,
+            message: format!("Database error: {}", e),
+            data: None,
+        })?;
+
+        row.map(|r| r.script_content)
+            .ok_or_else(|| JsonRpcError {
+                code: INVALID_PARAMS,
+                message: format!("Analysis {} not found", analysis_id),
+                data: None,
+            })?
+    };
+
+    // Basic JavaScript validation
+    let mut validation_errors = Vec::new();
+    let mut warnings = Vec::new();
+    
+    // Check for basic syntax patterns
+    if !script_content.contains("export default") && !script_content.contains("module.exports") {
+        warnings.push("Script should export a default function or module");
+    }
+    
+    if !script_content.contains("async") && !script_content.contains("function") {
+        validation_errors.push("Script must contain at least one function");
+    }
+    
+    // Check for common issues
+    if script_content.contains("console.log") {
+        warnings.push("Consider using context.log() instead of console.log()");
+    }
+    
+    if script_content.contains("require(") && !script_content.contains("import ") {
+        warnings.push("Consider using ES6 imports instead of require()");
+    }
+
+    // Check for dangerous patterns
+    if script_content.contains("eval(") || script_content.contains("Function(") {
+        validation_errors.push("Script contains potentially dangerous eval() or Function() constructor");
+    }
+    
+    if script_content.contains("process.exit") || script_content.contains("process.kill") {
+        validation_errors.push("Script should not terminate the process");
+    }
+
+    let is_valid = validation_errors.is_empty();
+    
+    Ok(json!({
+        "status": if is_valid { "success" } else { "error" },
+        "valid": is_valid,
+        "analysis_id": analysis_id,
+        "validation": {
+            "errors": validation_errors,
+            "warnings": warnings,
+            "script_length": script_content.len(),
+            "line_count": script_content.lines().count()
+        },
+        "message": if is_valid {
+            "Script validation passed"
+        } else {
+            "Script validation failed"
+        }
+    }))
 }
 
 // Job Management Handlers
@@ -1427,63 +1672,203 @@ async fn handle_job_result(
 
 // Schedule Management Handlers
 async fn handle_schedule_create(
-    handlers: &McpHandlers,
+    _handlers: &McpHandlers,
     arguments: Option<&Value>
 ) -> Result<Value, JsonRpcError> {
-    let _ = (handlers, arguments);
-    Err(JsonRpcError {
-        code: INTERNAL_ERROR,
-        message: "Schedule management not yet implemented - requires database migrations".to_string(),
-        data: Some(json!({
-            "hint": "Run database migrations first: sqlx migrate run --source ./migrations",
-            "status": "analysis_system_not_initialized"
-        })),
-    })
+    let args = arguments
+        .and_then(|v| v.as_object())
+        .ok_or_else(|| JsonRpcError {
+            code: INVALID_PARAMS,
+            message: "Invalid arguments".to_string(),
+            data: None,
+        })?;
+
+    let analysis_id = args.get("analysis_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| JsonRpcError {
+            code: INVALID_PARAMS,
+            message: "Missing required parameter: analysis_id".to_string(),
+            data: None,
+        })?;
+
+    let cron_expression = args.get("cron_expression")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| JsonRpcError {
+            code: INVALID_PARAMS,
+            message: "Missing required parameter: cron_expression".to_string(),
+            data: None,
+        })?;
+
+    // Validate cron expression format
+    let cron_parts: Vec<&str> = cron_expression.split_whitespace().collect();
+    if cron_parts.len() != 5 && cron_parts.len() != 6 {
+        return Err(JsonRpcError {
+            code: INVALID_PARAMS,
+            message: "Invalid cron expression. Expected format: '* * * * *' (minute hour day month weekday)".to_string(),
+            data: None,
+        });
+    }
+
+    let enabled = args.get("enabled")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+
+    let timezone = args.get("timezone")
+        .and_then(|v| v.as_str())
+        .unwrap_or("UTC");
+
+    let parameters = args.get("parameters")
+        .cloned()
+        .unwrap_or(json!({}));
+
+    // Return mock success response
+    // In a real implementation, this would create a database record
+    let schedule_id = uuid::Uuid::new_v4();
+    
+    Ok(json!({
+        "status": "success",
+        "message": "Schedule created successfully (mock)",
+        "schedule": {
+            "id": schedule_id,
+            "analysis_id": analysis_id,
+            "cron_expression": cron_expression,
+            "enabled": enabled,
+            "timezone": timezone,
+            "parameters": parameters,
+            "next_run": "2024-01-01T00:00:00Z",
+            "created_at": chrono::Utc::now().to_rfc3339()
+        },
+        "note": "Schedule management requires database tables that are not yet created"
+    }))
 }
 
 async fn handle_schedule_list(
-    handlers: &McpHandlers,
+    _handlers: &McpHandlers,
     arguments: Option<&Value>
 ) -> Result<Value, JsonRpcError> {
-    let _ = (handlers, arguments);
-    Err(JsonRpcError {
-        code: INTERNAL_ERROR,
-        message: "Schedule management not yet implemented - requires database migrations".to_string(),
-        data: Some(json!({
-            "hint": "Run database migrations first: sqlx migrate run --source ./migrations",
-            "status": "analysis_system_not_initialized"
-        })),
-    })
+    let args = arguments
+        .and_then(|v| v.as_object());
+
+    let analysis_id = args
+        .and_then(|a| a.get("analysis_id"))
+        .and_then(|v| v.as_str());
+
+    let enabled_only = args
+        .and_then(|a| a.get("enabled_only"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    // Return empty list with proper structure
+    // In a real implementation, this would query the database
+    let schedules = Vec::<Value>::new();
+    
+    Ok(json!({
+        "status": "success",
+        "schedules": schedules,
+        "count": 0,
+        "project_id": "mock-project-id",
+        "filters": {
+            "analysis_id": analysis_id,
+            "enabled_only": enabled_only
+        },
+        "note": "Schedule management requires database tables that are not yet created"
+    }))
 }
 
 async fn handle_schedule_update(
-    handlers: &McpHandlers,
+    _handlers: &McpHandlers,
     arguments: Option<&Value>
 ) -> Result<Value, JsonRpcError> {
-    let _ = (handlers, arguments);
-    Err(JsonRpcError {
-        code: INTERNAL_ERROR,
-        message: "Schedule management not yet implemented - requires database migrations".to_string(),
-        data: Some(json!({
-            "hint": "Run database migrations first: sqlx migrate run --source ./migrations",
-            "status": "analysis_system_not_initialized"
-        })),
-    })
+    let args = arguments
+        .and_then(|v| v.as_object())
+        .ok_or_else(|| JsonRpcError {
+            code: INVALID_PARAMS,
+            message: "Invalid arguments".to_string(),
+            data: None,
+        })?;
+
+    let schedule_id = args.get("schedule_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| JsonRpcError {
+            code: INVALID_PARAMS,
+            message: "Missing required parameter: schedule_id".to_string(),
+            data: None,
+        })?;
+
+    // Get optional update fields
+    let cron_expression = args.get("cron_expression").and_then(|v| v.as_str());
+    let enabled = args.get("enabled").and_then(|v| v.as_bool());
+    let timezone = args.get("timezone").and_then(|v| v.as_str());
+    let parameters = args.get("parameters");
+
+    if cron_expression.is_none() && enabled.is_none() && timezone.is_none() && parameters.is_none() {
+        return Err(JsonRpcError {
+            code: INVALID_PARAMS,
+            message: "No fields to update. Provide at least one of: cron_expression, enabled, timezone, parameters".to_string(),
+            data: None,
+        });
+    }
+
+    // Validate cron expression if provided
+    if let Some(cron) = cron_expression {
+        let cron_parts: Vec<&str> = cron.split_whitespace().collect();
+        if cron_parts.len() != 5 && cron_parts.len() != 6 {
+            return Err(JsonRpcError {
+                code: INVALID_PARAMS,
+                message: "Invalid cron expression format".to_string(),
+                data: None,
+            });
+        }
+    }
+
+    // Return mock success response
+    Ok(json!({
+        "status": "success",
+        "message": "Schedule updated successfully (mock)",
+        "schedule": {
+            "id": schedule_id,
+            "updated_fields": {
+                "cron_expression": cron_expression,
+                "enabled": enabled,
+                "timezone": timezone,
+                "parameters": parameters
+            },
+            "updated_at": chrono::Utc::now().to_rfc3339()
+        },
+        "note": "Schedule management requires database tables that are not yet created"
+    }))
 }
 
 async fn handle_schedule_delete(
-    handlers: &McpHandlers,
+    _handlers: &McpHandlers,
     arguments: Option<&Value>
 ) -> Result<Value, JsonRpcError> {
-    let _ = (handlers, arguments);
-    Err(JsonRpcError {
-        code: INTERNAL_ERROR,
-        message: "Schedule management not yet implemented - requires database migrations".to_string(),
-        data: Some(json!({
-            "hint": "Run database migrations first: sqlx migrate run --source ./migrations",
-            "status": "analysis_system_not_initialized"
-        })),
-    })
+    let args = arguments
+        .and_then(|v| v.as_object())
+        .ok_or_else(|| JsonRpcError {
+            code: INVALID_PARAMS,
+            message: "Invalid arguments".to_string(),
+            data: None,
+        })?;
+
+    let schedule_id = args.get("schedule_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| JsonRpcError {
+            code: INVALID_PARAMS,
+            message: "Missing required parameter: schedule_id".to_string(),
+            data: None,
+        })?;
+
+    // Return mock success response
+    Ok(json!({
+        "status": "success",
+        "message": "Schedule deleted successfully (mock)",
+        "schedule": {
+            "id": schedule_id,
+            "deleted_at": chrono::Utc::now().to_rfc3339()
+        },
+        "note": "Schedule management requires database tables that are not yet created"
+    }))
 }
 
 // Monitoring Handler

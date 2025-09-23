@@ -62,6 +62,24 @@ function processJsonData(data: any): JsonValue[] {
     return [];
   }
 
+  // If it's a string, try to parse it as JSON first
+  if (typeof data === "string") {
+    try {
+      const parsed = JSON.parse(data);
+      // Recursively process the parsed data
+      return processJsonData(parsed);
+    } catch (e) {
+      // If parsing fails, treat it as a plain string value
+      return [{
+        key: "value",
+        value: data,
+        type: "string",
+        isLong: isLongContent(data),
+        preview: formatPreview(data),
+      }];
+    }
+  }
+
   if (Array.isArray(data)) {
     return data.map((item, index) => ({
       key: `[${index}]`,
@@ -82,6 +100,7 @@ function processJsonData(data: any): JsonValue[] {
     }));
   }
 
+  // For other primitive types (number, boolean)
   return [{
     key: "value",
     value: data,

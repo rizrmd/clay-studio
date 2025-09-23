@@ -117,6 +117,17 @@ export function ToolUsageDialog({
       }
     }
 
+    // If output is a string, try to parse it as JSON
+    if (typeof output === "string") {
+      try {
+        const parsed = JSON.parse(output);
+        return parsed;
+      } catch (e) {
+        // If parsing fails, return the string as-is
+        return output;
+      }
+    }
+
     return output;
   };
 

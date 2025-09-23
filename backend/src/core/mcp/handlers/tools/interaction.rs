@@ -463,12 +463,22 @@ pub async fn handle_tool_call(
         "ask_user" => {
             let empty_map = serde_json::Map::new();
             let args = arguments.and_then(|v| v.as_object()).unwrap_or(&empty_map);
-            handlers.handle_ask_user(args).await.map(serde_json::Value::String)
+            let result = handlers.handle_ask_user(args).await?;
+            serde_json::from_str(&result).map_err(|e| JsonRpcError {
+                code: INTERNAL_ERROR,
+                message: format!("Failed to parse ask_user response: {}", e),
+                data: None,
+            })
         },
         "export_excel" => {
             let empty_map = serde_json::Map::new();
             let args = arguments.and_then(|v| v.as_object()).unwrap_or(&empty_map);
-            handlers.handle_export_excel(args).await.map(serde_json::Value::String)
+            let result = handlers.handle_export_excel(args).await?;
+            serde_json::from_str(&result).map_err(|e| JsonRpcError {
+                code: INTERNAL_ERROR,
+                message: format!("Failed to parse export_excel response: {}", e),
+                data: None,
+            })
         },
         "show_table" => {
             handlers.handle_show_table(arguments).await
@@ -479,66 +489,102 @@ pub async fn handle_tool_call(
         "file_list" => {
             let empty_map = serde_json::Map::new();
             let args = arguments.and_then(|v| v.as_object()).unwrap_or(&empty_map);
-            handlers.handle_file_list(args).await.map(serde_json::Value::String)
+            let result = handlers.handle_file_list(args).await?;
+            serde_json::from_str(&result).map_err(|e| JsonRpcError {
+                code: INTERNAL_ERROR,
+                message: format!("Failed to parse file_list response: {}", e),
+                data: None,
+            })
         },
         "file_read" => {
             let empty_map = serde_json::Map::new();
             let args = arguments.and_then(|v| v.as_object()).unwrap_or(&empty_map);
-            handlers.handle_file_read(args).await.map(serde_json::Value::String)
+            let result = handlers.handle_file_read(args).await?;
+            serde_json::from_str(&result).map_err(|e| JsonRpcError {
+                code: INTERNAL_ERROR,
+                message: format!("Failed to parse file_read response: {}", e),
+                data: None,
+            })
         },
         "file_search" => {
             let empty_map = serde_json::Map::new();
             let args = arguments.and_then(|v| v.as_object()).unwrap_or(&empty_map);
-            handlers.handle_file_search(args).await.map(serde_json::Value::String)
+            let result = handlers.handle_file_search(args).await?;
+            serde_json::from_str(&result).map_err(|e| JsonRpcError {
+                code: INTERNAL_ERROR,
+                message: format!("Failed to parse file_search response: {}", e),
+                data: None,
+            })
         },
         "file_metadata" => {
             let empty_map = serde_json::Map::new();
             let args = arguments.and_then(|v| v.as_object()).unwrap_or(&empty_map);
-            handlers.handle_file_metadata(args).await.map(serde_json::Value::String)
+            let result = handlers.handle_file_metadata(args).await?;
+            serde_json::from_str(&result).map_err(|e| JsonRpcError {
+                code: INTERNAL_ERROR,
+                message: format!("Failed to parse file_metadata response: {}", e),
+                data: None,
+            })
         },
         "file_peek" => {
             let empty_map = serde_json::Map::new();
             let args = arguments.and_then(|v| v.as_object()).unwrap_or(&empty_map);
-            handlers.handle_file_peek(args).await
-                .map(serde_json::Value::String)
+            let result = handlers.handle_file_peek(args).await
                 .map_err(|e| JsonRpcError {
                     code: INVALID_PARAMS,
                     message: e,
                     data: None,
-                })
+                })?;
+            serde_json::from_str(&result).map_err(|e| JsonRpcError {
+                code: INTERNAL_ERROR,
+                message: format!("Failed to parse file_peek response: {}", e),
+                data: None,
+            })
         },
         "file_range" => {
             let empty_map = serde_json::Map::new();
             let args = arguments.and_then(|v| v.as_object()).unwrap_or(&empty_map);
-            handlers.handle_file_range(args).await
-                .map(serde_json::Value::String)
+            let result = handlers.handle_file_range(args).await
                 .map_err(|e| JsonRpcError {
                     code: INVALID_PARAMS,
                     message: e,
                     data: None,
-                })
+                })?;
+            serde_json::from_str(&result).map_err(|e| JsonRpcError {
+                code: INTERNAL_ERROR,
+                message: format!("Failed to parse file_range response: {}", e),
+                data: None,
+            })
         },
         "file_download_url" => {
             let empty_map = serde_json::Map::new();
             let args = arguments.and_then(|v| v.as_object()).unwrap_or(&empty_map);
-            handlers.handle_file_download_url(args).await
-                .map(serde_json::Value::String)
+            let result = handlers.handle_file_download_url(args).await
                 .map_err(|e| JsonRpcError {
                     code: INVALID_PARAMS,
                     message: e.message,
                     data: None,
-                })
+                })?;
+            serde_json::from_str(&result).map_err(|e| JsonRpcError {
+                code: INTERNAL_ERROR,
+                message: format!("Failed to parse file_download_url response: {}", e),
+                data: None,
+            })
         },
         "file_search_content" => {
             let empty_map = serde_json::Map::new();
             let args = arguments.and_then(|v| v.as_object()).unwrap_or(&empty_map);
-            handlers.handle_file_search_content(args).await
-                .map(serde_json::Value::String)
+            let result = handlers.handle_file_search_content(args).await
                 .map_err(|e| JsonRpcError {
                     code: INVALID_PARAMS,
                     message: e,
                     data: None,
-                })
+                })?;
+            serde_json::from_str(&result).map_err(|e| JsonRpcError {
+                code: INTERNAL_ERROR,
+                message: format!("Failed to parse file_search_content response: {}", e),
+                data: None,
+            })
         },
         _ => Err(JsonRpcError {
             code: METHOD_NOT_FOUND,
