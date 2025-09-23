@@ -400,7 +400,7 @@ impl Handler for CorsMiddleware {
 
 #[handler]
 async fn handle_mcp_request(req: &mut Request, depot: &mut Depot, res: &mut Response) {
-    let db_pool = match depot.obtain::<PgPool>() {
+    let db_pool = match depot.get::<PgPool>("db_pool") {
         Ok(pool) => pool.clone(),
         Err(_) => {
             tracing::error!("Database pool not found in depot");
