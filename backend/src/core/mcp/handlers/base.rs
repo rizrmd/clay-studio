@@ -436,16 +436,31 @@ impl McpHandlers {
                 data: None,
             })?;
 
+        // Strip the MCP prefix if present (e.g., "mcp__data-analysis__datasource_list" -> "datasource_list")
+        let clean_tool_name = if tool_name.starts_with("mcp__") {
+            // Find the second "__" and take everything after it
+            if let Some(pos) = tool_name.find("__").and_then(|first| {
+                tool_name[first + 2..].find("__").map(|second| first + 2 + second + 2)
+            }) {
+                &tool_name[pos..]
+            } else {
+                tool_name
+            }
+        } else {
+            tool_name
+        };
+
         let arguments = params.get("arguments");
 
         eprintln!(
-            "[{}] [INFO] Handling tools/call request for tool: {}",
+            "[{}] [INFO] Handling tools/call request for tool: {} (cleaned: {})",
             Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
-            tool_name
+            tool_name,
+            clean_tool_name
         );
 
         // Route to appropriate tool handler based on tool name
-        match tool_name {
+        match clean_tool_name {
             name if tools::data_analysis::is_data_analysis_tool(name) => {
                 tools::data_analysis::handle_tool_call(self, name, arguments).await
             }
@@ -454,7 +469,7 @@ impl McpHandlers {
             }
             _ => Err(JsonRpcError {
                 code: METHOD_NOT_FOUND,
-                message: format!("Unknown tool: {}", tool_name),
+                message: format!("Unknown tool: {}", clean_tool_name),
                 data: None,
             })
         }
@@ -555,11 +570,39 @@ impl McpHandlers {
         &self, 
         _arguments: &serde_json::Map<String, serde_json::Value>
     ) -> Result<String, JsonRpcError> {
-        Err(JsonRpcError {
-            code: -32601,
-            message: "Datasource methods not implemented yet".to_string(),
+        // Query all datasources for this project
+        let datasources = sqlx::query(
+            "SELECT id, name, source_type, is_active, created_at FROM data_sources 
+             WHERE project_id = $1 AND deleted_at IS NULL 
+             ORDER BY created_at DESC"
+        )
+        .bind(&self.project_id)
+        .fetch_all(&self.db_pool)
+        .await
+        .map_err(|e| JsonRpcError {
+            code: INTERNAL_ERROR,
+            message: format!("Database error: {}", e),
             data: None,
-        })
+        })?;
+
+        let mut datasource_list = Vec::new();
+        for row in datasources {
+            let id: String = row.get("id");
+            let name: String = row.get("name");
+            let source_type: String = row.get("source_type");
+            let is_active: bool = row.get("is_active");
+            let created_at: chrono::DateTime<chrono::Utc> = row.get("created_at");
+
+            datasource_list.push(json!({
+                "id": id,
+                "name": name,
+                "source_type": source_type,
+                "is_active": is_active,
+                "created_at": created_at.to_rfc3339()
+            }));
+        }
+
+        Ok(serde_json::to_string(&datasource_list).unwrap_or_else(|_| "[]".to_string()))
     }
 
     pub async fn handle_datasource_remove(
