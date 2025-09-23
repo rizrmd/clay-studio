@@ -95,11 +95,18 @@ pub async fn execute_query_on_datasource(
     // Get datasource info
     let datasource = get_datasource_with_validation(datasource_id, project_id, db_pool).await?;
     
+    // Add datasource ID to config if not present (needed by connectors)
+    let mut config_with_id = datasource.connection_config.clone();
+    if config_with_id.is_object() {
+        let config_obj = config_with_id.as_object_mut().unwrap();
+        config_obj.insert("id".to_string(), Value::String(datasource_id.to_string()));
+    }
+    
     // Execute query using pooling
     execute_query_with_pooling(
         datasource_id,
         &datasource.source_type,
-        &datasource.connection_config,
+        &config_with_id,
         query
     ).await
 }

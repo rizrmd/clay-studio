@@ -771,7 +771,13 @@ impl McpHandlers {
 
             if let Some(row) = row {
                 let source_type: String = row.get("source_type");
-                let connection_config: Value = row.get("connection_config");
+                let mut connection_config: Value = row.get("connection_config");
+                
+                // Add datasource ID to config (needed by connectors)
+                if connection_config.is_object() {
+                    let config_obj = connection_config.as_object_mut().unwrap();
+                    config_obj.insert("id".to_string(), Value::String(datasource_id.to_string()));
+                }
 
                 match shared_service::test_datasource_connection(&source_type, &connection_config).await {
                     Ok(_) => {
