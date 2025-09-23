@@ -478,13 +478,54 @@ impl McpHandlers {
     // Stub implementations for missing methods
     pub async fn handle_datasource_inspect(
         &self, 
-        _arguments: &serde_json::Map<String, serde_json::Value>
+        arguments: &serde_json::Map<String, serde_json::Value>
     ) -> Result<String, JsonRpcError> {
-        Err(JsonRpcError {
-            code: -32601,
-            message: "Method not implemented yet".to_string(),
+        let datasource_id = arguments
+            .get("datasource_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| JsonRpcError {
+                code: INVALID_PARAMS,
+                message: "Missing required parameter: datasource_id".to_string(),
+                data: None,
+            })?;
+
+        // Get datasource details
+        let row = sqlx::query(
+            "SELECT name, source_type, connection_config, schema_info FROM data_sources 
+             WHERE id = $1 AND project_id = $2 AND deleted_at IS NULL"
+        )
+        .bind(datasource_id)
+        .bind(&self.project_id)
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(|e| JsonRpcError {
+            code: INTERNAL_ERROR,
+            message: format!("Database error: {}", e),
             data: None,
-        })
+        })?;
+
+        if let Some(row) = row {
+            let name: String = row.get("name");
+            let source_type: String = row.get("source_type");
+            let existing_schema: Option<Value> = row.get("schema_info");
+
+            // For now, return the existing schema info
+            // In the future, we can implement schema refresh logic
+            let result = json!({
+                "datasource_id": datasource_id,
+                "name": name,
+                "source_type": source_type,
+                "schema": existing_schema,
+                "message": "Schema inspection returns cached schema. Live refresh not yet implemented."
+            });
+            Ok(serde_json::to_string(&result).unwrap())
+        } else {
+            Err(JsonRpcError {
+                code: -32602,
+                message: format!("Datasource {} not found", datasource_id),
+                data: None,
+            })
+        }
     }
 
     pub async fn handle_show_table(
@@ -557,13 +598,9 @@ impl McpHandlers {
     // Datasource handler methods
     pub async fn handle_datasource_add(
         &self, 
-        _arguments: &serde_json::Map<String, serde_json::Value>
+        arguments: &serde_json::Map<String, serde_json::Value>
     ) -> Result<String, JsonRpcError> {
-        Err(JsonRpcError {
-            code: -32601,
-            message: "Datasource methods not implemented yet".to_string(),
-            data: None,
-        })
+        self.add_datasource(arguments).await
     }
 
     pub async fn handle_datasource_list(
@@ -607,57 +644,259 @@ impl McpHandlers {
 
     pub async fn handle_datasource_remove(
         &self, 
-        _arguments: &serde_json::Map<String, serde_json::Value>
+        arguments: &serde_json::Map<String, serde_json::Value>
     ) -> Result<String, JsonRpcError> {
-        Err(JsonRpcError {
-            code: -32601,
-            message: "Datasource methods not implemented yet".to_string(),
-            data: None,
-        })
+        self.remove_datasource(arguments).await
     }
 
     pub async fn handle_datasource_update(
         &self, 
-        _arguments: &serde_json::Map<String, serde_json::Value>
+        arguments: &serde_json::Map<String, serde_json::Value>
     ) -> Result<String, JsonRpcError> {
-        Err(JsonRpcError {
-            code: -32601,
-            message: "Datasource methods not implemented yet".to_string(),
-            data: None,
-        })
+        let datasource_id = arguments
+            .get("datasource_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| JsonRpcError {
+                code: INVALID_PARAMS,
+                message: "Missing required parameter: datasource_id".to_string(),
+                data: None,
+            })?;
+
+        // Build update query dynamically based on provided fields
+        let mut update_fields = Vec::new();
+        let mut param_count = 3; // Starting at $3 (after id and project_id)
+
+        if let Some(_name) = arguments.get("name").and_then(|v| v.as_str()) {
+            update_fields.push(format!("name = ${}", param_count));
+            param_count += 1;
+        }
+
+        if let Some(_source_type) = arguments.get("source_type").and_then(|v| v.as_str()) {
+            update_fields.push(format!("source_type = ${}", param_count));
+            param_count += 1;
+        }
+
+        if let Some(_config) = arguments.get("config") {
+            update_fields.push(format!("connection_config = ${}", param_count));
+            param_count += 1;
+        }
+
+        if arguments.get("is_active").and_then(|v| v.as_bool()).is_some() {
+            update_fields.push(format!("is_active = ${}", param_count));
+            let _ = param_count + 1; // Last parameter, increment not used
+        }
+
+        if update_fields.is_empty() {
+            return Err(JsonRpcError {
+                code: INVALID_PARAMS,
+                message: "No fields to update".to_string(),
+                data: None,
+            });
+        }
+
+        update_fields.push("updated_at = NOW()".to_string());
+
+        let update_query = format!(
+            "UPDATE data_sources SET {} WHERE id = $1 AND project_id = $2 AND deleted_at IS NULL RETURNING id",
+            update_fields.join(", ")
+        );
+
+        // Execute update with dynamic bindings
+        let mut query = sqlx::query(&update_query)
+            .bind(datasource_id)
+            .bind(&self.project_id);
+
+        if let Some(name) = arguments.get("name").and_then(|v| v.as_str()) {
+            query = query.bind(name);
+        }
+
+        if let Some(source_type) = arguments.get("source_type").and_then(|v| v.as_str()) {
+            query = query.bind(source_type);
+        }
+
+        if let Some(config) = arguments.get("config") {
+            query = query.bind(config);
+        }
+
+        if let Some(is_active) = arguments.get("is_active").and_then(|v| v.as_bool()) {
+            query = query.bind(is_active);
+        }
+
+        let result = query
+            .fetch_optional(&self.db_pool)
+            .await
+            .map_err(|e| JsonRpcError {
+                code: INTERNAL_ERROR,
+                message: format!("Database error: {}", e),
+                data: None,
+            })?;
+
+        if result.is_some() {
+            let response = json!({
+                "success": true,
+                "message": format!("Datasource {} updated successfully", datasource_id)
+            });
+            Ok(serde_json::to_string(&response).unwrap())
+        } else {
+            Err(JsonRpcError {
+                code: -32602,
+                message: format!("Datasource {} not found or no permission", datasource_id),
+                data: None,
+            })
+        }
     }
 
     pub async fn handle_connection_test(
         &self, 
-        _arguments: &serde_json::Map<String, serde_json::Value>
+        arguments: &serde_json::Map<String, serde_json::Value>
     ) -> Result<String, JsonRpcError> {
-        Err(JsonRpcError {
-            code: -32601,
-            message: "Datasource methods not implemented yet".to_string(),
-            data: None,
-        })
+        use crate::core::datasources::shared_service;
+        
+        // Check if testing by datasource_id or by config
+        if let Some(datasource_id) = arguments.get("datasource_id").and_then(|v| v.as_str()) {
+            // Test existing datasource connection
+            let row = sqlx::query(
+                "SELECT source_type, connection_config FROM data_sources 
+                 WHERE id = $1 AND project_id = $2 AND deleted_at IS NULL"
+            )
+            .bind(datasource_id)
+            .bind(&self.project_id)
+            .fetch_optional(&self.db_pool)
+            .await
+            .map_err(|e| JsonRpcError {
+                code: INTERNAL_ERROR,
+                message: format!("Database error: {}", e),
+                data: None,
+            })?;
+
+            if let Some(row) = row {
+                let source_type: String = row.get("source_type");
+                let connection_config: Value = row.get("connection_config");
+
+                match shared_service::test_datasource_connection(&source_type, &connection_config).await {
+                    Ok(_) => {
+                        let result = json!({
+                            "success": true,
+                            "message": "Connection test successful"
+                        });
+                        Ok(serde_json::to_string(&result).unwrap())
+                    },
+                    Err(e) => {
+                        let result = json!({
+                            "success": false,
+                            "message": format!("Connection test failed: {}", e)
+                        });
+                        Ok(serde_json::to_string(&result).unwrap())
+                    }
+                }
+            } else {
+                Err(JsonRpcError {
+                    code: -32602,
+                    message: format!("Datasource {} not found", datasource_id),
+                    data: None,
+                })
+            }
+        } else {
+            // Test new connection with provided config
+            let source_type = arguments
+                .get("source_type")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| JsonRpcError {
+                    code: INVALID_PARAMS,
+                    message: "Missing required parameter: source_type".to_string(),
+                    data: None,
+                })?;
+            
+            let config = arguments
+                .get("config")
+                .ok_or_else(|| JsonRpcError {
+                    code: INVALID_PARAMS,
+                    message: "Missing required parameter: config".to_string(),
+                    data: None,
+                })?;
+
+            match shared_service::test_datasource_connection(source_type, config).await {
+                Ok(_) => {
+                    let result = json!({
+                        "success": true,
+                        "message": "Connection test successful"
+                    });
+                    Ok(serde_json::to_string(&result).unwrap())
+                },
+                Err(e) => {
+                    let result = json!({
+                        "success": false,
+                        "message": format!("Connection test failed: {}", e)
+                    });
+                    Ok(serde_json::to_string(&result).unwrap())
+                }
+            }
+        }
     }
 
     pub async fn handle_datasource_detail(
         &self, 
-        _arguments: &serde_json::Map<String, serde_json::Value>
+        arguments: &serde_json::Map<String, serde_json::Value>
     ) -> Result<String, JsonRpcError> {
-        Err(JsonRpcError {
-            code: -32601,
-            message: "Datasource methods not implemented yet".to_string(),
+        let datasource_id = arguments
+            .get("datasource_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| JsonRpcError {
+                code: INVALID_PARAMS,
+                message: "Missing required parameter: datasource_id".to_string(),
+                data: None,
+            })?;
+
+        // Query datasource details
+        let row = sqlx::query(
+            "SELECT id, name, source_type, is_active, created_at, updated_at, schema_info 
+             FROM data_sources 
+             WHERE id = $1 AND project_id = $2 AND deleted_at IS NULL"
+        )
+        .bind(datasource_id)
+        .bind(&self.project_id)
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(|e| JsonRpcError {
+            code: INTERNAL_ERROR,
+            message: format!("Database error: {}", e),
             data: None,
-        })
+        })?;
+
+        if let Some(row) = row {
+            let id: String = row.get("id");
+            let name: String = row.get("name");
+            let source_type: String = row.get("source_type");
+            let is_active: bool = row.get("is_active");
+            let created_at: chrono::DateTime<chrono::Utc> = row.get("created_at");
+            let updated_at: Option<chrono::DateTime<chrono::Utc>> = row.get("updated_at");
+            let schema_info: Option<Value> = row.get("schema_info");
+
+            let detail = json!({
+                "id": id,
+                "name": name,
+                "source_type": source_type,
+                "is_active": is_active,
+                "created_at": created_at.to_rfc3339(),
+                "updated_at": updated_at.map(|dt| dt.to_rfc3339()),
+                "schema_info": schema_info
+            });
+
+            Ok(serde_json::to_string(&detail).unwrap_or_else(|_| "{}".to_string()))
+        } else {
+            Err(JsonRpcError {
+                code: -32602,
+                message: format!("Datasource {} not found", datasource_id),
+                data: None,
+            })
+        }
     }
 
     pub async fn handle_datasource_query(
         &self, 
-        _arguments: &serde_json::Map<String, serde_json::Value>
+        arguments: &serde_json::Map<String, serde_json::Value>
     ) -> Result<String, JsonRpcError> {
-        Err(JsonRpcError {
-            code: -32601,
-            message: "Datasource methods not implemented yet".to_string(),
-            data: None,
-        })
+        self.query_datasource(arguments).await
     }
     
     /// Execute a query using connection pooling
