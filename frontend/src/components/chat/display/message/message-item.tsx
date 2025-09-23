@@ -2,6 +2,7 @@ import { Message } from "../types";
 import { cn } from "@/lib/utils";
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
 import { ChatToolUsage } from "@/components/chat/display/message/item/tools/chat-tool-usage";
+import { ChatProgress } from "@/components/chat/display/message/item/chat-progress";
 import {
   chatBubbleVariants,
   type Animation,
@@ -251,6 +252,7 @@ export function MessageItem({
             }
             return null;
           })}
+          <ChatProgress toolInvocations={toolInvocations} />
           <ChatToolUsage
             toolInvocations={completedToolInvocations}
             className={

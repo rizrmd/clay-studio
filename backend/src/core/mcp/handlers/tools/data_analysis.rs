@@ -626,73 +626,133 @@ pub async fn handle_tool_call(
             use crate::core::mcp::handlers::base::McpHandlers as DataSourceHandler;
             let empty_map = serde_json::Map::new();
             let args = arguments.and_then(|v| v.as_object()).unwrap_or(&empty_map);
-            DataSourceHandler::handle_datasource_add(handlers, args).await.map(serde_json::Value::String)
+            let result = DataSourceHandler::handle_datasource_add(handlers, args).await?;
+            serde_json::from_str(&result).map_err(|e| JsonRpcError {
+                code: INTERNAL_ERROR,
+                message: format!("Invalid JSON response: {}", e),
+                data: None,
+            })
         },
         "datasource_list" => {
             use crate::core::mcp::handlers::base::McpHandlers as DataSourceHandler;
             let empty_map = serde_json::Map::new();
             let args = arguments.and_then(|v| v.as_object()).unwrap_or(&empty_map);
-            DataSourceHandler::handle_datasource_list(handlers, args).await.map(serde_json::Value::String)
+            let result = DataSourceHandler::handle_datasource_list(handlers, args).await?;
+            serde_json::from_str(&result).map_err(|e| JsonRpcError {
+                code: INTERNAL_ERROR,
+                message: format!("Invalid JSON response: {}", e),
+                data: None,
+            })
         },
         "datasource_remove" => {
             use crate::core::mcp::handlers::base::McpHandlers as DataSourceHandler;
             let empty_map = serde_json::Map::new();
             let args = arguments.and_then(|v| v.as_object()).unwrap_or(&empty_map);
-            DataSourceHandler::handle_datasource_remove(handlers, args).await.map(serde_json::Value::String)
+            let result = DataSourceHandler::handle_datasource_remove(handlers, args).await?;
+            serde_json::from_str(&result).map_err(|e| JsonRpcError {
+                code: INTERNAL_ERROR,
+                message: format!("Invalid JSON response: {}", e),
+                data: None,
+            })
         },
         "datasource_update" => {
             use crate::core::mcp::handlers::base::McpHandlers as DataSourceHandler;
             let empty_map = serde_json::Map::new();
             let args = arguments.and_then(|v| v.as_object()).unwrap_or(&empty_map);
-            DataSourceHandler::handle_datasource_update(handlers, args).await.map(serde_json::Value::String)
+            let result = DataSourceHandler::handle_datasource_update(handlers, args).await?;
+            serde_json::from_str(&result).map_err(|e| JsonRpcError {
+                code: INTERNAL_ERROR,
+                message: format!("Invalid JSON response: {}", e),
+                data: None,
+            })
         },
         "connection_test" => {
             use crate::core::mcp::handlers::base::McpHandlers as DataSourceHandler;
             let empty_map = serde_json::Map::new();
             let args = arguments.and_then(|v| v.as_object()).unwrap_or(&empty_map);
-            DataSourceHandler::handle_connection_test(handlers, args).await.map(serde_json::Value::String)
+            let result = DataSourceHandler::handle_connection_test(handlers, args).await?;
+            serde_json::from_str(&result).map_err(|e| JsonRpcError {
+                code: INTERNAL_ERROR,
+                message: format!("Invalid JSON response: {}", e),
+                data: None,
+            })
         },
         "datasource_detail" => {
             use crate::core::mcp::handlers::base::McpHandlers as DataSourceHandler;
             let empty_map = serde_json::Map::new();
             let args = arguments.and_then(|v| v.as_object()).unwrap_or(&empty_map);
-            DataSourceHandler::handle_datasource_detail(handlers, args).await.map(serde_json::Value::String)
+            let result = DataSourceHandler::handle_datasource_detail(handlers, args).await?;
+            serde_json::from_str(&result).map_err(|e| JsonRpcError {
+                code: INTERNAL_ERROR,
+                message: format!("Invalid JSON response: {}", e),
+                data: None,
+            })
         },
         "datasource_query" => {
             use crate::core::mcp::handlers::base::McpHandlers as DataSourceHandler;
             let empty_map = serde_json::Map::new();
             let args = arguments.and_then(|v| v.as_object()).unwrap_or(&empty_map);
-            DataSourceHandler::handle_datasource_query(handlers, args).await.map(serde_json::Value::String)
+            let result = DataSourceHandler::handle_datasource_query(handlers, args).await?;
+            serde_json::from_str(&result).map_err(|e| JsonRpcError {
+                code: INTERNAL_ERROR,
+                message: format!("Invalid JSON response: {}", e),
+                data: None,
+            })
         },
         "datasource_inspect" => {
             use crate::core::mcp::handlers::base::McpHandlers as DataSourceHandler;
             let empty_map = serde_json::Map::new();
             let args = arguments.and_then(|v| v.as_object()).unwrap_or(&empty_map);
-            DataSourceHandler::handle_datasource_inspect(handlers, args).await.map(serde_json::Value::String)
+            let result = DataSourceHandler::handle_datasource_inspect(handlers, args).await?;
+            serde_json::from_str(&result).map_err(|e| JsonRpcError {
+                code: INTERNAL_ERROR,
+                message: format!("Invalid JSON response: {}", e),
+                data: None,
+            })
         },
         "schema_get" => {
             use crate::core::mcp::handlers::base::McpHandlers as SchemaHandler;
             let empty_map = serde_json::Map::new();
             let args = arguments.and_then(|v| v.as_object()).unwrap_or(&empty_map);
-            SchemaHandler::handle_schema_get(handlers, args).await.map(serde_json::Value::String)
+            let result = SchemaHandler::handle_schema_get(handlers, args).await?;
+            serde_json::from_str(&result).map_err(|e| JsonRpcError {
+                code: INTERNAL_ERROR,
+                message: format!("Invalid JSON response: {}", e),
+                data: None,
+            })
         },
         "schema_search" => {
             use crate::core::mcp::handlers::base::McpHandlers as SchemaHandler;
             let empty_map = serde_json::Map::new();
             let args = arguments.and_then(|v| v.as_object()).unwrap_or(&empty_map);
-            SchemaHandler::handle_schema_search(handlers, args).await.map(serde_json::Value::String)
+            let result = SchemaHandler::handle_schema_search(handlers, args).await?;
+            serde_json::from_str(&result).map_err(|e| JsonRpcError {
+                code: INTERNAL_ERROR,
+                message: format!("Invalid JSON response: {}", e),
+                data: None,
+            })
         },
         "schema_related" => {
             use crate::core::mcp::handlers::base::McpHandlers as SchemaHandler;
             let empty_map = serde_json::Map::new();
             let args = arguments.and_then(|v| v.as_object()).unwrap_or(&empty_map);
-            SchemaHandler::handle_schema_related(handlers, args).await.map(serde_json::Value::String)
+            let result = SchemaHandler::handle_schema_related(handlers, args).await?;
+            serde_json::from_str(&result).map_err(|e| JsonRpcError {
+                code: INTERNAL_ERROR,
+                message: format!("Invalid JSON response: {}", e),
+                data: None,
+            })
         },
         "schema_stats" => {
             use crate::core::mcp::handlers::base::McpHandlers as SchemaHandler;
             let empty_map = serde_json::Map::new();
             let args = arguments.and_then(|v| v.as_object()).unwrap_or(&empty_map);
-            SchemaHandler::handle_schema_stats(handlers, args).await.map(serde_json::Value::String)
+            let result = SchemaHandler::handle_schema_stats(handlers, args).await?;
+            serde_json::from_str(&result).map_err(|e| JsonRpcError {
+                code: INTERNAL_ERROR,
+                message: format!("Invalid JSON response: {}", e),
+                data: None,
+            })
         },
         // Analysis management tools
         "analysis_create" => {

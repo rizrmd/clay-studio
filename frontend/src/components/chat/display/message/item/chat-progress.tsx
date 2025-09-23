@@ -17,6 +17,8 @@ interface ToolResult {
   toolName: string;
   result: {
     __cancelled?: boolean;
+    __completed?: boolean;
+    executionTime?: number;
     [key: string]: any;
   };
 }
@@ -92,7 +94,7 @@ export const ChatProgress: React.FC<ChatProgressProps> = ({
                     .join(" ")}
                   {"`"}
                 </span>
-                {invocation.result.executionTime && (
+                {invocation.result?.executionTime && (
                   <span className="text-muted-foreground ml-1">
                     ({invocation.result.executionTime}ms)
                   </span>
