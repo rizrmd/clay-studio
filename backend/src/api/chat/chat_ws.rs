@@ -13,34 +13,16 @@ use uuid;
 
 async fn save_message(
     pool: &PgPool,
-    conversation_id: &str,
+    _conversation_id: &str,
     message: &Message,
 ) -> Result<(), AppError> {
-    // Save the message
+    // Update the existing message (created as placeholder during streaming)
     sqlx::query(
-        "INSERT INTO messages (id, conversation_id, content, role, processing_time_ms, created_at) 
-         VALUES ($1, $2, $3, $4, $5, $6)
-         ON CONFLICT (id) DO UPDATE SET
-            content = EXCLUDED.content,
-            processing_time_ms = EXCLUDED.processing_time_ms",
+        "UPDATE messages SET content = $1, processing_time_ms = $2 WHERE id = $3",
     )
-    .bind(&message.id)
-    .bind(conversation_id)
     .bind(&message.content)
-    .bind(match message.role {
-        MessageRole::System => "system",
-        MessageRole::User => "user",
-        MessageRole::Assistant => "assistant",
-    })
     .bind(message.processing_time_ms)
-    .bind(
-        message
-            .created_at
-            .as_ref()
-            .and_then(|dt| chrono::DateTime::parse_from_rfc3339(dt).ok())
-            .map(|dt| dt.with_timezone(&Utc))
-            .unwrap_or_else(Utc::now),
-    )
+    .bind(&message.id)
     .execute(pool)
     .await
     .map_err(|e| AppError::InternalServerError(format!("Failed to save message: {}", e)))?;
@@ -304,6 +286,23 @@ pub async fn handle_chat_message_ws(
 
     let start_time = std::time::Instant::now();
     let message_id = uuid::Uuid::new_v4();
+
+    // Create a placeholder assistant message immediately to satisfy foreign key constraints
+    // This will be updated with the final content when streaming completes
+    if let Err(e) = sqlx::query(
+        "INSERT INTO messages (id, conversation_id, content, role, created_at) 
+         VALUES ($1, $2, $3, $4, $5)"
+    )
+    .bind(&message_id)
+    .bind(&actual_conversation_id)
+    .bind("") // Empty content initially, will be updated
+    .bind("assistant")
+    .bind(Utc::now())
+    .execute(&db_pool)
+    .await {
+        tracing::error!("Failed to create placeholder assistant message: {}", e);
+        return Err(format!("Failed to create message: {}", e).into());
+    }
 
     // Track this conversation as actively streaming
     {
