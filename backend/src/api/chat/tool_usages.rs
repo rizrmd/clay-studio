@@ -43,7 +43,7 @@ pub async fn get_tool_usage(
         FROM tool_usages
         WHERE id = $1"
     )
-    .bind(&tool_usage_uuid)
+    .bind(tool_usage_uuid)
     .fetch_optional(&state.db_pool)
     .await
     .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?

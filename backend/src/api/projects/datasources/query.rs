@@ -329,7 +329,7 @@ pub async fn get_table_row_ids(
     
     // Extract the first column name from the structure
     if let Some(columns) = structure_result.get("columns").and_then(|c| c.as_array()) {
-        if let Some(first_col) = columns.get(0).and_then(|c| c.as_str()) {
+        if let Some(first_col) = columns.first().and_then(|c| c.as_str()) {
             id_column = first_col.to_string();
             tracing::info!("Using first column '{}' as ID column for table {}", id_column, table_name);
         }

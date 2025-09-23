@@ -293,7 +293,7 @@ pub async fn handle_chat_message_ws(
         "INSERT INTO messages (id, conversation_id, content, role, created_at) 
          VALUES ($1, $2, $3, $4, $5)"
     )
-    .bind(&message_id)
+    .bind(message_id)
     .bind(&actual_conversation_id)
     .bind("") // Empty content initially, will be updated
     .bind("assistant")
@@ -448,7 +448,7 @@ pub async fn handle_chat_message_ws(
                              VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"
                         )
                         .bind(tool_usage_id)
-                        .bind(&message_id.to_string())
+                        .bind(message_id.to_string())
                         .bind(&tool)
                         .bind(&tool_use_id)
                         .bind(&args)

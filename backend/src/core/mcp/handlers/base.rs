@@ -518,7 +518,7 @@ impl McpHandlers {
                 "schema": existing_schema,
                 "message": "Schema inspection returns cached schema. Live refresh not yet implemented."
             });
-            Ok(serde_json::to_string(&result).unwrap())
+            Ok(serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string()))
         } else {
             Err(JsonRpcError {
                 code: -32602,
@@ -736,7 +736,7 @@ impl McpHandlers {
                 "success": true,
                 "message": format!("Datasource {} updated successfully", datasource_id)
             });
-            Ok(serde_json::to_string(&response).unwrap())
+            Ok(serde_json::to_string(&response).unwrap_or_else(|_| r#"{"success":false}"#.to_string()))
         } else {
             Err(JsonRpcError {
                 code: -32602,
@@ -779,14 +779,14 @@ impl McpHandlers {
                             "success": true,
                             "message": "Connection test successful"
                         });
-                        Ok(serde_json::to_string(&result).unwrap())
+                        Ok(serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string()))
                     },
                     Err(e) => {
                         let result = json!({
                             "success": false,
                             "message": format!("Connection test failed: {}", e)
                         });
-                        Ok(serde_json::to_string(&result).unwrap())
+                        Ok(serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string()))
                     }
                 }
             } else {
@@ -821,14 +821,14 @@ impl McpHandlers {
                         "success": true,
                         "message": "Connection test successful"
                     });
-                    Ok(serde_json::to_string(&result).unwrap())
+                    Ok(serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string()))
                 },
                 Err(e) => {
                     let result = json!({
                         "success": false,
                         "message": format!("Connection test failed: {}", e)
                     });
-                    Ok(serde_json::to_string(&result).unwrap())
+                    Ok(serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string()))
                 }
             }
         }
