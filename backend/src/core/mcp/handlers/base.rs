@@ -605,22 +605,46 @@ impl McpHandlers {
 
     pub async fn handle_datasource_list(
         &self, 
-        _arguments: &serde_json::Map<String, serde_json::Value>
+        arguments: &serde_json::Map<String, serde_json::Value>
     ) -> Result<String, JsonRpcError> {
-        // Query all datasources for this project
-        let datasources = sqlx::query(
+        // Check if active_only filter is requested
+        let active_only = arguments.get("active_only")
+            .and_then(|v| {
+                // Handle both boolean and string "true"/"false"
+                if let Some(b) = v.as_bool() {
+                    Some(b)
+                } else if let Some(s) = v.as_str() {
+                    match s.to_lowercase().as_str() {
+                        "true" => Some(true),
+                        "false" => Some(false),
+                        _ => None
+                    }
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(false);
+
+        // Query datasources based on filter
+        let query = if active_only {
+            "SELECT id, name, source_type, is_active, created_at FROM data_sources 
+             WHERE project_id = $1 AND deleted_at IS NULL AND is_active = true
+             ORDER BY created_at DESC"
+        } else {
             "SELECT id, name, source_type, is_active, created_at FROM data_sources 
              WHERE project_id = $1 AND deleted_at IS NULL 
              ORDER BY created_at DESC"
-        )
-        .bind(&self.project_id)
-        .fetch_all(&self.db_pool)
-        .await
-        .map_err(|e| JsonRpcError {
-            code: INTERNAL_ERROR,
-            message: format!("Database error: {}", e),
-            data: None,
-        })?;
+        };
+
+        let datasources = sqlx::query(query)
+            .bind(&self.project_id)
+            .fetch_all(&self.db_pool)
+            .await
+            .map_err(|e| JsonRpcError {
+                code: INTERNAL_ERROR,
+                message: format!("Database error: {}", e),
+                data: None,
+            })?;
 
         let mut datasource_list = Vec::new();
         for row in datasources {

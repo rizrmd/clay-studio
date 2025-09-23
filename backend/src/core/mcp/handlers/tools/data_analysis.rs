@@ -56,7 +56,13 @@ pub fn get_data_analysis_tools() -> Vec<Tool> {
             description: "List all datasources in the project".to_string(),
             input_schema: json!({
                 "type": "object",
-                "properties": {},
+                "properties": {
+                    "active_only": {
+                        "type": "boolean",
+                        "description": "Only return active datasources",
+                        "default": false
+                    }
+                },
                 "additionalProperties": false
             }),
         },
