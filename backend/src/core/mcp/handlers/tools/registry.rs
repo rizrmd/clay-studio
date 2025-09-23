@@ -18,7 +18,7 @@ pub fn get_all_available_mcp_tools() -> Vec<String> {
         "schema_stats",
     ];
 
-    // Add data analysis tools with mcp prefix
+    // Add data analysis tools with mcp prefix  
     for tool in data_analysis_tools {
         tools.push(format!("mcp__data-analysis__{}", tool));
     }
