@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                UPDATE analysis_jobs \n                SET status = 'cancelled', \n                    completed_at = NOW(),\n                    error_message = 'Job cancelled by user'\n                WHERE id = $1\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e3ad73b81a38d700da2bc6098147c5493bd7c18def00501ea6f969a8e52fcb4a"
+}

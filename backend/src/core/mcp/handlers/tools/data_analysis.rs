@@ -1031,15 +1031,86 @@ async fn handle_job_list(
     handlers: &McpHandlers,
     arguments: Option<&Value>
 ) -> Result<Value, JsonRpcError> {
-    let _ = (handlers, arguments);
-    Err(JsonRpcError {
-        code: INTERNAL_ERROR,
-        message: "Job management not yet implemented - requires database migrations".to_string(),
-        data: Some(json!({
-            "hint": "Run database migrations first: sqlx migrate run --source ./migrations",
-            "status": "analysis_system_not_initialized"
-        })),
-    })
+    let default_args = serde_json::Map::new();
+    let args = arguments
+        .and_then(|v| v.as_object())
+        .unwrap_or(&default_args);
+
+    let analysis_id = args.get("analysis_id")
+        .and_then(|v| v.as_str())
+        .and_then(|s| uuid::Uuid::parse_str(s).ok());
+
+    let status_filter = args.get("status")
+        .and_then(|v| v.as_str());
+
+    let limit = args.get("limit")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(50)
+        .min(100); // Cap at 100
+
+    // Use dynamic query to handle different filter combinations
+    let mut query_str = String::from(
+        "SELECT aj.id, aj.analysis_id, aj.status, aj.created_at, aj.started_at, 
+                aj.completed_at, a.title as analysis_title
+         FROM analysis_jobs aj
+         LEFT JOIN analyses a ON aj.analysis_id = a.id
+         WHERE a.project_id = $1"
+    );
+    
+    let mut param_count = 2;
+    if analysis_id.is_some() {
+        query_str.push_str(&format!(" AND aj.analysis_id = ${}", param_count));
+        param_count += 1;
+    }
+    
+    if status_filter.is_some() {
+        query_str.push_str(&format!(" AND aj.status = ${}", param_count));
+        param_count += 1;
+    }
+    
+    query_str.push_str(&format!(" ORDER BY aj.created_at DESC LIMIT ${}", param_count));
+    
+    // Build and execute query
+    let mut query = sqlx::query(&query_str).bind(&handlers.project_id);
+    
+    if let Some(aid) = analysis_id {
+        query = query.bind(aid);
+    }
+    
+    if let Some(status) = status_filter {
+        query = query.bind(status);
+    }
+    
+    query = query.bind(limit);
+    
+    let rows = query
+        .fetch_all(&handlers.db_pool)
+        .await
+        .map_err(|e| JsonRpcError {
+            code: INTERNAL_ERROR,
+            message: format!("Failed to list jobs: {}", e),
+            data: None,
+        })?;
+
+    let jobs: Vec<serde_json::Value> = rows.into_iter()
+        .map(|row| {
+            use sqlx::Row;
+            json!({
+                "job_id": row.get::<uuid::Uuid, _>("id"),
+                "analysis_id": row.get::<uuid::Uuid, _>("analysis_id"),
+                "analysis_title": row.get::<Option<String>, _>("analysis_title"),
+                "status": row.get::<String, _>("status"),
+                "created_at": row.get::<chrono::DateTime<chrono::Utc>, _>("created_at"),
+                "started_at": row.get::<Option<chrono::DateTime<chrono::Utc>>, _>("started_at"),
+                "completed_at": row.get::<Option<chrono::DateTime<chrono::Utc>>, _>("completed_at")
+            })
+        }).collect();
+
+    Ok(json!({
+        "jobs": jobs,
+        "count": jobs.len(),
+        "project_id": handlers.project_id
+    }))
 }
 
 async fn handle_job_get(
@@ -1111,15 +1182,98 @@ async fn handle_job_cancel(
     handlers: &McpHandlers,
     arguments: Option<&Value>
 ) -> Result<Value, JsonRpcError> {
-    let _ = (handlers, arguments);
-    Err(JsonRpcError {
+    let args = arguments
+        .and_then(|v| v.as_object())
+        .ok_or_else(|| JsonRpcError {
+            code: INVALID_PARAMS,
+            message: "Invalid arguments".to_string(),
+            data: None,
+        })?;
+
+    let job_id = args.get("job_id")
+        .and_then(|v| v.as_str())
+        .and_then(|s| uuid::Uuid::parse_str(s).ok())
+        .ok_or_else(|| JsonRpcError {
+            code: INVALID_PARAMS,
+            message: "Invalid or missing job_id".to_string(),
+            data: None,
+        })?;
+
+    // First check if the job exists and get its current status
+    let current_job = sqlx::query!(
+        r#"
+        SELECT aj.status, a.project_id
+        FROM analysis_jobs aj
+        LEFT JOIN analyses a ON aj.analysis_id = a.id
+        WHERE aj.id = $1
+        "#,
+        job_id
+    )
+    .fetch_optional(&handlers.db_pool)
+    .await
+    .map_err(|e| JsonRpcError {
         code: INTERNAL_ERROR,
-        message: "Job management not yet implemented - requires database migrations".to_string(),
-        data: Some(json!({
-            "hint": "Run database migrations first: sqlx migrate run --source ./migrations",
-            "status": "analysis_system_not_initialized"
-        })),
-    })
+        message: format!("Database error: {}", e),
+        data: None,
+    })?;
+
+    match current_job {
+        Some(job) => {
+            // Verify the job belongs to the current project
+            if job.project_id != handlers.project_id {
+                return Err(JsonRpcError {
+                    code: -32602,
+                    message: "Job not found or access denied".to_string(),
+                    data: None,
+                });
+            }
+
+            // Check if the job can be cancelled
+            match job.status.as_str() {
+                "completed" | "failed" | "cancelled" => {
+                    return Err(JsonRpcError {
+                        code: -32602,
+                        message: format!("Job cannot be cancelled - current status: {}", job.status),
+                        data: None,
+                    });
+                }
+                _ => {}
+            }
+
+            // Update the job status to cancelled
+            sqlx::query!(
+                r#"
+                UPDATE analysis_jobs 
+                SET status = 'cancelled', 
+                    completed_at = NOW(),
+                    error_message = 'Job cancelled by user'
+                WHERE id = $1
+                "#,
+                job_id
+            )
+            .execute(&handlers.db_pool)
+            .await
+            .map_err(|e| JsonRpcError {
+                code: INTERNAL_ERROR,
+                message: format!("Failed to cancel job: {}", e),
+                data: None,
+            })?;
+
+            Ok(json!({
+                "success": true,
+                "job_id": job_id,
+                "status": "cancelled",
+                "message": "Job successfully cancelled"
+            }))
+        }
+        None => {
+            Err(JsonRpcError {
+                code: -32602,
+                message: format!("Job {} not found", job_id),
+                data: None,
+            })
+        }
+    }
 }
 
 async fn handle_job_result(
