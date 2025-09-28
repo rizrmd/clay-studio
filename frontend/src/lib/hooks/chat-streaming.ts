@@ -13,11 +13,29 @@ export const stream = {
         createdAt: new Date().toISOString(),
       };
       conversation.messages.push(assistantMessage);
+      
+      // Initialize streaming state
+      if (!chatStore.streaming[msg.conversation_id]) {
+        chatStore.streaming[msg.conversation_id] = {
+          messageId: msg.id,
+          partialContent: "",
+          activeTools: [],
+          isComplete: false,
+          events: [],
+        };
+      } else {
+        // Update existing streaming state
+        chatStore.streaming[msg.conversation_id].messageId = msg.id;
+        chatStore.streaming[msg.conversation_id].isComplete = false;
+        chatStore.streaming[msg.conversation_id].events = [];
+      }
     }
   },
 
   progress(msg: ServerMessage & { type: "progress" }) {
     const conversation = chatStore.map[msg.conversation_id];
+    const streamState = chatStore.streaming[msg.conversation_id];
+    
     if (conversation && conversation.messages.length > 0) {
       const lastMessage =
         conversation.messages[conversation.messages.length - 1];
@@ -32,10 +50,27 @@ export const stream = {
 
           if (textContent) {
             lastMessage.content = textContent;
+            
+            // Add content event to timeline if we have streaming state
+            if (streamState && streamState.events) {
+              streamState.events.push({
+                type: "content",
+                timestamp: Date.now(),
+                content: textContent,
+              });
+            }
           }
         } else if (msg.content.result) {
           // Handle result content (final message content)
           lastMessage.content = msg.content.result;
+          
+          if (streamState && streamState.events) {
+            streamState.events.push({
+              type: "content",
+              timestamp: Date.now(),
+              content: msg.content.result,
+            });
+          }
         }
       }
     }
@@ -64,6 +99,11 @@ export const stream = {
       }
       conversation.message_count = conversation.messages.length;
       conversation.updated_at = new Date().toISOString();
+      
+      // Mark streaming as complete
+      if (chatStore.streaming[msg.conversation_id]) {
+        chatStore.streaming[msg.conversation_id].isComplete = true;
+      }
     }
   },
 };

@@ -101,6 +101,11 @@ export function ToolUsageDialog({
   const processOutput = (output: any) => {
     if (!output) return null;
 
+    // Don't process output for ListMcpResourcesTool - show as-is
+    if (toolUsage?.tool_name === 'ListMcpResourcesTool') {
+      return output;
+    }
+
     // Check for array format with MCP tool result
     if (Array.isArray(output) && output.length > 0) {
       const firstItem = output[0];

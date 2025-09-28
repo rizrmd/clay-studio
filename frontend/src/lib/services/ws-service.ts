@@ -241,6 +241,15 @@ class WebSocketService extends EventEmitter {
     this.sendMessage(message);
   }
 
+  retryLastMessage(projectId: string, conversationId: string): void {
+    const message: ClientMessage = {
+      type: "retry_last_message",
+      project_id: projectId,
+      conversation_id: conversationId,
+    };
+    this.sendMessage(message);
+  }
+
   stopStreaming(conversationId: string): void {
     const message: ClientMessage = {
       type: "stop_streaming",

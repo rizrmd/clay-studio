@@ -137,7 +137,7 @@ This project uses Model Context Protocol (MCP) tools for database operations and
 - **connection_test**: Returns connection status and datasource info
 - **schema_search**: Returns search matches with table information
 - **datasource_list**: Returns array of datasources with metadata
-- **datasource_inspect**: Returns complete database analysis
+- **datasource_inspect**: Returns complete database inspection
 - **show_table**: Returns interactive table configuration
 - **show_chart**: Returns interactive chart configuration
 - **ask_user**: Returns user interaction specification
@@ -878,7 +878,7 @@ If you find yourself about to show data, STOP and ask:
     )
 }
 
-/// Generate an enhanced CLAUDE.md with actual datasource information
+/// Generate an enhanced CLAUDE.md with actual datasource information and compiled context
 pub async fn generate_claude_md_with_datasources(
     project_id: &str,
     project_name: &str,
@@ -944,6 +944,36 @@ pub async fn generate_claude_md_with_datasources(
         base_content.push_str("```\n");
     }
 
+    base_content
+}
+
+/// Generate CLAUDE.md with datasources and compiled context (async version with database access)
+pub async fn generate_claude_md_with_context(
+    project_id: &str,
+    project_name: &str,
+    datasources: Vec<Value>,
+    db_pool: &sqlx::PgPool,
+) -> String {
+    let mut base_content = generate_claude_md_with_datasources(project_id, project_name, datasources).await;
+    
+    // Add compiled context if available
+    use crate::utils::context_compiler::ContextCompiler;
+    let compiler = ContextCompiler::new(db_pool.clone());
+    
+    match compiler.get_compiled_context(project_id).await {
+        Ok(context) if !context.is_empty() => {
+            base_content.push_str("\n## Project Context\n\n");
+            base_content.push_str(&context);
+            base_content.push_str("\n");
+        }
+        Err(e) => {
+            tracing::warn!("Failed to compile context for project {}: {}", project_id, e);
+        }
+        _ => {
+            // Empty context, do nothing
+        }
+    }
+    
     base_content
 }
 

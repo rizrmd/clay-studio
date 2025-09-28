@@ -108,23 +108,30 @@ impl ConnectionPoolManager {
         
         // Create new pool based on database type
         info!("🔧 Creating new connection pool for {} datasource {} (cache key: {})", source_type, datasource_id, cache_key);
+        
+        // Add datasource_id to config if not present (needed by connectors)
+        let mut enriched_config = config.clone();
+        if let Some(obj) = enriched_config.as_object_mut() {
+            obj.insert("id".to_string(), serde_json::Value::String(datasource_id.to_string()));
+        }
+        
         let pool = match source_type.to_lowercase().as_str() {
             "postgresql" | "postgres" => {
-                let connector = PostgreSQLConnector::new(config)
+                let connector = PostgreSQLConnector::new(&enriched_config)
                     .map_err(|e| format!("Failed to create PostgreSQL connector: {}", e))?;
                 let pg_pool = connector.create_pool().await
                     .map_err(|e| format!("Failed to create PostgreSQL pool: {}", e))?;
                 DatabasePool::PostgreSQL(Arc::new(pg_pool))
             },
             "mysql" => {
-                let connector = MySQLConnector::new(config)
+                let connector = MySQLConnector::new(&enriched_config)
                     .map_err(|e| format!("Failed to create MySQL connector: {}", e))?;
                 let mysql_pool = connector.create_pool().await
                     .map_err(|e| format!("Failed to create MySQL pool: {}", e))?;
                 DatabasePool::MySQL(Arc::new(mysql_pool))
             },
             "sqlite" => {
-                let connector = SQLiteConnector::new(config)
+                let connector = SQLiteConnector::new(&enriched_config)
                     .map_err(|e| format!("Failed to create SQLite connector: {}", e))?;
                 let sqlite_pool = connector.create_pool().await
                     .map_err(|e| format!("Failed to create SQLite pool: {}", e))?;
@@ -327,11 +334,10 @@ impl ConnectionPoolManager {
         
         // Get datasources for the specific project
         let datasources = sqlx::query(
-            "SELECT ds.id, ds.connection_config, ds.source_type 
-             FROM data_sources ds
-             JOIN project_datasources pd ON ds.id = pd.datasource_id
-             WHERE ds.deleted_at IS NULL 
-             AND pd.project_id = $1"
+            "SELECT id, connection_config, source_type 
+             FROM data_sources 
+             WHERE deleted_at IS NULL 
+             AND project_id = $1"
         )
         .bind(project_id)
         .fetch_all(app_db_pool)

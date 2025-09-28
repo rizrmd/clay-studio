@@ -413,10 +413,19 @@ impl McpHandlers {
     }
 
     pub async fn handle_tools_list(&self, _params: Option<Value>) -> Result<Value, JsonRpcError> {
+        // Only advertise tools specific to this server type
+        let tools_list = match self.server_type.as_str() {
+            "analysis" => tools::analysis::get_analysis_tools(),
+            "interaction" => tools::interaction::get_interaction_tools(),
+            "operation" => tools::operation::get_operation_tool_definitions(),
+            _ => {
+                // Default to empty list for unknown server types
+                vec![]
+            }
+        };
+        
         Ok(json!({
-            "tools": tools::data_analysis::get_data_analysis_tools().into_iter()
-                .chain(tools::interaction::get_interaction_tools().into_iter())
-                .collect::<Vec<_>>()
+            "tools": tools_list
         }))
     }
 
@@ -436,7 +445,7 @@ impl McpHandlers {
                 data: None,
             })?;
 
-        // Strip the MCP prefix if present (e.g., "mcp__data-analysis__datasource_list" -> "datasource_list")
+        // Strip the MCP prefix if present (e.g., "mcp__operation__datasource_list" -> "datasource_list")
         let clean_tool_name = if tool_name.starts_with("mcp__") {
             // Find the second "__" and take everything after it
             if let Some(pos) = tool_name.find("__").and_then(|first| {
@@ -461,11 +470,14 @@ impl McpHandlers {
 
         // Route to appropriate tool handler based on tool name
         match clean_tool_name {
-            name if tools::data_analysis::is_data_analysis_tool(name) => {
-                tools::data_analysis::handle_tool_call(self, name, arguments).await
+            name if tools::analysis::is_analysis_tool(name) => {
+                tools::analysis::handle_tool_call(self, name, arguments).await
             }
             name if tools::interaction::is_interaction_tool(name) => {
                 tools::interaction::handle_tool_call(self, name, arguments).await
+            }
+            name if tools::operation::is_operation_tool(name) => {
+                tools::operation::handle_tool_call(self, name, arguments).await
             }
             _ => Err(JsonRpcError {
                 code: METHOD_NOT_FOUND,

@@ -88,9 +88,13 @@ impl ProjectManager {
 
             let mcp_config = serde_json::json!({
                 "mcpServers": {
-                    "data-analysis": {
+                    "operation": {
                         "type": "http",
-                        "url": format!("http://localhost:7670/data-analysis/{}/{}", client_id_str, project_id_str)
+                        "url": format!("http://localhost:7670/operation/{}/{}", client_id_str, project_id_str)
+                    },
+                    "analysis": {
+                        "type": "http",
+                        "url": format!("http://localhost:7670/analysis/{}/{}", client_id_str, project_id_str)
                     },
                     "interaction": {
                         "type": "http",

@@ -13,19 +13,42 @@ use uuid;
 
 async fn save_message(
     pool: &PgPool,
-    _conversation_id: &str,
+    conversation_id: &str,
     message: &Message,
 ) -> Result<(), AppError> {
-    // Update the existing message (created as placeholder during streaming)
-    sqlx::query(
-        "UPDATE messages SET content = $1, processing_time_ms = $2 WHERE id = $3",
-    )
-    .bind(&message.content)
-    .bind(message.processing_time_ms)
-    .bind(&message.id)
-    .execute(pool)
-    .await
-    .map_err(|e| AppError::InternalServerError(format!("Failed to save message: {}", e)))?;
+    // For user messages, insert a new record. For assistant messages, update the placeholder
+    if message.role == MessageRole::User {
+        // Insert new user message
+        sqlx::query(
+            "INSERT INTO messages (id, conversation_id, role, content, created_at, processing_time_ms) 
+             VALUES ($1, $2, $3, $4, $5, $6)",
+        )
+        .bind(&message.id)
+        .bind(conversation_id)
+        .bind("user") // User role as string literal
+        .bind(&message.content)
+        .bind(
+            message.created_at.as_ref()
+                .and_then(|dt| chrono::DateTime::parse_from_rfc3339(dt).ok())
+                .map(|dt| dt.with_timezone(&Utc))
+                .unwrap_or_else(Utc::now)
+        )
+        .bind(message.processing_time_ms)
+        .execute(pool)
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("Failed to insert user message: {}", e)))?;
+    } else {
+        // Update the existing message (created as placeholder during streaming)
+        sqlx::query(
+            "UPDATE messages SET content = $1, processing_time_ms = $2 WHERE id = $3",
+        )
+        .bind(&message.content)
+        .bind(message.processing_time_ms)
+        .bind(&message.id)
+        .execute(pool)
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("Failed to update assistant message: {}", e)))?;
+    }
 
     // Save tool usages if present (including failed MCP interactions for tracking)
     if let Some(tool_usages) = &message.tool_usages {

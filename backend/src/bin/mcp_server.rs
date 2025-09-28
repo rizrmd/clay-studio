@@ -77,7 +77,7 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let mut project_id = String::from("default");
     let mut client_id = String::from("unknown");
-    let mut server_type = String::from("data-analysis");
+    let mut server_type = String::from("operation");
     let mut use_http = false;
     let mut port = 8000u16;
 
@@ -205,7 +205,7 @@ fn print_help() {
     eprintln!("Options:");
     eprintln!("  --project-id <ID>   Project ID to serve data for");
     eprintln!("  --client-id <ID>    Client ID for authentication");
-    eprintln!("  --server-type <TYPE> Server type (data-analysis or interaction)");
+    eprintln!("  --server-type <TYPE> Server type (operation, analysis, or interaction)");
     eprintln!("  --http              Use HTTP/SSE transport instead of stdio");
     eprintln!("  --port <PORT>       Port for HTTP transport (default: 8000)");
     eprintln!("  -h, --help          Show this help message");

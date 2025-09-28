@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                        UPDATE projects \n                        SET \n                            context_compiled = $1,\n                            context_compiled_at = NOW()\n                        WHERE id = $2\n                        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "22da2828d5c0fa497fd591716779c021cd2f4a8c0cb988888797458097325705"
+}

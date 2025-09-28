@@ -78,17 +78,14 @@ pub async fn update_claude_md_if_needed(
             })
             .collect();
 
-        // Generate updated CLAUDE.md content
-        let claude_md_content = if !datasource_values.is_empty() {
-            claude_md_template::generate_claude_md_with_datasources(
-                project_id,
-                &project_name,
-                datasource_values,
-            )
-            .await
-        } else {
-            claude_md_template::generate_claude_md(project_id, &project_name)
-        };
+        // Generate updated CLAUDE.md content with compiled context
+        let claude_md_content = claude_md_template::generate_claude_md_with_context(
+            project_id,
+            &project_name,
+            datasource_values,
+            &state.db_pool,
+        )
+        .await;
 
         // Save the updated content
         let project_manager = ProjectManager::new();

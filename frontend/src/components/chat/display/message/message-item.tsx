@@ -69,14 +69,15 @@ export function MessageItem({
   const toolInvocations: ToolInvocation[] = [
     // Completed tool usages
     ...(message.tool_usages?.map((usage) => {
-      // For MCP interaction tools, use parameters as the result for interaction rendering
+      // For MCP interaction tools and TodoWrite, use parameters as the result for rendering
       const isMcpInteraction = usage.tool_name.startsWith('mcp__interaction__');
+      const isTodoWrite = usage.tool_name === 'TodoWrite';
       
       return {
         state: "result" as const,
         id: usage.id,
         toolName: usage.tool_name,
-        result: isMcpInteraction ? (usage.parameters || {}) : (usage.output || {}),
+        result: (isMcpInteraction || isTodoWrite) ? (usage.parameters || {}) : (usage.output || {}),
         // Keep original data accessible
         originalOutput: usage.output,
         originalParameters: usage.parameters,

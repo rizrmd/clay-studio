@@ -360,8 +360,8 @@ export function DatasourceList({
             className="text-xs p-0 h-auto text-primary underline"
             onClick={() => {
               if (projectId) {
-                // Create a new chat tab
-                tabsActions.openInNewTab('chat', {
+                // Check for existing "New Chat" tab first, create only if needed
+                tabsActions.getOrCreateActiveTab('chat', {
                   projectId,
                   conversationId: 'new',
                 }, 'New Chat');
@@ -403,8 +403,8 @@ export function DatasourceList({
             className="text-xs p-0 h-auto text-primary underline"
             onClick={() => {
               if (projectId) {
-                // Create a new chat tab
-                tabsActions.openInNewTab('chat', {
+                // Check for existing "New Chat" tab first, create only if needed
+                tabsActions.getOrCreateActiveTab('chat', {
                   projectId,
                   conversationId: 'new',
                 }, 'New Chat');

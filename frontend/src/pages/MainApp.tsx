@@ -36,6 +36,11 @@ const AnalysisList = lazy(() =>
     default: m.AnalysisList,
   }))
 );
+const ContextEditor = lazy(() =>
+  import("@/components/projects/context-editor").then((m) => ({
+    default: m.ContextEditor,
+  }))
+);
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useSnapshot } from "valtio";
 import { uiStore, uiActions } from "@/lib/store/chat/ui-store";
@@ -87,6 +92,8 @@ export function MainApp() {
   const isAnalysisNewRoute = location.pathname.includes("/analysis/new");
   // Check if we're on the analysis view/edit route
   const isAnalysisViewRoute = location.pathname.includes("/analysis/") && !isAnalysisNewRoute;
+  // Check if we're on the context route
+  const isContextRoute = location.pathname.endsWith("/context");
 
   // Enable debug logging hooks
   useLoggerDebug();
@@ -103,6 +110,29 @@ export function MainApp() {
     }
   }, [projectId, conversationId, location.state]);
 
+  // Sync context tab with route
+  useEffect(() => {
+    if (isContextRoute && projectId) {
+      // Find or create context tab
+      const existingContextTab = tabsSnapshot.tabs.find(t => 
+        t.type === 'context' && t.metadata.projectId === projectId
+      );
+      
+      if (existingContextTab) {
+        tabsActions.setActiveTab(existingContextTab.id);
+      } else {
+        // Create the context tab if it doesn't exist
+        tabsActions.addTab({
+          type: 'context',
+          title: 'Context',
+          metadata: {
+            projectId,
+          }
+        });
+      }
+    }
+  }, [isContextRoute, projectId, location.pathname]);
+
   // Handle redirection when visiting /p/:projectId without conversation ID
   // Don't redirect if we're on the /new route or data browser route or query editor route
   useEffect(() => {
@@ -116,7 +146,8 @@ export function MainApp() {
       !isDatasourceNewRoute &&
       !isAnalysisListRoute &&
       !isAnalysisNewRoute &&
-      !isAnalysisViewRoute
+      !isAnalysisViewRoute &&
+      !isContextRoute
     ) {
       // Try to get the last conversation from localStorage
       const lastConversationKey = `last_conversation_${projectId}`;
@@ -561,6 +592,14 @@ export function MainApp() {
             <AnalysisList projectId={projectId!} />
           </Suspense>
         );
+      } else if (isContextRoute) {
+        return (
+          <Suspense
+            fallback={<div className="flex-1 animate-pulse bg-gray-50" />}
+          >
+            <ContextEditor projectId={projectId!} />
+          </Suspense>
+        );
       } else if (isNewRoute) {
         return (
           <Suspense
@@ -650,6 +689,14 @@ export function MainApp() {
               analysisId={activeTab.metadata.analysisId}
               projectId={projectId!}
             />
+          </Suspense>
+        );
+      case "context":
+        return (
+          <Suspense
+            fallback={<div className="flex-1 animate-pulse bg-gray-50" />}
+          >
+            <ContextEditor projectId={projectId!} />
           </Suspense>
         );
       default:

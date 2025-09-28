@@ -1,4 +1,4 @@
-import { ChevronLeft, X, MessageSquare, Trash2 } from "lucide-react";
+import { ChevronLeft, X, MessageSquare, Trash2, Code } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useSnapshot } from "valtio";
 import { useNavigate } from "react-router-dom";
@@ -63,27 +63,49 @@ export function ConversationSidebarHeader({
             </Button>
           </div>
         ) : (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              if (projectId) {
-                // Always create a new chat tab
-                tabsActions.openInNewTab('chat', {
-                  projectId,
-                  conversationId: 'new',
-                }, 'New Chat');
-                
-                // Navigate to the new route
-                navigate(`/p/${projectId}/new`);
-              }
-            }}
-            className="gap-1 h-[25px] border border-transparent hover:border-gray-200"
-            title="New Chat"
-          >
-            <MessageSquare size={10} />
-            <span className="text-xs">New</span>
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                if (projectId) {
+                  // Open context in a new tab
+                  tabsActions.openInNewTab('context', {
+                    projectId,
+                  }, 'Context');
+                  
+                  // Navigate to context route
+                  navigate(`/p/${projectId}/context`);
+                }
+              }}
+              className="gap-1 h-[25px] border border-transparent hover:border-gray-200"
+              title="Project Context"
+            >
+              <Code size={10} />
+              <span className="text-xs">Context</span>
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                if (projectId) {
+                  // Check for existing "New Chat" tab first, create only if needed
+                  tabsActions.getOrCreateActiveTab('chat', {
+                    projectId,
+                    conversationId: 'new',
+                  }, 'New Chat');
+                  
+                  // Navigate to the new route
+                  navigate(`/p/${projectId}/new`);
+                }
+              }}
+              className="gap-1 h-[25px] border border-transparent hover:border-gray-200"
+              title="New Chat"
+            >
+              <MessageSquare size={10} />
+              <span className="text-xs">New</span>
+            </Button>
+          </div>
         )}
       </div>
     </div>

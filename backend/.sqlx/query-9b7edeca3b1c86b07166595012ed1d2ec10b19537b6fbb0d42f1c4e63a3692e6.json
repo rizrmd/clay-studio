@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT \n                context,\n                context_compiled,\n                context_compiled_at\n            FROM projects \n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "context",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "context_compiled",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "context_compiled_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "9b7edeca3b1c86b07166595012ed1d2ec10b19537b6fbb0d42f1c4e63a3692e6"
+}

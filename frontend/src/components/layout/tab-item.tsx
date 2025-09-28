@@ -8,6 +8,7 @@ import {
   Edit, 
   Plus,
   BarChart3,
+  Code,
   X 
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -22,6 +23,7 @@ const TAB_ICONS: Record<TabType, typeof MessageSquare> = {
   'datasource_new': Plus,
   'datasource_list': Database,
   'analysis': BarChart3,
+  'context': Code,
 };
 
 interface TabItemProps {
@@ -78,6 +80,9 @@ export function TabItem({ tab }: TabItemProps) {
         } else {
           return `/p/${projectId}/analysis/new`;
         }
+        
+      case 'context':
+        return `/p/${projectId}/context`;
         
       default:
         // Fallback to chat if unknown type

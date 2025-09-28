@@ -16,9 +16,9 @@ pub struct McpTool {
 pub fn get_mcp_tools() -> HashMap<String, McpTool> {
     let mut tools = HashMap::new();
 
-    // Data Analysis Tools
+    // Operation Tools
     tools.insert(
-        "mcp__data-analysis__datasource_list".to_string(),
+        "mcp__operation__datasource_list".to_string(),
         McpTool {
             name: "datasource_list",
             display_name: "List Data Sources",
@@ -28,7 +28,7 @@ pub fn get_mcp_tools() -> HashMap<String, McpTool> {
     );
 
     tools.insert(
-        "mcp__data-analysis__datasource_detail".to_string(),
+        "mcp__operation__datasource_detail".to_string(),
         McpTool {
             name: "datasource_detail",
             display_name: "Data Source Details",
@@ -43,7 +43,7 @@ pub fn get_mcp_tools() -> HashMap<String, McpTool> {
     );
 
     tools.insert(
-        "mcp__data-analysis__datasource_add".to_string(),
+        "mcp__operation__datasource_add".to_string(),
         McpTool {
             name: "datasource_add",
             display_name: "Add Data Source",
@@ -53,7 +53,7 @@ pub fn get_mcp_tools() -> HashMap<String, McpTool> {
     );
 
     tools.insert(
-        "mcp__data-analysis__datasource_remove".to_string(),
+        "mcp__operation__datasource_remove".to_string(),
         McpTool {
             name: "datasource_remove",
             display_name: "Remove Data Source",
@@ -67,7 +67,7 @@ pub fn get_mcp_tools() -> HashMap<String, McpTool> {
     );
 
     tools.insert(
-        "mcp__data-analysis__datasource_update".to_string(),
+        "mcp__operation__datasource_update".to_string(),
         McpTool {
             name: "datasource_update",
             display_name: "Update Data Source",
@@ -82,7 +82,7 @@ pub fn get_mcp_tools() -> HashMap<String, McpTool> {
     );
 
     tools.insert(
-        "mcp__data-analysis__datasource_test".to_string(),
+        "mcp__operation__datasource_test".to_string(),
         McpTool {
             name: "datasource_test",
             display_name: "Test Connection",
@@ -96,7 +96,7 @@ pub fn get_mcp_tools() -> HashMap<String, McpTool> {
     );
 
     tools.insert(
-        "mcp__data-analysis__datasource_inspect".to_string(),
+        "mcp__operation__datasource_inspect".to_string(),
         McpTool {
             name: "datasource_inspect",
             display_name: "Inspect Data Source",
@@ -110,7 +110,7 @@ pub fn get_mcp_tools() -> HashMap<String, McpTool> {
     );
 
     tools.insert(
-        "mcp__data-analysis__data_query".to_string(),
+        "mcp__operation__data_query".to_string(),
         McpTool {
             name: "data_query",
             display_name: "Query Data",
@@ -120,7 +120,7 @@ pub fn get_mcp_tools() -> HashMap<String, McpTool> {
     );
 
     tools.insert(
-        "mcp__data-analysis__schema_stats".to_string(),
+        "mcp__operation__schema_stats".to_string(),
         McpTool {
             name: "schema_stats",
             display_name: "Schema Statistics",
@@ -134,7 +134,7 @@ pub fn get_mcp_tools() -> HashMap<String, McpTool> {
     );
 
     tools.insert(
-        "mcp__data-analysis__schema_search".to_string(),
+        "mcp__operation__schema_search".to_string(),
         McpTool {
             name: "schema_search",
             display_name: "Search Schema",
@@ -149,7 +149,7 @@ pub fn get_mcp_tools() -> HashMap<String, McpTool> {
     );
 
     tools.insert(
-        "mcp__data-analysis__schema_get".to_string(),
+        "mcp__operation__schema_get".to_string(),
         McpTool {
             name: "schema_get",
             display_name: "Get Schema",
@@ -207,7 +207,7 @@ pub fn get_mcp_tools() -> HashMap<String, McpTool> {
     tools
 }
 
-/// Gets tool information by its full ID (e.g., "mcp__data-analysis__datasource_list")
+/// Gets tool information by its full ID (e.g., "mcp__operation__datasource_list")
 #[allow(dead_code)]
 pub fn get_tool_info(tool_id: &str) -> Option<McpTool> {
     let tools = get_mcp_tools();

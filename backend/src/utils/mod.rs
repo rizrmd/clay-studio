@@ -4,6 +4,7 @@ pub mod command_logger;
 pub mod common;
 pub mod config;
 pub mod content_extractor;
+pub mod context_compiler;
 pub mod datasource;
 pub mod db;
 pub mod domain;

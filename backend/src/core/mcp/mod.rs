@@ -1,5 +1,6 @@
 pub mod handlers;
 pub mod types;
+pub mod response;
 
 use chrono::Utc;
 use handlers::McpHandlers;
@@ -43,14 +44,14 @@ impl McpServer {
         let handlers = McpHandlers {
             project_id: project_id.clone(),
             client_id: client_id.clone(),
-            server_type: "data-analysis".to_string(),
+            server_type: "operation".to_string(),
             db_pool,
         };
 
         Ok(Self {
             project_id,
             client_id,
-            server_type: "data-analysis".to_string(),
+            server_type: "operation".to_string(),
             runtime,
             handlers,
         })
@@ -350,7 +351,8 @@ async fn run_http_server(
     );
 
     let router = Router::new()
-        .push(Router::with_path("/data-analysis/{client_id}/{project_id}").post(handle_mcp_request).get(handle_sse_connection))
+        .push(Router::with_path("/operation/{client_id}/{project_id}").post(handle_mcp_request).get(handle_sse_connection))
+        .push(Router::with_path("/analysis/{client_id}/{project_id}").post(handle_mcp_request).get(handle_sse_connection))
         .push(Router::with_path("/interaction/{client_id}/{project_id}").post(handle_mcp_request).get(handle_sse_connection))
         .hoop(DbMiddleware { db_pool })
         .hoop(CorsMiddleware);
@@ -417,12 +419,14 @@ async fn handle_mcp_request(req: &mut Request, depot: &mut Depot, res: &mut Resp
     let project_id = req.param::<String>("project_id").unwrap_or_else(|| "default".to_string());
     
     // Determine server type from URL path
-    let server_type = if req.uri().path().starts_with("/data-analysis") {
-        "data-analysis".to_string()
+    let server_type = if req.uri().path().starts_with("/operation") {
+        "operation".to_string()
+    } else if req.uri().path().starts_with("/analysis") {
+        "analysis".to_string()
     } else if req.uri().path().starts_with("/interaction") {
         "interaction".to_string()
     } else {
-        "data-analysis".to_string()
+        "operation".to_string()
     };
     
     // Create handlers for this specific request
@@ -529,12 +533,14 @@ async fn handle_sse_connection(req: &mut Request, _depot: &mut Depot, res: &mut 
     let project_id = req.param::<String>("project_id").unwrap_or_else(|| "default".to_string());
     
     // Determine server type from URL path
-    let server_type = if req.uri().path().starts_with("/data-analysis") {
-        "data-analysis"
+    let server_type = if req.uri().path().starts_with("/operation") {
+        "operation"
+    } else if req.uri().path().starts_with("/analysis") {
+        "analysis"
     } else if req.uri().path().starts_with("/interaction") {
         "interaction"
     } else {
-        "data-analysis"
+        "operation"
     };
     
     eprintln!(

@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE analyses \n        SET \n            is_active = false,\n            updated_at = NOW()\n        WHERE id = $1 AND project_id = $2 AND is_active = true\n        RETURNING id, title\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "title",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "a01f9ebe0dda9c6e3023150e2296775f8e8f119243e60be5eb500e0fc5268f7d"
+}

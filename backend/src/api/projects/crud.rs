@@ -12,6 +12,45 @@ use sqlx::Row;
 use uuid::Uuid;
 
 #[handler]
+pub async fn get_project(
+    req: &mut Request,
+    depot: &mut Depot,
+    res: &mut Response,
+) -> Result<(), AppError> {
+    let state = get_app_state(depot)?;
+    let project_id = req
+        .param::<String>("project_id")
+        .ok_or(AppError::BadRequest("Missing project_id".to_string()))?;
+
+    let project = sqlx::query!(
+        r#"
+        SELECT id, name, created_at, updated_at
+        FROM projects
+        WHERE id = $1
+        "#,
+        project_id
+    )
+    .fetch_optional(&state.db_pool)
+    .await?;
+
+    match project {
+        Some(p) => {
+            res.render(Json(serde_json::json!({
+                "id": p.id,
+                "name": p.name,
+                "created_at": p.created_at,
+                "updated_at": p.updated_at
+            })));
+        }
+        None => {
+            return Err(AppError::NotFound("Project not found".to_string()));
+        }
+    }
+
+    Ok(())
+}
+
+#[handler]
 pub async fn get_project_context(
     req: &mut Request,
     depot: &mut Depot,

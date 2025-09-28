@@ -100,6 +100,14 @@ function App() {
         }
       />
       <Route
+        path="/p/:projectId/context"
+        element={
+          <AppRoute>
+            <MainApp />
+          </AppRoute>
+        }
+      />
+      <Route
         path="/projects"
         element={
           <AppRoute>

@@ -42,9 +42,18 @@ export const useChat = () => {
           chatStore.list.push(message.conversation_id);
         }
       } else {
-        // Update existing conversation messages
-        conversation.messages = message.messages;
-        conversation.message_count = message.messages.length;
+        // If we're expecting initial message and server returns empty, keep our optimistic update
+        if (chatStore.expectingInitialMessage === message.conversation_id && 
+            message.messages.length === 0 && 
+            conversation.messages && 
+            conversation.messages.length > 0) {
+          // Keep the optimistic message, don't overwrite with empty array
+          chatStore.expectingInitialMessage = undefined; // Clear the flag
+        } else {
+          // Normal update - replace messages
+          conversation.messages = message.messages;
+          conversation.message_count = message.messages.length;
+        }
       }
     };
 
@@ -105,12 +114,43 @@ export const useChat = () => {
         },
       });
 
+      // If we have a pending message, add it optimistically to the conversation
       if (chatStore.pendingFirstChat) {
-        sendMessage(chatStore.pendingFirstChat);
-        chatStore.pendingFirstChat = "";
+        const pendingMessage = chatStore.pendingFirstChat;
+        chatStore.pendingFirstChat = ""; // Clear it to prevent duplicate sends
+        
+        // Add the message to the conversation immediately for UI display
+        if (!chatStore.map[message.conversation.id].messages) {
+          chatStore.map[message.conversation.id].messages = [];
+        }
+        
+        const userMessage: Message = {
+          id: crypto.randomUUID(),
+          content: pendingMessage,
+          role: "user",
+          createdAt: new Date().toISOString(),
+        };
+        chatStore.map[message.conversation.id].messages.push(userMessage);
+        
+        // Mark that we're expecting this conversation to have initial messages
+        chatStore.expectingInitialMessage = message.conversation.id;
+        
+        // Navigate to trigger subscription
+        navigate(`/p/${chatStore.project_id}/c/${message.conversation.id}`);
+        
+        // Send the message after ensuring subscription
+        setTimeout(() => {
+          // Send the message via WebSocket directly
+          wsService.sendChatMessage(
+            chatStore.project_id,
+            message.conversation.id,
+            pendingMessage
+          );
+        }, 500);
+      } else {
+        // No pending message, just navigate
+        navigate(`/p/${chatStore.project_id}/c/${message.conversation.id}`);
       }
-
-      navigate(`/p/${chatStore.project_id}/c/${message.conversation.id}`);
     };
 
     const handleConversationDetails = (
@@ -139,6 +179,12 @@ export const useChat = () => {
         (id) => id !== message.conversation_id
       );
 
+      // Close any tabs associated with this conversation
+      const chatTabs = tabsStore.tabs.filter(t => 
+        t.type === 'chat' && t.metadata.conversationId === message.conversation_id
+      );
+      chatTabs.forEach(tab => tabsActions.removeTab(tab.id));
+
       // If we're viewing the deleted conversation, switch to another one or navigate to /new
       if (chatStore.conversation_id === message.conversation_id) {
         if (chatStore.list.length > 0) {
@@ -164,6 +210,14 @@ export const useChat = () => {
       chatStore.list = chatStore.list.filter(
         (id) => !message.conversation_ids.includes(id)
       );
+
+      // Close any tabs associated with the deleted conversations
+      const chatTabsToRemove = tabsStore.tabs.filter(t => 
+        t.type === 'chat' && 
+        t.metadata.conversationId && 
+        message.conversation_ids.includes(t.metadata.conversationId)
+      );
+      chatTabsToRemove.forEach(tab => tabsActions.removeTab(tab.id));
 
       // If we're viewing one of the deleted conversations, switch to another one or navigate to /new
       if (
@@ -215,11 +269,12 @@ export const useChat = () => {
           partialContent: "",
           activeTools: [],
           isComplete: false,
+          events: [],
         };
       }
 
-      const activeTools =
-        chatStore.streaming[message.conversationId].activeTools;
+      const streamState = chatStore.streaming[message.conversationId];
+      const activeTools = streamState.activeTools;
       if (!activeTools.find((t) => t.toolUsageId === message.toolUsageId)) {
         activeTools.push({
           tool: message.tool,
@@ -227,7 +282,19 @@ export const useChat = () => {
           startTime: Date.now(),
           status: "active",
         });
-      } else {
+        
+        // Add tool start event
+        if (streamState.events) {
+          streamState.events.push({
+            type: "tool_start",
+            timestamp: Date.now(),
+            tool: {
+              toolUsageId: message.toolUsageId,
+              toolName: message.tool,
+              status: "active",
+            },
+          });
+        }
       }
 
     };
@@ -237,10 +304,11 @@ export const useChat = () => {
       toolUsageId: string;
       executionTimeMs?: number;
       conversationId: string;
+      output?: any;
     }) => {
       if (chatStore.streaming[message.conversationId]) {
-        const activeTools =
-          chatStore.streaming[message.conversationId].activeTools;
+        const streamState = chatStore.streaming[message.conversationId];
+        const activeTools = streamState.activeTools;
         const toolIndex = activeTools.findIndex(
           (t) => t.toolUsageId === message.toolUsageId
         );
@@ -250,6 +318,21 @@ export const useChat = () => {
           activeTools[toolIndex].completedAt = Date.now();
           if (message.executionTimeMs) {
             activeTools[toolIndex].executionTime = message.executionTimeMs;
+          }
+          
+          // Add to event timeline
+          if (streamState.events) {
+            streamState.events.push({
+              type: "tool_complete",
+              timestamp: Date.now(),
+              tool: {
+                toolUsageId: message.toolUsageId,
+                toolName: activeTools[toolIndex].tool,
+                status: "completed",
+                executionTime: message.executionTimeMs,
+                output: message.output,
+              },
+            });
           }
         }
       }
@@ -409,6 +492,7 @@ export const useChat = () => {
     isConnected: wsService.isConnected(),
     isStreaming: wsService.isStreaming(snap.conversation_id || ""),
     isLoadingMessages: snap.conversation_id ? snap.loadingMessages[snap.conversation_id] || false : false,
+    streamingState: snap.conversation_id ? snap.streaming[snap.conversation_id] : null,
 
     // Actions
     sendMessage,

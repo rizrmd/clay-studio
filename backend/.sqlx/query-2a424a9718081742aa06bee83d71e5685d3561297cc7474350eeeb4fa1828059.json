@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE analyses \n        SET \n            title = COALESCE($3, title),\n            script_content = COALESCE($4, script_content),\n            updated_at = NOW()\n        WHERE id = $1 AND project_id = $2\n        RETURNING id, title\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "title",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Varchar",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "2a424a9718081742aa06bee83d71e5685d3561297cc7474350eeeb4fa1828059"
+}

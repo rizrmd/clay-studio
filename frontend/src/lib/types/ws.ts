@@ -134,7 +134,8 @@ export type ClientMessage =
     }
   | { type: "delete_conversation"; conversation_id: string }
   | { type: "bulk_delete_conversations"; conversation_ids: string[] }
-  | { type: "get_conversation_messages"; conversation_id: string };
+  | { type: "get_conversation_messages"; conversation_id: string }
+  | { type: "retry_last_message"; project_id: string; conversation_id: string };
 
 export interface StreamingState {
   messageId: string;

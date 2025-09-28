@@ -10,7 +10,8 @@ export type TabType =
   | 'datasource_edit' 
   | 'datasource_new'
   | 'datasource_list'
-  | 'analysis';
+  | 'analysis'
+  | 'context';
 
 export interface Tab {
   id: string;
@@ -287,6 +288,17 @@ export const tabsActions = {
       }
     }
     
+    // For context tabs, only allow one per project
+    if (type === 'context') {
+      const existingContextTab = tabsStore.tabs.find(t => 
+        t.type === 'context' && t.metadata.projectId === metadata.projectId
+      );
+      if (existingContextTab) {
+        tabsActions.setActiveTab(existingContextTab.id);
+        return existingContextTab.id;
+      }
+    }
+    
     // Check if there's already an active tab of this type (fallback for general types)
     const activeTabId = tabsStore.activeTabByType[type];
     if (activeTabId) {
@@ -313,7 +325,18 @@ export const tabsActions = {
   },
 
   openInNewTab: (type: TabType, metadata: Tab['metadata'], title?: string) => {
-    // Always create a new tab, even if there's already an active one of this type
+    // For context tabs, only allow one per project
+    if (type === 'context') {
+      const existingContextTab = tabsStore.tabs.find(t => 
+        t.type === 'context' && t.metadata.projectId === metadata.projectId
+      );
+      if (existingContextTab) {
+        tabsActions.setActiveTab(existingContextTab.id);
+        return existingContextTab.id;
+      }
+    }
+    
+    // Always create a new tab for other types
     return tabsActions.addTab({
       type,
       title: title || tabsActions.getDefaultTitle(type, metadata),
@@ -339,6 +362,8 @@ export const tabsActions = {
         return 'Datasources';
       case 'analysis':
         return metadata.analysisTitle || 'Analysis';
+      case 'context':
+        return 'Context';
       default:
         return 'Tab';
     }

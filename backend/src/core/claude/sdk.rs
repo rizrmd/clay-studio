@@ -8,7 +8,7 @@ use uuid::Uuid;
 use super::types::{AskUserOption, ClaudeMessage, QueryRequest};
 use crate::utils::log_organizer::auto_organize_logs;
 use crate::utils::command_logger::{CommandLogger, CommandExecution};
-use crate::core::mcp::handlers::McpHandlers;
+use crate::core::mcp::handlers::tools::get_all_available_mcp_tools;
 
 #[derive(Debug, Clone)]
 pub struct ClaudeSDK {
@@ -21,9 +21,6 @@ pub struct ClaudeSDK {
 
 impl ClaudeSDK {
     /// Get all available MCP tools for allowed tools configuration
-    fn get_available_mcp_tools() -> Vec<String> {
-        McpHandlers::get_all_available_mcp_tools()
-    }
 
     pub fn new(client_id: Uuid, oauth_token: Option<String>) -> Self {
         let clients_base =
@@ -75,11 +72,18 @@ impl ClaudeSDK {
                             Ok(json) => {
                                 // Check if it has the expected structure with centralized server URLs
                                 if let Some(mcp_servers) = json.get("mcpServers") {
-                                    let data_analysis_valid = mcp_servers
-                                        .get("data-analysis")
-                                        .and_then(|da| da.get("url"))
+                                    let operation_valid = mcp_servers
+                                        .get("operation")
+                                        .and_then(|op| op.get("url"))
                                         .and_then(|url| url.as_str())
-                                        .map(|url| url.contains(":7670/data-analysis/"))
+                                        .map(|url| url.contains(":7670/operation/"))
+                                        .unwrap_or(false);
+                                    
+                                    let analysis_valid = mcp_servers
+                                        .get("analysis")
+                                        .and_then(|an| an.get("url"))
+                                        .and_then(|url| url.as_str())
+                                        .map(|url| url.contains(":7670/analysis/"))
                                         .unwrap_or(false);
                                     
                                     let interaction_valid = mcp_servers
@@ -89,7 +93,7 @@ impl ClaudeSDK {
                                         .map(|url| url.contains(":7670/interaction/"))
                                         .unwrap_or(false);
                                     
-                                    data_analysis_valid && interaction_valid
+                                    operation_valid && analysis_valid && interaction_valid
                                 } else {
                                     false
                                 }
@@ -133,9 +137,13 @@ impl ClaudeSDK {
             // Use centralized MCP server on port 7670 with URL path-based routing
             let mcp_servers = json!({
                 "mcpServers": {
-                    "data-analysis": {
+                    "operation": {
                         "type": "http",
-                        "url": format!("http://localhost:7670/data-analysis/{}/{}", self.client_id, project_id)
+                        "url": format!("http://localhost:7670/operation/{}/{}", self.client_id, project_id)
+                    },
+                    "analysis": {
+                        "type": "http",
+                        "url": format!("http://localhost:7670/analysis/{}/{}", self.client_id, project_id)
                     },
                     "interaction": {
                         "type": "http",
@@ -250,8 +258,7 @@ impl ClaudeSDK {
         let claude_cli_path = self
             .client_dir
             .join("node_modules/@anthropic-ai/claude-code/cli.js");
-        let allowed_tools_debug = Self::get_available_mcp_tools().join(",");
-        let command_debug = format!("{} {} -p --verbose --allowedTools \"{}\" --output-format stream-json [prompt]", bun_executable.display(), claude_cli_path.display(), allowed_tools_debug);
+        let command_debug = format!("{} {} -p --verbose --output-format stream-json [prompt]", bun_executable.display(), claude_cli_path.display());
         let command_debug_clone = command_debug.clone();
         let command_debug_clone2 = command_debug.clone();
         let command_debug_clone3 = command_debug.clone();
@@ -283,14 +290,21 @@ impl ClaudeSDK {
                 .arg("-") // Read from stdin
                 .arg("--verbose");
 
-            // Add allowed tools dynamically
-            let allowed_tools = Self::get_available_mcp_tools().join(",");
-            cmd_builder.arg("--allowedTools")
-                .arg(&allowed_tools);
+            // Add allowed tools - dynamically get all MCP tools plus WebSearch and WebFetch
+            let mut allowed_mcp_tools = get_all_available_mcp_tools();
+            // Add WebSearch and WebFetch to allowed tools
+            allowed_mcp_tools.push("WebSearch".to_string());
+            allowed_mcp_tools.push("WebFetch".to_string());
+            
+            if !allowed_mcp_tools.is_empty() {
+                let allowed_tools_list = allowed_mcp_tools.join(",");
+                cmd_builder.arg("--allowedTools")
+                    .arg(allowed_tools_list);
+            }
 
             // Add disallowed tools
             cmd_builder.arg("--disallowedTools")
-                .arg("Bash,Glob,LS");
+                .arg("Bash,Glob,LS,Read,Edit,MultiEdit,Grep,NotebookEdit,ExitPlanMode,BashOutput,KillBash");
 
             cmd_builder.arg("--output-format")
                 .arg("stream-json")
@@ -873,7 +887,7 @@ impl ClaudeSDK {
         };
         
         // Test with a dummy client/project ID to see if server responds
-        let url = "http://localhost:7670/data-analysis/test-client/test-project";
+        let url = "http://localhost:7670/operation/test-client/test-project";
         
         let test_request = serde_json::json!({
             "jsonrpc": "2.0",
