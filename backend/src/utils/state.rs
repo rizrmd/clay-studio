@@ -250,7 +250,7 @@ impl AppState {
     ) -> Result<Vec<Message>, Box<dyn std::error::Error + Send + Sync>> {
         // Fetch messages from database
         let messages = sqlx::query(
-            "SELECT id, content, role, processing_time_ms, created_at 
+            "SELECT id, content, role, processing_time_ms, created_at, progress_content 
              FROM messages 
              WHERE conversation_id = $1 
              AND (is_forgotten = false OR is_forgotten IS NULL)
@@ -319,6 +319,7 @@ impl AppState {
                     .into(),
                 file_attachments: None,
                 tool_usages,
+                progress_content: row.get("progress_content"),
             };
 
             cached_messages.push(message);

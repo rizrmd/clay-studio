@@ -99,6 +99,14 @@ export const datasourcesActions = {
     }
   },
 
+  clearDatasources: () => {
+    datasourcesStore.datasources = [];
+    datasourcesStore.isLoading = false;
+    datasourcesStore.error = null;
+    datasourcesStore.editingDatasource = null;
+    datasourcesStore.testingConnection = null;
+  },
+
   // API Actions
   async loadDatasources(projectId: string) {
     try {

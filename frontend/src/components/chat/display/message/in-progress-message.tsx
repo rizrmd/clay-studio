@@ -67,6 +67,7 @@ export function InProgressMessage({
   }> = [];
   
   let contentBuffer = "";
+  let latestTodos: Array<{ content: string; status: "pending" | "in_progress" | "completed" }> = [];
 
   let firstEventTimestamp: number | null = null;
   
@@ -152,27 +153,37 @@ export function InProgressMessage({
           }
           
           // Try to extract todos from the tool output
-          let todos = null;
+          // For TodoWrite, the todos might be in output (which could be parameters for reconstructed events)
+          let todos: Array<{ content: string; status: "pending" | "in_progress" | "completed" }> | null = null;
+          
+          
           try {
-            // TodoWrite tool's output should contain the todos
-            if (event.tool.output) {
-              // The output might be the todos directly or wrapped in an object
-              if (typeof event.tool.output === "object") {
-                if (Array.isArray(event.tool.output)) {
-                  // Output is directly the todos array
-                  todos = event.tool.output;
-                } else if (event.tool.output.todos) {
-                  // Output has a todos property
-                  todos = event.tool.output.todos;
+            // Check both output and parameters fields since TodoWrite stores todos in parameters
+            const dataSource = event.tool.output || (event.tool as any).parameters;
+            
+            if (dataSource) {
+              // The data might be the todos directly or wrapped in an object
+              if (typeof dataSource === "object") {
+                if (Array.isArray(dataSource)) {
+                  // Data is directly the todos array
+                  todos = dataSource;
+                } else if (dataSource.todos) {
+                  // Data has a todos property (this is the expected format)
+                  todos = dataSource.todos;
+                } else if (dataSource.parameters?.todos) {
+                  // Data contains parameters with todos (from backend)
+                  todos = dataSource.parameters.todos;
                 }
-              } else if (typeof event.tool.output === "string") {
+              } else if (typeof dataSource === "string") {
                 // Try to parse JSON string
                 try {
-                  const parsed = JSON.parse(event.tool.output);
+                  const parsed = JSON.parse(dataSource);
                   if (Array.isArray(parsed)) {
                     todos = parsed;
                   } else if (parsed.todos) {
                     todos = parsed.todos;
+                  } else if (parsed.parameters?.todos) {
+                    todos = parsed.parameters.todos;
                   }
                 } catch {
                   // Not valid JSON, ignore
@@ -184,24 +195,16 @@ export function InProgressMessage({
           }
           
           if (todos && Array.isArray(todos) && todos.length > 0) {
-            // Remove the previous TodoWrite tool indicator and add the todos
+            // Save the latest todos - will be rendered at the end
+            latestTodos = todos as Array<{ content: string; status: "pending" | "in_progress" | "completed" }>;
+            
+            // Remove the TodoWrite tool indicator from processedEvents
             const toolEventIndex = processedEvents.findIndex(
               e => e.type === "tool" && e.toolUsageId === event.tool?.toolUsageId
             );
             if (toolEventIndex !== -1) {
-              // Replace the tool indicator with the todos
-              processedEvents[toolEventIndex] = {
-                type: "todos",
-                todos: todos,
-                timestamp: event.timestamp
-              };
-            } else {
-              // Add as new event if tool indicator not found
-              processedEvents.push({
-                type: "todos",
-                todos: todos,
-                timestamp: event.timestamp
-              });
+              // Remove the tool indicator completely
+              processedEvents.splice(toolEventIndex, 1);
             }
           }
         }
@@ -213,6 +216,15 @@ export function InProgressMessage({
   if (contentBuffer) {
     processedEvents.push({ type: "content", content: contentBuffer });
   }
+  
+  // Add latest todos at the end if we have them
+  if (latestTodos.length > 0) {
+    processedEvents.push({
+      type: "todos",
+      todos: latestTodos
+    });
+  }
+
 
   return (
     <div

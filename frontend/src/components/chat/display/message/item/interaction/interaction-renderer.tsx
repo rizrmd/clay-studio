@@ -57,6 +57,7 @@ export function InteractionRenderer({
   const interactionSpec = useMemo(() => {
     if (!toolOutput) return null;
 
+
     // Handle array outputs (take first element)
     let actualOutput = toolOutput;
     if (Array.isArray(toolOutput) && toolOutput.length > 0) {
@@ -403,6 +404,7 @@ export function hasInteraction(toolOutput: any): boolean {
   if (!toolOutput) {
     return false;
   }
+
 
   // If it's an array, check the first element
   if (Array.isArray(toolOutput) && toolOutput.length > 0) {

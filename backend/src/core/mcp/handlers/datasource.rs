@@ -293,9 +293,21 @@ impl McpHandlers {
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| "Missing required parameter: datasource_id".to_string())?;
 
-            // Get connector
-            let source = self.get_datasource_connector(datasource_id).await?;
-            let mut connector = create_connector(&source.source_type, &source.connection_config)
+            // Get datasource info using shared service (with caching)
+            let datasource = shared_service::get_datasource_with_validation(
+                datasource_id,
+                &self.project_id,
+                &self.db_pool
+            ).await.map_err(|e| format!("Failed to get datasource: {}", e))?;
+            
+            // Add datasource ID to config for pooling support
+            let mut config_with_id = datasource.connection_config.clone();
+            if let Some(config_obj) = config_with_id.as_object_mut() {
+                config_obj.insert("id".to_string(), Value::String(datasource_id.to_string()));
+            }
+            
+            // Create connector using the same mechanism for consistency
+            let mut connector = create_connector(&datasource.source_type, &config_with_id)
                 .await
                 .map_err(|e| format!("Failed to create connector: {}", e))?;
 
@@ -307,7 +319,7 @@ impl McpHandlers {
                         "connected": true,
                         "datasource": {
                             "id": datasource_id,
-                            "name": source.name
+                            "name": datasource.name
                         },
                         "message": "Connection test successful"
                     });
@@ -319,7 +331,7 @@ impl McpHandlers {
                         "connected": false,
                         "datasource": {
                             "id": datasource_id,
-                            "name": source.name
+                            "name": datasource.name
                         },
                         "error": e.to_string()
                     });
@@ -485,26 +497,31 @@ impl McpHandlers {
         &self,
         datasource_id: &str,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        // Get connector
-        let source = self.get_datasource_connector(datasource_id).await.map_err(
-            |e| -> Box<dyn std::error::Error + Send + Sync> {
-                Box::new(std::io::Error::other(e.message))
-            },
-        )?;
-        let connector = create_connector(&source.source_type, &source.connection_config)
+        // Get datasource info using shared service (with caching)
+        let datasource = shared_service::get_datasource_with_validation(
+            datasource_id,
+            &self.project_id,
+            &self.db_pool
+        ).await.map_err(|e| format!("Failed to get datasource: {}", e))?;
+        
+        // Add datasource ID to config for pooling support
+        let mut config_with_id = datasource.connection_config.clone();
+        if let Some(config_obj) = config_with_id.as_object_mut() {
+            config_obj.insert("id".to_string(), Value::String(datasource_id.to_string()));
+        }
+        
+        // Create connector using the same mechanism as datasource_query
+        // This ensures we use pooling where available
+        let connector = create_connector(&datasource.source_type, &config_with_id)
             .await
             .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
-                Box::new(std::io::Error::other(
-                    format!("{}", e),
-                ))
+                Box::new(std::io::Error::other(format!("Failed to create connector: {}", e)))
             })?;
 
         // Run inspection
         let analysis = connector.analyze_database().await.map_err(
             |e| -> Box<dyn std::error::Error + Send + Sync> {
-                Box::new(std::io::Error::other(
-                    format!("{}", e),
-                ))
+                Box::new(std::io::Error::other(format!("Database analysis failed: {}", e)))
             },
         )?;
 
@@ -520,12 +537,13 @@ impl McpHandlers {
         let response_data = json!({
             "datasource": {
                 "id": datasource_id,
-                "name": source.name
+                "name": datasource.name
             },
             "analysis": analysis,
             "message": "Database inspection completed successfully",
             "metadata": {
-                "schema_cached": true
+                "schema_cached": true,
+                "using_connection_pool": true
             }
         });
         Ok(serde_json::to_string(&response_data)?)

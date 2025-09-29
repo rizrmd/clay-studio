@@ -31,9 +31,7 @@ pub async fn get_schema(
         .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?
         .ok_or_else(|| AppError::NotFound("Datasource not found".to_string()))?;
 
-    let schema_info_str: Option<String> = datasource_row.get("schema_info");
-    let schema_info: Option<Value> = schema_info_str
-        .and_then(|s| serde_json::from_str(&s).ok());
+    let schema_info: Option<Value> = datasource_row.get("schema_info");
 
     if let Some(schema) = schema_info {
         res.render(Json(schema));
@@ -137,26 +135,39 @@ pub async fn get_table_structure(
         .ok_or_else(|| AppError::BadRequest("Missing datasource_id".to_string()))?;
     let table_name = req.param::<String>("table_name")
         .ok_or_else(|| AppError::BadRequest("Missing table_name".to_string()))?;
+    
+    // Check if force_refresh is requested
+    let force_refresh = req.query::<bool>("force_refresh").unwrap_or(false);
 
-    // First check if we have cached schema info for this table
-    let schema_info_row = sqlx::query("SELECT schema_info FROM data_sources WHERE id = $1")
-        .bind(&datasource_id)
-        .fetch_optional(&state.db_pool)
-        .await
-        .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
+    // First check if we have cached schema info for this table (unless force_refresh is true)
+    if !force_refresh {
+        let schema_info_row = sqlx::query("SELECT schema_info FROM data_sources WHERE id = $1")
+            .bind(&datasource_id)
+            .fetch_optional(&state.db_pool)
+            .await
+            .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
 
-    if let Some(row) = schema_info_row {
-        let cached_schema_info: Option<Value> = row.get("schema_info");
-        if let Some(schema_value) = cached_schema_info {
-            if let Some(tables_obj) = schema_value.get("tables") {
-                if let Some(table_structure) = tables_obj.get(&table_name) {
-                    if let Ok(structure) = serde_json::from_value::<TableStructure>(table_structure.clone()) {
-                        res.render(Json(structure));
-                        return Ok(());
+        if let Some(row) = schema_info_row {
+            let cached_schema_info: Option<Value> = row.get("schema_info");
+            if let Some(schema_value) = cached_schema_info {
+                if let Some(tables_obj) = schema_value.get("tables") {
+                    if let Some(table_structure) = tables_obj.get(&table_name) {
+                        if let Ok(structure) = serde_json::from_value::<TableStructure>(table_structure.clone()) {
+                            // Check if the cached structure has actual data (not empty columns)
+                            if !structure.columns.is_empty() {
+                                println!("DEBUG: Returning cached table structure with {} columns", structure.columns.len());
+                                res.render(Json(structure));
+                                return Ok(());
+                            }
+                            // If columns are empty, fall through to fetch fresh data
+                            println!("DEBUG: Cached table structure has empty columns, fetching fresh data");
+                        }
                     }
                 }
             }
         }
+    } else {
+        println!("DEBUG: Force refresh requested, bypassing cache");
     }
 
     // Get datasource and verify ownership using cache
@@ -165,11 +176,16 @@ pub async fn get_table_structure(
     let source_type = cached_datasource.datasource_type.clone();
     let mut config = cached_datasource.connection_config.clone();
     
+    println!("DEBUG: Getting table structure for datasource_id: {}, table: {}, source_type: {}", datasource_id, table_name, source_type);
+    println!("DEBUG: Config before modification: {:?}", config);
+    
     // Add datasource ID to config for the connector
     config.as_object_mut()
         .ok_or_else(|| AppError::InternalServerError("Invalid config format".to_string()))?
         .insert("id".to_string(), Value::String(datasource_id.clone()));
 
+    println!("DEBUG: Config after adding ID: {:?}", config);
+    
     // Get table structure based on source type using cached connection pools
     let result = match source_type.as_str() {
         "postgresql" => {
@@ -224,8 +240,8 @@ pub async fn update_schema_info_with_table_structure(
 
     let mut schema_info: Value = schema_info_row
         .and_then(|row| {
-            let schema_str: Option<String> = row.get("schema_info");
-            schema_str.and_then(|s| serde_json::from_str(&s).ok())
+            let schema_json: Option<Value> = row.get("schema_info");
+            schema_json
         })
         .unwrap_or_else(|| serde_json::json!({}));
 
@@ -284,16 +300,179 @@ async fn list_sqlserver_tables(
 
 async fn get_postgres_table_structure(
     _datasource_id: &str,
-    _config: &Value,
-    _table_name: &str,
+    config: &Value,
+    table_name: &str,
 ) -> Result<TableStructure, Box<dyn std::error::Error + Send + Sync>> {
-    // TODO: Move implementation from original datasources.rs
+    use super::types::{TableColumn, ForeignKeyInfo, IndexInfo};
+    
+    // Get the schema name from config, default to 'public'
+    let schema_name = config.as_object()
+        .and_then(|obj| obj.get("schema"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("public");
+    
+    println!("DEBUG: Using schema '{}' for table '{}'", schema_name, table_name);
+    
+    // Build connection URL
+    let connection_url = if let Some(url) = config.as_str() {
+        url.to_string()
+    } else if let Some(obj) = config.as_object() {
+        if let Some(url) = obj.get("url").and_then(|v| v.as_str()) {
+            url.to_string()
+        } else {
+            let host = obj.get("host").and_then(|v| v.as_str()).unwrap_or("localhost");
+            let port = obj.get("port").and_then(|v| v.as_u64()).unwrap_or(5432);
+            let database = obj.get("database").and_then(|v| v.as_str()).unwrap_or("");
+            let user = obj.get("user").and_then(|v| v.as_str())
+                .or_else(|| obj.get("username").and_then(|v| v.as_str()))
+                .unwrap_or("");
+            let password = obj.get("password").and_then(|v| v.as_str()).unwrap_or("");
+            
+            format!("postgresql://{}:{}@{}:{}/{}", user, password, host, port, database)
+        }
+    } else {
+        return Err("Invalid configuration format".into());
+    };
+
+    // Connect to database
+    let pool = sqlx::postgres::PgPool::connect(&connection_url).await?;
+    
+    // Get column information
+    let columns_query = r#"
+        SELECT 
+            c.column_name,
+            c.data_type,
+            c.is_nullable,
+            c.column_default,
+            c.character_maximum_length,
+            c.numeric_precision,
+            c.numeric_scale,
+            CASE WHEN pk.column_name IS NOT NULL THEN true ELSE false END as is_primary_key,
+            CASE WHEN fk.column_name IS NOT NULL THEN true ELSE false END as is_foreign_key
+        FROM information_schema.columns c
+        LEFT JOIN (
+            SELECT ku.column_name
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage ku
+                ON tc.constraint_name = ku.constraint_name
+                AND tc.table_schema = ku.table_schema
+            WHERE tc.constraint_type = 'PRIMARY KEY'
+                AND tc.table_name = $1
+                AND tc.table_schema = $2
+        ) pk ON c.column_name = pk.column_name
+        LEFT JOIN (
+            SELECT DISTINCT ku.column_name
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage ku
+                ON tc.constraint_name = ku.constraint_name
+                AND tc.table_schema = ku.table_schema
+            WHERE tc.constraint_type = 'FOREIGN KEY'
+                AND tc.table_name = $1
+                AND tc.table_schema = $2
+        ) fk ON c.column_name = fk.column_name
+        WHERE c.table_name = $1
+            AND c.table_schema = $2
+        ORDER BY c.ordinal_position
+    "#;
+    
+    let column_rows = sqlx::query(columns_query)
+        .bind(table_name)
+        .bind(schema_name)
+        .fetch_all(&pool)
+        .await?;
+    
+    let mut columns = Vec::new();
+    let mut primary_keys = Vec::new();
+    
+    for row in column_rows {
+        let column_name: String = row.get("column_name");
+        let is_primary_key: bool = row.get("is_primary_key");
+        
+        if is_primary_key {
+            primary_keys.push(column_name.clone());
+        }
+        
+        columns.push(TableColumn {
+            name: column_name,
+            data_type: row.get("data_type"),
+            is_nullable: row.get::<&str, _>("is_nullable") == "YES",
+            column_default: row.get("column_default"),
+            is_primary_key,
+            is_foreign_key: row.get("is_foreign_key"),
+            character_maximum_length: row.get("character_maximum_length"),
+            numeric_precision: row.get("numeric_precision"),
+            numeric_scale: row.get("numeric_scale"),
+        });
+    }
+    
+    // Get foreign key information
+    let fk_query = r#"
+        SELECT
+            kcu.column_name,
+            ccu.table_name AS referenced_table,
+            ccu.column_name AS referenced_column
+        FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu
+            ON tc.constraint_name = kcu.constraint_name
+            AND tc.table_schema = kcu.table_schema
+        JOIN information_schema.constraint_column_usage ccu
+            ON ccu.constraint_name = tc.constraint_name
+            AND ccu.table_schema = tc.table_schema
+        WHERE tc.constraint_type = 'FOREIGN KEY'
+            AND tc.table_name = $1
+            AND tc.table_schema = $2
+    "#;
+    
+    let fk_rows = sqlx::query(fk_query)
+        .bind(table_name)
+        .bind(schema_name)
+        .fetch_all(&pool)
+        .await?;
+    
+    let foreign_keys: Vec<ForeignKeyInfo> = fk_rows.iter().map(|row| {
+        ForeignKeyInfo {
+            column_name: row.get("column_name"),
+            referenced_table: row.get("referenced_table"),
+            referenced_column: row.get("referenced_column"),
+        }
+    }).collect();
+    
+    // Get index information
+    let index_query = r#"
+        SELECT
+            i.indexname as name,
+            array_agg(a.attname ORDER BY array_position(ix.indkey, a.attnum)) as columns,
+            ix.indisunique as is_unique
+        FROM pg_indexes i
+        JOIN pg_class c ON c.relname = i.tablename
+        JOIN pg_index ix ON ix.indexrelid = (i.schemaname || '.' || i.indexname)::regclass
+        JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = ANY(ix.indkey)
+        WHERE i.tablename = $1
+            AND i.schemaname = $2
+            AND NOT ix.indisprimary
+        GROUP BY i.indexname, ix.indisunique
+    "#;
+    
+    let index_rows = sqlx::query(index_query)
+        .bind(table_name)
+        .bind(schema_name)
+        .fetch_all(&pool)
+        .await?;
+    
+    let indexes: Vec<IndexInfo> = index_rows.iter().map(|row| {
+        IndexInfo {
+            name: row.get("name"),
+            columns: row.get("columns"),
+            is_unique: row.get("is_unique"),
+        }
+    }).collect();
+    
     Ok(TableStructure {
-        table_name: _table_name.to_string(),
-        columns: vec![],
-        primary_keys: vec![],
-        foreign_keys: vec![],
-        indexes: vec![],
+        table_name: table_name.to_string(),
+        columns,
+        primary_keys,
+        foreign_keys,
+        indexes,
     })
 }
 

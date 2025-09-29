@@ -411,6 +411,10 @@ impl DataSourceConnector for PostgreSQLConnector {
 
     async fn execute_query(&self, query: &str, limit: i32) -> Result<Value, Box<dyn Error + Send + Sync>> {
         let pool = self.get_pool().await?;
+        
+        // Log the schema being used
+        info!("Executing query with schema: {}", self.schema);
+        info!("Original query: {}", query);
 
         // No need to set search_path here anymore - it's set in the connection string
         // Add LIMIT if not present
@@ -419,10 +423,14 @@ impl DataSourceConnector for PostgreSQLConnector {
         } else {
             format!("{} LIMIT {}", query, limit)
         };
+        
+        info!("Final query to execute: {}", query_with_limit);
 
         let start = std::time::Instant::now();
         let rows = sqlx::query(&query_with_limit).fetch_all(&pool).await?;
         let execution_time_ms = start.elapsed().as_millis() as i64;
+        
+        debug!("Query returned {} rows", rows.len());
 
         if rows.is_empty() {
             return Ok(json!({
@@ -446,22 +454,51 @@ impl DataSourceConnector for PostgreSQLConnector {
         for row in rows.iter() {
             let mut row_data = Vec::new();
             for (i, _col) in columns.iter().enumerate() {
-                // Try to get value as different types, including PostgreSQL-specific types
-                if let Ok(val) = row.try_get::<String, _>(i) {
-                    row_data.push(val);
-                } else if let Ok(val) = row.try_get::<Uuid, _>(i) {
-                    row_data.push(val.to_string());
-                } else if let Ok(val) = row.try_get::<BigDecimal, _>(i) {
-                    row_data.push(val.to_string());
-                } else if let Ok(val) = row.try_get::<i32, _>(i) {
-                    row_data.push(val.to_string());
-                } else if let Ok(val) = row.try_get::<i64, _>(i) {
-                    row_data.push(val.to_string());
-                } else if let Ok(val) = row.try_get::<f64, _>(i) {
-                    row_data.push(val.to_string());
-                } else if let Ok(val) = row.try_get::<bool, _>(i) {
-                    row_data.push(val.to_string());
+                // Try to get value as different types, using Option to handle NULLs properly
+                if let Ok(val) = row.try_get::<Option<chrono::NaiveDateTime>, _>(i) {
+                    match val {
+                        Some(dt) => row_data.push(dt.to_string()),
+                        None => row_data.push("NULL".to_string()),
+                    }
+                } else if let Ok(val) = row.try_get::<Option<BigDecimal>, _>(i) {
+                    match val {
+                        Some(bd) => row_data.push(bd.to_string()),
+                        None => row_data.push("NULL".to_string()),
+                    }
+                } else if let Ok(val) = row.try_get::<Option<i64>, _>(i) {
+                    match val {
+                        Some(v) => row_data.push(v.to_string()),
+                        None => row_data.push("NULL".to_string()),
+                    }
+                } else if let Ok(val) = row.try_get::<Option<i32>, _>(i) {
+                    match val {
+                        Some(v) => row_data.push(v.to_string()),
+                        None => row_data.push("NULL".to_string()),
+                    }
+                } else if let Ok(val) = row.try_get::<Option<f64>, _>(i) {
+                    match val {
+                        Some(v) => row_data.push(v.to_string()),
+                        None => row_data.push("NULL".to_string()),
+                    }
+                } else if let Ok(val) = row.try_get::<Option<bool>, _>(i) {
+                    match val {
+                        Some(v) => row_data.push(v.to_string()),
+                        None => row_data.push("NULL".to_string()),
+                    }
+                } else if let Ok(val) = row.try_get::<Option<Uuid>, _>(i) {
+                    match val {
+                        Some(v) => row_data.push(v.to_string()),
+                        None => row_data.push("NULL".to_string()),
+                    }
+                } else if let Ok(val) = row.try_get::<Option<String>, _>(i) {
+                    match val {
+                        Some(v) => row_data.push(v),
+                        None => row_data.push("NULL".to_string()),
+                    }
                 } else {
+                    // If all else fails, log the column type and return NULL
+                    let col = &columns[i];
+                    eprintln!("[DEBUG] Failed to convert column {}: type info not handled", col);
                     row_data.push("NULL".to_string());
                 }
             }
@@ -553,22 +590,51 @@ impl DataSourceConnector for PostgreSQLConnector {
         for row in rows.iter() {
             let mut row_data = Vec::new();
             for (i, _col) in columns.iter().enumerate() {
-                // Try to get value as different types, including PostgreSQL-specific types
-                if let Ok(val) = row.try_get::<String, _>(i) {
-                    row_data.push(val);
-                } else if let Ok(val) = row.try_get::<Uuid, _>(i) {
-                    row_data.push(val.to_string());
-                } else if let Ok(val) = row.try_get::<BigDecimal, _>(i) {
-                    row_data.push(val.to_string());
-                } else if let Ok(val) = row.try_get::<i32, _>(i) {
-                    row_data.push(val.to_string());
-                } else if let Ok(val) = row.try_get::<i64, _>(i) {
-                    row_data.push(val.to_string());
-                } else if let Ok(val) = row.try_get::<f64, _>(i) {
-                    row_data.push(val.to_string());
-                } else if let Ok(val) = row.try_get::<bool, _>(i) {
-                    row_data.push(val.to_string());
+                // Try to get value as different types, using Option to handle NULLs properly
+                if let Ok(val) = row.try_get::<Option<chrono::NaiveDateTime>, _>(i) {
+                    match val {
+                        Some(dt) => row_data.push(dt.to_string()),
+                        None => row_data.push("NULL".to_string()),
+                    }
+                } else if let Ok(val) = row.try_get::<Option<BigDecimal>, _>(i) {
+                    match val {
+                        Some(bd) => row_data.push(bd.to_string()),
+                        None => row_data.push("NULL".to_string()),
+                    }
+                } else if let Ok(val) = row.try_get::<Option<i64>, _>(i) {
+                    match val {
+                        Some(v) => row_data.push(v.to_string()),
+                        None => row_data.push("NULL".to_string()),
+                    }
+                } else if let Ok(val) = row.try_get::<Option<i32>, _>(i) {
+                    match val {
+                        Some(v) => row_data.push(v.to_string()),
+                        None => row_data.push("NULL".to_string()),
+                    }
+                } else if let Ok(val) = row.try_get::<Option<f64>, _>(i) {
+                    match val {
+                        Some(v) => row_data.push(v.to_string()),
+                        None => row_data.push("NULL".to_string()),
+                    }
+                } else if let Ok(val) = row.try_get::<Option<bool>, _>(i) {
+                    match val {
+                        Some(v) => row_data.push(v.to_string()),
+                        None => row_data.push("NULL".to_string()),
+                    }
+                } else if let Ok(val) = row.try_get::<Option<Uuid>, _>(i) {
+                    match val {
+                        Some(v) => row_data.push(v.to_string()),
+                        None => row_data.push("NULL".to_string()),
+                    }
+                } else if let Ok(val) = row.try_get::<Option<String>, _>(i) {
+                    match val {
+                        Some(v) => row_data.push(v),
+                        None => row_data.push("NULL".to_string()),
+                    }
                 } else {
+                    // If all else fails, log the column type and return NULL
+                    let col = &columns[i];
+                    eprintln!("[DEBUG] Failed to convert column {}: type info not handled", col);
                     row_data.push("NULL".to_string());
                 }
             }

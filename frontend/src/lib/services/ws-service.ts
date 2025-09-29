@@ -408,10 +408,12 @@ class WebSocketService extends EventEmitter {
   }
 
   private handleStreamStart(messageId: string, conversationId: string): void {
+    // Create or update stream state
+    const existingStream = this.activeStreams.get(conversationId);
     const streamState: StreamingState = {
       messageId,
-      partialContent: "",
-      activeTools: [],
+      partialContent: existingStream?.partialContent || "",
+      activeTools: existingStream?.activeTools || [],
       isComplete: false,
     };
 
@@ -442,14 +444,27 @@ class WebSocketService extends EventEmitter {
     toolUsageId: string,
     conversationId: string
   ): void {
-    const stream = this.activeStreams.get(conversationId);
-    if (!stream) return;
+    // Get or create stream state (needed for replay after refresh)
+    let stream = this.activeStreams.get(conversationId);
+    if (!stream) {
+      // Create a minimal stream state for tool tracking
+      stream = {
+        messageId: "",
+        partialContent: "",
+        activeTools: [],
+        isComplete: false,
+      };
+      this.activeStreams.set(conversationId, stream);
+    }
 
-    stream.activeTools.push({
-      tool,
-      toolUsageId,
-      startTime: Date.now(),
-    });
+    // Only add if not already present
+    if (!stream.activeTools.find(t => t.toolUsageId === toolUsageId)) {
+      stream.activeTools.push({
+        tool,
+        toolUsageId,
+        startTime: Date.now(),
+      });
+    }
 
     this.emit("tool_started", { tool, toolUsageId, conversationId });
   }
@@ -461,14 +476,16 @@ class WebSocketService extends EventEmitter {
     output: any,
     conversationId: string
   ): void {
+    // Get stream if it exists (may not exist during replay)
     const stream = this.activeStreams.get(conversationId);
-    if (!stream) return;
+    if (stream) {
+      // Remove from active tools
+      stream.activeTools = stream.activeTools.filter(
+        (t) => t.toolUsageId !== toolUsageId
+      );
+    }
 
-    // Remove from active tools
-    stream.activeTools = stream.activeTools.filter(
-      (t) => t.toolUsageId !== toolUsageId
-    );
-
+    // Always emit the event even if no active stream (for replay scenarios)
     this.emit("tool_completed", {
       tool,
       toolUsageId,

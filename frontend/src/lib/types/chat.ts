@@ -35,6 +35,7 @@ export type Message = {
   file_attachments?: FileUploadResponse[];
   tool_usages?: ToolUsage[];
   todoWrite?: unknown; // Legacy field for TodoWrite functionality
+  progress_content?: string; // Stores internal thinking/progress messages separately
 };
 
 export type Conversation = {

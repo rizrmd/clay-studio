@@ -132,6 +132,18 @@ export const analysisActions = {
     analysisStore.error = error;
   },
   
+  clearAnalyses: () => {
+    analysisStore.analyses = [];
+    analysisStore.activeAnalysisId = null;
+    analysisStore.isLoading = false;
+    analysisStore.error = null;
+    analysisStore.jobs = {};
+    analysisStore.activeJobs = [];
+    analysisStore.schedules = [];
+    analysisStore.selectedAnalysisId = null;
+    analysisStore.executingAnalysisId = null;
+  },
+  
   // Analysis CRUD
   setAnalyses: (analyses: Analysis[]) => {
     analysisStore.analyses = analyses;

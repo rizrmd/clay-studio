@@ -265,14 +265,6 @@ export function ChatInput({
     const selectedMessage = userMessages[nextIndex].content;
     setInput(selectedMessage);
     multimodalInputActions.setLocalInput(activeConversationId, selectedMessage);
-
-    // Move caret to the beginning
-    setTimeout(() => {
-      if (textareaRef.current) {
-        textareaRef.current.setSelectionRange(0, 0);
-        textareaRef.current.focus();
-      }
-    }, 0);
   };
 
   const handleDownArrowPressed = () => {
@@ -293,14 +285,6 @@ export function ChatInput({
       setInput(selectedMessage);
       multimodalInputActions.setLocalInput(activeConversationId, selectedMessage);
     }
-
-    // Move caret to the beginning
-    setTimeout(() => {
-      if (textareaRef.current) {
-        textareaRef.current.setSelectionRange(0, 0);
-        textareaRef.current.focus();
-      }
-    }, 0);
   };
 
   // Only show connecting message for real conversations that aren't subscribed

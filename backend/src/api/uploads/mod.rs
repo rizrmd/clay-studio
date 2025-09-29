@@ -10,6 +10,76 @@ use std::fs;
 use std::path::Path;
 use chrono::Utc;
 
+#[handler]
+pub async fn handle_excel_download(req: &mut Request, res: &mut Response) -> Result<(), salvo::Error> {
+    let client_id = req.param::<String>("client_id").ok_or_else(|| {
+        salvo::Error::other("Missing client_id parameter")
+    })?;
+    
+    let project_id = req.param::<String>("project_id").ok_or_else(|| {
+        salvo::Error::other("Missing project_id parameter")
+    })?;
+    
+    let export_id = req.param::<String>("export_id").ok_or_else(|| {
+        salvo::Error::other("Missing export_id parameter")
+    })?;
+
+    // Find the Excel file in the excel_exports directory
+    let excel_dir = format!(".clients/{}/{}/excel_exports", client_id, project_id);
+    
+    if !Path::new(&excel_dir).exists() {
+        return Err(salvo::Error::other("Excel export directory not found"));
+    }
+
+    // Look for files that start with the export_id
+    let dir_entries = fs::read_dir(&excel_dir).map_err(|e| {
+        salvo::Error::other(format!("Failed to read excel directory: {}", e))
+    })?;
+
+    let mut excel_file_path = None;
+    for entry in dir_entries {
+        if let Ok(entry) = entry {
+            let file_name = entry.file_name();
+            let file_name_str = file_name.to_string_lossy();
+            if file_name_str.starts_with(&export_id) && file_name_str.ends_with(".xlsx") {
+                excel_file_path = Some(entry.path());
+                break;
+            }
+        }
+    }
+
+    let file_path = excel_file_path.ok_or_else(|| {
+        salvo::Error::other("Excel file not found")
+    })?;
+
+    // Extract pretty filename from the file path
+    // Format is: {export_id}_{pretty_name}.xlsx
+    let file_name = file_path.file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("export.xlsx");
+    
+    let pretty_filename = if let Some(underscore_pos) = file_name.find('_') {
+        // Extract everything after the first underscore
+        &file_name[underscore_pos + 1..]
+    } else {
+        // Fallback to the full filename if no underscore found
+        file_name
+    };
+
+    // Set Content-Disposition header for pretty download filename
+    res.headers_mut().insert(
+        "Content-Disposition",
+        format!("attachment; filename=\"{}\"", pretty_filename).parse().unwrap()
+    );
+
+    let named_file = NamedFile::builder(file_path).build().await.map_err(|e| {
+        salvo::Error::other(format!("Failed to serve excel file: {}", e))
+    })?;
+
+    named_file.send(req.headers(), res).await;
+    Ok(())
+}
+
 pub fn upload_routes() -> Router {
     Router::new()
         .push(Router::with_path("/upload").post(handle_file_upload))
@@ -17,6 +87,7 @@ pub fn upload_routes() -> Router {
         .push(Router::with_path("/uploads/{client_id}/{project_id}/{file_name}").get(handle_file_download))
         .push(Router::with_path("/uploads/{file_id}").delete(handle_delete_upload))
         .push(Router::with_path("/uploads/{file_id}/description").put(handle_update_file_description))
+        .push(Router::with_path("/files/excel/{client_id}/{project_id}/{export_id}").get(handle_excel_download))
 }
 
 #[handler]

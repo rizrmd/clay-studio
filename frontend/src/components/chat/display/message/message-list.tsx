@@ -59,11 +59,28 @@ export const MessageList = () => {
           // Check if message appears incomplete (after refresh, no streaming state)
           // An incomplete message has no processing_time_ms and is the last assistant message
           // processing_time_ms is null for incomplete messages, and a number (even 0) for complete ones
+          // Note: Sometimes null values come through as objects from JSON parsing
+          const hasValidProcessingTime = 
+            typeof message.processing_time_ms === 'number' && 
+            !isNaN(message.processing_time_ms);
+          
+          // Check if any tools are still in progress (no output)
+          const hasInProgressTools = message.tool_usages?.some(usage => 
+            usage.output === null || usage.output === undefined
+          ) || false;
+          
+          // A message is only incomplete if it has no valid processing time OR has in-progress tools
+          // AND it's not actively streaming AND the streaming state isn't marked as complete
+          // progress_content alone doesn't make a message incomplete
+          const isStreamingComplete = streamingState && streamingState.isComplete;
           const isIncompleteMessage = 
             message.role === "assistant" && 
             isLastMessage &&
-            (message.processing_time_ms === null || message.processing_time_ms === undefined) &&
-            !isActivelyStreaming; // Not actively streaming (which would handle it differently)
+            (!hasValidProcessingTime || hasInProgressTools) &&
+            !isActivelyStreaming && // Not actively streaming (which would handle it differently)
+            !isStreamingComplete; // Not completed streaming either
+          
+          
           
           
           // Use InProgressMessage for actively streaming messages
@@ -82,37 +99,79 @@ export const MessageList = () => {
             // Reconstruct events from existing tool usages
             const reconstructedEvents = [];
             
+            // Use progress_content if available (contains internal thinking), otherwise use regular content
+            const contentToShow = message.progress_content || message.content;
+            
             // Add content event if message has content
-            if (message.content) {
+            if (contentToShow) {
               reconstructedEvents.push({
                 type: "content" as const,
                 timestamp: new Date(message.createdAt || Date.now()).getTime(),
-                content: message.content,
+                content: contentToShow,
               });
             }
             
             // Add tool events from tool_usages
             if (message.tool_usages) {
               message.tool_usages.forEach((usage) => {
+                // Determine if the tool is complete or in-progress
+                // A tool is complete if:
+                // 1. It has output (not null/undefined) OR
+                // 2. It's TodoWrite with parameters OR
+                // 3. The message is completed AND the tool has execution_time_ms (filtered tools)
+                const hasOutput = usage.output !== null && usage.output !== undefined;
+                const isTodoWriteWithParams = usage.tool_name === "TodoWrite" && usage.parameters;
+                const isFilteredButComplete = hasValidProcessingTime && 
+                  usage.execution_time_ms !== null && usage.execution_time_ms !== undefined;
+                
+                const isComplete = hasOutput || isTodoWriteWithParams || isFilteredButComplete;
+                
                 // For TodoWrite, we need to use parameters (which contains the todos) not output
                 let output = usage.output;
                 if (usage.tool_name === "TodoWrite" && usage.parameters) {
                   output = usage.parameters;
                 }
                 
-                reconstructedEvents.push({
-                  type: "tool_complete" as const,
-                  timestamp: new Date(usage.createdAt || Date.now()).getTime(),
-                  tool: {
-                    toolUsageId: usage.id,
-                    toolName: usage.tool_name,
-                    status: "completed" as const,
-                    executionTime: usage.execution_time_ms,
-                    output: output,
-                  },
-                });
+                if (isComplete) {
+                  // Add both start and complete events for completed tools
+                  // First add the tool_start event
+                  reconstructedEvents.push({
+                    type: "tool_start" as const,
+                    timestamp: new Date(usage.createdAt || Date.now()).getTime(),
+                    tool: {
+                      toolUsageId: usage.id,
+                      toolName: usage.tool_name,
+                      status: "active" as const,
+                    },
+                  });
+                  
+                  // Then add the tool_complete event
+                  reconstructedEvents.push({
+                    type: "tool_complete" as const,
+                    timestamp: new Date(usage.createdAt || Date.now()).getTime() + 1, // Slightly later timestamp
+                    tool: {
+                      toolUsageId: usage.id,
+                      toolName: usage.tool_name,
+                      status: "completed" as const,
+                      executionTime: usage.execution_time_ms,
+                      output: output,
+                    },
+                  });
+                } else {
+                  // Add as in-progress tool (tool_start event)
+                  reconstructedEvents.push({
+                    type: "tool_start" as const,
+                    timestamp: new Date(usage.createdAt || Date.now()).getTime(),
+                    tool: {
+                      toolUsageId: usage.id,
+                      toolName: usage.tool_name,
+                      status: "active" as const,
+                    },
+                  });
+                }
               });
             }
+            
             
             return (
               <InProgressMessage

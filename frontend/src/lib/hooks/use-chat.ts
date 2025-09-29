@@ -28,14 +28,23 @@ export const useChat = () => {
 
       if (!conversation) {
         // Create new conversation if it doesn't exist
+        // Clean up progress_content from completed messages
+        const cleanedMessages = (message.messages || []).map(msg => {
+          // If message is completed (has processing_time_ms), clear progress_content
+          if (msg.processing_time_ms !== null && msg.processing_time_ms !== undefined) {
+            return { ...msg, progress_content: undefined };
+          }
+          return msg;
+        });
+        
         conversation = {
           id: message.conversation_id,
           project_id: chatStore.project_id, // Use chatStore directly instead of snap
           title: `Conversation ${message.conversation_id}`,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
-          message_count: message.messages.length,
-          messages: message.messages || [],
+          message_count: cleanedMessages.length,
+          messages: cleanedMessages,
         };
         chatStore.map[message.conversation_id] = conversation;
         if (!chatStore.list.includes(message.conversation_id)) {
@@ -51,7 +60,14 @@ export const useChat = () => {
           chatStore.expectingInitialMessage = undefined; // Clear the flag
         } else {
           // Normal update - replace messages
-          conversation.messages = message.messages;
+          // Clean up progress_content from completed messages
+          conversation.messages = message.messages.map(msg => {
+            // If message is completed (has processing_time_ms), clear progress_content
+            if (msg.processing_time_ms !== null && msg.processing_time_ms !== undefined) {
+              return { ...msg, progress_content: undefined };
+            }
+            return msg;
+          });
           conversation.message_count = message.messages.length;
         }
       }
@@ -320,14 +336,30 @@ export const useChat = () => {
             activeTools[toolIndex].executionTime = message.executionTimeMs;
           }
           
-          // Add to event timeline
+          // Add to event timeline - make sure we're marking it as completed
           if (streamState.events) {
             streamState.events.push({
               type: "tool_complete",
               timestamp: Date.now(),
               tool: {
                 toolUsageId: message.toolUsageId,
-                toolName: activeTools[toolIndex].tool,
+                toolName: message.tool || activeTools[toolIndex].tool, // Use the tool name from message if available
+                status: "completed", // Explicitly mark as completed
+                executionTime: message.executionTimeMs,
+                output: message.output,
+              },
+            });
+          }
+        } else {
+          // Tool wasn't in activeTools (might be from reconnection/refresh)
+          // Still add the completion event
+          if (streamState.events) {
+            streamState.events.push({
+              type: "tool_complete",
+              timestamp: Date.now(),
+              tool: {
+                toolUsageId: message.toolUsageId,
+                toolName: message.tool,
                 status: "completed",
                 executionTime: message.executionTimeMs,
                 output: message.output,

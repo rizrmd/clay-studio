@@ -15,6 +15,10 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
     ref
   ) => {
     const [hasContent, setHasContent] = React.useState(!!props.value || !!props.defaultValue);
+    const internalRef = React.useRef<HTMLTextAreaElement>(null);
+    const textareaRef = (ref as React.RefObject<HTMLTextAreaElement>) || internalRef;
+    const cursorPositionRef = React.useRef<{ start: number; end: number } | null>(null);
+    const isUserTyping = React.useRef(false);
     
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       const target = e.target as HTMLTextAreaElement;
@@ -56,10 +60,9 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
             props.onChange(syntheticEvent);
           }
 
-          // Set cursor position after the new line
-          setTimeout(() => {
-            target.selectionStart = target.selectionEnd = start + 1;
-          }, 0);
+          // Set cursor position after the new line immediately
+          target.value = newValue;
+          target.selectionStart = target.selectionEnd = start + 1;
         } else if (!e.shiftKey) {
           // Plain Enter: Submit if handler exists
           if (onEnterSubmit) {
@@ -76,6 +79,16 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
 
     const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       setHasContent(!!e.target.value);
+      isUserTyping.current = true;
+      
+      // Store cursor position before change
+      if (textareaRef.current) {
+        cursorPositionRef.current = {
+          start: textareaRef.current.selectionStart,
+          end: textareaRef.current.selectionEnd
+        };
+      }
+      
       props.onChange?.(e);
     };
 
@@ -85,7 +98,7 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
           "flex min-h-[60px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-base shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 md:text-sm",
           className
         )}
-        ref={ref}
+        ref={textareaRef}
         onKeyDown={handleKeyDown}
         {...props}
         onChange={handleChange}
@@ -97,10 +110,17 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
       return main;
     }
 
-    // Update hasContent when value prop changes
+    // Update hasContent when value prop changes and restore cursor position if user was typing
     React.useEffect(() => {
       if (props.value !== undefined) {
         setHasContent(!!props.value);
+        
+        // Restore cursor position if user was typing
+        if (isUserTyping.current && cursorPositionRef.current && textareaRef.current) {
+          const { start, end } = cursorPositionRef.current;
+          textareaRef.current.setSelectionRange(start, end);
+          isUserTyping.current = false;
+        }
       }
     }, [props.value]);
 

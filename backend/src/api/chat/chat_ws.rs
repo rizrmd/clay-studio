@@ -166,6 +166,7 @@ pub async fn handle_chat_message_ws(
         processing_time_ms: None,
         file_attachments: None, // WebSocket doesn't handle file attachments in this way
         tool_usages: None,
+        progress_content: None,
     };
 
     tracing::info!("Saving user message");
@@ -413,13 +414,14 @@ pub async fn handle_chat_message_ws(
     {
         Ok(mut receiver) => {
             tracing::info!("Claude query successful, starting message loop");
-            let _accumulated_text = String::new();
+            let mut progress_content = String::new();  // For internal thinking/progress
+            let mut assistant_content = String::new();  // For final user-facing content
             let mut tool_usages = Vec::new();
             let mut pending_tools = std::collections::HashMap::new();
-            let mut assistant_content = String::new();
+            let mut last_content_save = std::time::Instant::now();
+            const CONTENT_SAVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
 
             while let Some(message) = receiver.recv().await {
-                // tracing::info!("Received Claude message: {:?}", std::mem::discriminant(&message));
 
                 match message {
                     ClaudeMessage::Progress { content } => {
@@ -431,6 +433,38 @@ pub async fn handle_chat_message_ws(
                                     "type": "progress",
                                     "content": content
                                 }));
+                            }
+                        }
+                        
+                        // Extract and save progress/thinking content separately
+                        if let Some(content_obj) = content.as_object() {
+                            if let Some(message_obj) = content_obj.get("message") {
+                                if let Some(content_array) = message_obj.get("content").and_then(|v| v.as_array()) {
+                                    for content_item in content_array {
+                                        if let Some(text) = content_item.get("text").and_then(|v| v.as_str()) {
+                                            progress_content.push_str(text);
+                                        }
+                                    }
+                                }
+                            } else if let Some(result_text) = content_obj.get("result").and_then(|v| v.as_str()) {
+                                // Handle result format - this might be actual content
+                                progress_content.push_str(result_text);
+                            }
+                        }
+                        
+                        // Periodically save progress content to database
+                        if last_content_save.elapsed() > CONTENT_SAVE_INTERVAL && !progress_content.is_empty() {
+                            if let Err(e) = sqlx::query(
+                                "UPDATE messages SET progress_content = $1 WHERE id = $2"
+                            )
+                            .bind(&progress_content)
+                            .bind(&message_id.to_string())
+                            .execute(&db_pool)
+                            .await {
+                                tracing::error!("Failed to update message progress content: {}", e);
+                            } else {
+                                tracing::debug!("Saved progress content: {} chars", progress_content.len());
+                                last_content_save = std::time::Instant::now();
                             }
                         }
 
@@ -543,6 +577,14 @@ pub async fn handle_chat_message_ws(
                             }
 
                             // Send ToolComplete event
+                            // For TodoWrite, include parameters in output since that's where todos are stored
+                            let output_to_send = if name == "TodoWrite" {
+                                // Send parameters as output for TodoWrite since it contains the todos
+                                Some(params.clone())
+                            } else {
+                                Some(result.clone())
+                            };
+                            
                             broadcast_to_subscribers(
                                 &project_id,
                                 &conversation_id_clone,
@@ -550,7 +592,7 @@ pub async fn handle_chat_message_ws(
                                     tool: name.clone(),
                                     tool_usage_id: tool_usage_id.to_string(),
                                     execution_time_ms: execution_time as i64,
-                                    output: Some(result.clone()),
+                                    output: output_to_send,
                                     conversation_id: conversation_id_clone.clone(),
                                 },
                             )
@@ -574,6 +616,56 @@ pub async fn handle_chat_message_ws(
                                 let mut streams = active_claude_streams.write().await;
                                 if let Some(stream_state) = streams.get_mut(&conversation_id_clone) {
                                     stream_state.completed_tool_usages.push(tool_usage);
+                                }
+                            }
+                        } else {
+                            // Tool not found in pending_tools - this can happen during reconnection
+                            // or if the tool tracking had issues. Still send a completion event.
+                            tracing::warn!("Tool result received for unknown tool: {}", tool);
+                            
+                            // Try to find the tool in the database by tool_use_id
+                            if let Ok(row) = sqlx::query(
+                                "SELECT id, tool_name, parameters, created_at FROM tool_usages 
+                                 WHERE message_id = $1 AND tool_use_id = $2 
+                                 ORDER BY created_at DESC LIMIT 1"
+                            )
+                            .bind(&message_id.to_string())
+                            .bind(&tool)
+                            .fetch_optional(&db_pool)
+                            .await {
+                                if let Some(row) = row {
+                                    let tool_usage_id: uuid::Uuid = row.get("id");
+                                    let tool_name: String = row.get("tool_name");
+                                    let created_at: chrono::DateTime<Utc> = row.get("created_at");
+                                    let execution_time = Utc::now().signed_duration_since(created_at).num_milliseconds() as i64;
+                                    
+                                    // Update the tool usage with the result
+                                    if let Err(e) = sqlx::query(
+                                        "UPDATE tool_usages SET output = $1, execution_time_ms = $2 WHERE id = $3"
+                                    )
+                                    .bind(&result)
+                                    .bind(execution_time)
+                                    .bind(tool_usage_id)
+                                    .execute(&db_pool)
+                                    .await {
+                                        tracing::error!("Failed to update tool usage record: {}", e);
+                                    }
+                                    
+                                    // Send ToolComplete event
+                                    broadcast_to_subscribers(
+                                        &project_id,
+                                        &conversation_id_clone,
+                                        ServerMessage::ToolComplete {
+                                            tool: tool_name.clone(),
+                                            tool_usage_id: tool_usage_id.to_string(),
+                                            execution_time_ms: execution_time,
+                                            output: Some(result.clone()),
+                                            conversation_id: conversation_id_clone.clone(),
+                                        },
+                                    )
+                                    .await;
+                                    
+                                    tracing::info!("Sent completion for recovered tool: {} ({})", tool_name, tool_usage_id);
                                 }
                             }
                         }
@@ -629,7 +721,8 @@ pub async fn handle_chat_message_ws(
                             result
                         };
 
-                        assistant_content = actual_content.clone();
+                        // This is the actual assistant response content
+                        assistant_content.push_str(&actual_content);
                         broadcast_to_subscribers(
                             &project_id,
                             &conversation_id_clone,
@@ -642,6 +735,12 @@ pub async fn handle_chat_message_ws(
                     }
 
                     ClaudeMessage::Error { error } => {
+                        // Remove stream from active streams on error
+                        {
+                            let mut streams = active_claude_streams.write().await;
+                            streams.remove(&conversation_id_clone);
+                        }
+                        
                         broadcast_to_subscribers(
                             &project_id,
                             &conversation_id_clone,
@@ -655,6 +754,21 @@ pub async fn handle_chat_message_ws(
                     }
 
                     _ => continue,
+                }
+            }
+
+            // Save any remaining progress content before finalizing
+            if !progress_content.is_empty() {
+                if let Err(e) = sqlx::query(
+                    "UPDATE messages SET progress_content = $1 WHERE id = $2"
+                )
+                .bind(&progress_content)
+                .bind(&message_id.to_string())
+                .execute(&db_pool)
+                .await {
+                    tracing::error!("Failed to save final progress content: {}", e);
+                } else {
+                    tracing::info!("Saved final progress content: {} chars", progress_content.len());
                 }
             }
 
@@ -672,6 +786,11 @@ pub async fn handle_chat_message_ws(
                         None
                     } else {
                         Some(tool_usages.clone())
+                    },
+                    progress_content: if progress_content.is_empty() {
+                        None
+                    } else {
+                        Some(progress_content.clone())
                     },
                 };
 
@@ -695,8 +814,10 @@ pub async fn handle_chat_message_ws(
                             let filtered_tool_usages: Vec<crate::models::tool_usage::ToolUsage> = tool_usages
                                 .iter()
                                 .map(|tu| {
-                                    // Don't filter MCP interaction tools and TodoWrite - they need their output for rendering
-                                    let should_preserve = tu.tool_name.starts_with("mcp__interaction__") || tu.tool_name == "TodoWrite";
+                                    // Don't filter MCP interaction tools, TodoWrite, and datasource_query - they need their output for rendering
+                                    let should_preserve = tu.tool_name.starts_with("mcp__interaction__") || 
+                                        tu.tool_name == "TodoWrite" ||
+                                        tu.tool_name == "datasource_query";
                                     crate::models::tool_usage::ToolUsage {
                                         id: tu.id,
                                         message_id: tu.message_id.clone(),
@@ -710,6 +831,11 @@ pub async fn handle_chat_message_ws(
                                 })
                                 .collect();
                             Some(filtered_tool_usages)
+                        },
+                        progress_content: if progress_content.is_empty() {
+                            None
+                        } else {
+                            Some(progress_content)
                         },
                     };
 
@@ -748,6 +874,14 @@ pub async fn handle_chat_message_ws(
                 .await;
             }
 
+            // Remove stream from active streams since it's complete
+            {
+                let mut streams = state.active_claude_streams.write().await;
+                if streams.remove(&conversation_id_clone).is_some() {
+                    tracing::info!("Removed completed stream for conversation {}", conversation_id_clone);
+                }
+            }
+            
             // Send completion event
             broadcast_to_subscribers(
                 &project_id,
@@ -763,8 +897,10 @@ pub async fn handle_chat_message_ws(
                         let filtered_tool_usages: Vec<crate::models::tool_usage::ToolUsage> = tool_usages
                             .iter()
                             .map(|tu| {
-                                // Don't filter MCP interaction tools and TodoWrite - they need their output for rendering
-                                let should_preserve = tu.tool_name.starts_with("mcp__interaction__") || tu.tool_name == "TodoWrite";
+                                // Don't filter MCP interaction tools, TodoWrite, and datasource_query - they need their output for rendering
+                                let should_preserve = tu.tool_name.starts_with("mcp__interaction__") || 
+                                    tu.tool_name == "TodoWrite" ||
+                                    tu.tool_name == "datasource_query";
                                 crate::models::tool_usage::ToolUsage {
                                     id: tu.id,
                                     message_id: tu.message_id.clone(),
@@ -788,6 +924,12 @@ pub async fn handle_chat_message_ws(
             let error_msg = e.to_string();
             tracing::error!("Failed to query Claude: {}", error_msg);
 
+            // Remove stream from active streams on error
+            {
+                let mut streams = active_claude_streams.write().await;
+                streams.remove(&conversation_id_clone);
+            }
+            
             // Send appropriate error message to client
             broadcast_to_subscribers(
                 &project_id,
@@ -799,24 +941,6 @@ pub async fn handle_chat_message_ws(
             )
             .await;
             return Err(e);
-        }
-    }
-
-    // Clear progress events and completed tool usages from active streams (keep the state for reference)
-    {
-        let mut streams = active_claude_streams.write().await;
-        if let Some(stream_state) = streams.get_mut(&conversation_id_clone) {
-            let event_count = stream_state.progress_events.len();
-            let tool_usage_count = stream_state.completed_tool_usages.len();
-            // Clear progress events and tool usages as the message is complete and they're now in database
-            stream_state.progress_events.clear();
-            stream_state.completed_tool_usages.clear();
-            tracing::info!(
-                "Cleared {} progress events and {} tool usages for completed message in conversation {}",
-                event_count,
-                tool_usage_count,
-                conversation_id_clone
-            );
         }
     }
 

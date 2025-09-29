@@ -19,7 +19,7 @@ pub async fn get_conversation_messages(
     // Fetch messages from database first, filtering out forgotten ones
     // Order by created_at and then by id to ensure stable ordering
     let messages = sqlx::query(
-        "SELECT id, content, role, processing_time_ms, created_at 
+        "SELECT id, content, role, processing_time_ms, created_at, progress_content 
          FROM messages 
          WHERE conversation_id = $1 
          AND (is_forgotten = false OR is_forgotten IS NULL)
@@ -117,6 +117,7 @@ pub async fn get_conversation_messages(
             created_at: msg_created_at.to_rfc3339(),
             processing_time_ms: row.try_get("processing_time_ms").ok(),
             tool_usages,
+            progress_content: row.try_get("progress_content").ok(),
         });
     }
 

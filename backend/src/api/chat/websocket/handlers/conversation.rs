@@ -328,6 +328,7 @@ pub async fn handle_get_conversation_messages(
                     m.processing_time_ms,
                     m.created_at,
                     m.file_attachments,
+                    m.progress_content,
                     COALESCE(
                         JSON_AGG(
                             JSON_BUILD_OBJECT(
@@ -335,6 +336,8 @@ pub async fn handle_get_conversation_messages(
                                 'message_id', tu.message_id,
                                 'tool_name', tu.tool_name,
                                 'tool_use_id', tu.tool_use_id,
+                                'parameters', tu.parameters,
+                                'output', tu.output,
                                 'execution_time_ms', tu.execution_time_ms,
                                 'createdAt', tu.created_at
                             )
@@ -399,7 +402,54 @@ pub async fn handle_get_conversation_messages(
                     tool_usages: row
                         .try_get::<serde_json::Value, _>("tool_usages")
                         .ok()
-                        .and_then(|v| serde_json::from_value(v).ok()),
+                        .and_then(|v| {
+                            // Manually parse the tool_usages array because the id field is a string in JSON
+                            // but Uuid in the struct
+                            if let serde_json::Value::Array(arr) = v {
+                                let mut usages = Vec::new();
+                                for item in arr {
+                                    if let serde_json::Value::Object(obj) = item {
+                                        // Parse UUID from string
+                                        let id = obj.get("id")
+                                            .and_then(|v| v.as_str())
+                                            .and_then(|s| uuid::Uuid::parse_str(s).ok())
+                                            .unwrap_or_else(uuid::Uuid::new_v4);
+                                        
+                                        usages.push(crate::models::ToolUsage {
+                                            id,
+                                            message_id: obj.get("message_id")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or_default()
+                                                .to_string(),
+                                            tool_name: obj.get("tool_name")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or_default()
+                                                .to_string(),
+                                            tool_use_id: obj.get("tool_use_id")
+                                                .and_then(|v| v.as_str())
+                                                .map(|s| s.to_string()),
+                                            parameters: obj.get("parameters")
+                                                .cloned(),
+                                            output: obj.get("output")
+                                                .cloned(),
+                                            execution_time_ms: obj.get("execution_time_ms")
+                                                .and_then(|v| v.as_i64()),
+                                            created_at: obj.get("createdAt")
+                                                .and_then(|v| v.as_str())
+                                                .map(|s| s.to_string()),
+                                        });
+                                    }
+                                }
+                                if !usages.is_empty() {
+                                    Some(usages)
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            }
+                        }),
+                    progress_content: row.try_get("progress_content").ok(),
                 });
             }
 

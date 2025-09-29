@@ -101,6 +101,12 @@ export function MainApp() {
   // Update valtio store with current route params
   useEffect(() => {
     if (projectId) {
+      // Check if project has changed
+      const previousProjectId = uiSnapshot.currentProject;
+      if (previousProjectId !== projectId) {
+        // Switch to the new project's tabs
+        tabsActions.switchToProject(projectId);
+      }
       uiActions.setCurrentProject(projectId);
     }
     if (conversationId) {

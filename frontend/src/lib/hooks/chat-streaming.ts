@@ -6,29 +6,28 @@ export const stream = {
   start(msg: ServerMessage & { type: "start" }) {
     const conversation = chatStore.map[msg.conversation_id];
     if (conversation) {
-      const assistantMessage: Message = {
-        id: msg.id,
-        content: "",
-        role: "assistant",
-        createdAt: new Date().toISOString(),
-      };
-      conversation.messages.push(assistantMessage);
+      // Check if message already exists (e.g., after refresh when replaying events)
+      const existingMessage = conversation.messages.find(m => m.id === msg.id);
       
-      // Initialize streaming state
-      if (!chatStore.streaming[msg.conversation_id]) {
-        chatStore.streaming[msg.conversation_id] = {
-          messageId: msg.id,
-          partialContent: "",
-          activeTools: [],
-          isComplete: false,
-          events: [],
+      if (!existingMessage) {
+        // Only add new message if it doesn't exist
+        const assistantMessage: Message = {
+          id: msg.id,
+          content: "",
+          role: "assistant",
+          createdAt: new Date().toISOString(),
         };
-      } else {
-        // Update existing streaming state
-        chatStore.streaming[msg.conversation_id].messageId = msg.id;
-        chatStore.streaming[msg.conversation_id].isComplete = false;
-        chatStore.streaming[msg.conversation_id].events = [];
+        conversation.messages.push(assistantMessage);
       }
+      
+      // Always initialize/reset streaming state for active streaming
+      chatStore.streaming[msg.conversation_id] = {
+        messageId: msg.id,
+        partialContent: existingMessage?.content || "", // Preserve existing content if any
+        activeTools: [],
+        isComplete: false,
+        events: [],
+      };
     }
   },
 
@@ -96,13 +95,19 @@ export const stream = {
       if (lastMessage && lastMessage.id === msg.id) {
         lastMessage.processing_time_ms = msg.processing_time_ms;
         lastMessage.tool_usages = msg.tool_usages;
+        // Clear progress_content when message is complete
+        lastMessage.progress_content = undefined;
       }
       conversation.message_count = conversation.messages.length;
       conversation.updated_at = new Date().toISOString();
       
-      // Mark streaming as complete
+      // Mark streaming as complete and clear the streaming state after a short delay
       if (chatStore.streaming[msg.conversation_id]) {
         chatStore.streaming[msg.conversation_id].isComplete = true;
+        // Clear streaming state after a short delay to allow UI to update
+        setTimeout(() => {
+          delete chatStore.streaming[msg.conversation_id];
+        }, 100);
       }
     }
   },

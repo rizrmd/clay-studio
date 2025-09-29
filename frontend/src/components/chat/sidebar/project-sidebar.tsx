@@ -25,6 +25,7 @@ import { DatasourceList } from "./components/datasource-list";
 import { MobileMenuToggle } from "./components/toggle";
 import { ShareProjectDialog } from "@/components/share/ShareProjectDialog";
 import { AnalysisList } from "./components/analysis-list";
+import { useAuth } from "@/hooks/use-auth";
 import {
   Accordion,
   AccordionItem,
@@ -60,6 +61,7 @@ export function ProjectSidebar({
   const params = useParams();
   const [searchParams] = useSearchParams();
   const location = useLocation();
+  const { logout } = useAuth();
 
   const { datasourceId } = params;
   const tableFromUrl = searchParams.get("table");
@@ -94,6 +96,25 @@ export function ProjectSidebar({
 
   // Load datasources when on a datasource browse route (removed - consolidated below)
 
+  // Handle project switch
+  useEffect(() => {
+    if (projectId && projectId !== sidebarSnapshot.currentProjectId) {
+      // Switch sidebar state to the new project
+      sidebarActions.switchToProject(projectId);
+      
+      // Clear old project data
+      datasourcesActions.clearDatasources();
+      analysisActions.clearAnalyses();
+      
+      // Clear conversations from chat store for clean slate
+      chatStore.map = {};
+      chatStore.list = [];
+      chatStore.errors = {};
+      chatStore.streaming = {};
+      chatStore.loadingMessages = {};
+    }
+  }, [projectId]);
+
   // Always load conversations when we have a projectId (regardless of route)
   useEffect(() => {
     if (projectId) {
@@ -104,11 +125,10 @@ export function ProjectSidebar({
         chat.setProjectId(projectId);
       }
 
-      // Only load conversations if we don't have any for this project
-      if (chat.conversationList.length === 0) {
-        // Use REST API to load conversations
-        const loadConversationsViaAPI = async () => {
-          try {
+      // Force reload conversations for new project (removed the check for empty list)
+      // Use REST API to load conversations
+      const loadConversationsViaAPI = async () => {
+        try {
 
           const response = await api.get(
             `/conversations?project_id=${projectId}`
@@ -166,7 +186,6 @@ export function ProjectSidebar({
       };
 
       loadConversationsViaAPI();
-      }
     }
   }, [projectId]);
 
@@ -195,8 +214,9 @@ export function ProjectSidebar({
     deleteConversation(conversationId);
   };
 
-  const handleLogout = () => {
-    // Implementation for logout
+  const handleLogout = async () => {
+    await logout();
+    navigate("/auth/signin");
   };
 
   const handleProfile = () => {
@@ -217,17 +237,16 @@ export function ProjectSidebar({
   // Load datasources when needed (either on datasource routes or when sidebar is expanded)
   useEffect(() => {
     if (projectId && (isOnDatasourceBrowseRoute || !isCollapsed)) {
-      // Only load if not already loaded or if it's a different project
-      if (!datasourcesSnapshot.datasources.length) {
-        datasourcesActions.loadDatasources(projectId);
-      }
+      // Always load datasources when project changes or when needed
+      datasourcesActions.loadDatasources(projectId);
     }
   }, [projectId]);
 
   // Load analyses when needed
   useEffect(() => {
     if (projectId && (location.pathname.includes("/analysis") || !isCollapsed)) {
-      if ((!analysisSnapshot.analyses || !analysisSnapshot.analyses.length) && !analysisSnapshot.isLoading) {
+      // Always load analyses when project changes or when needed
+      if (!analysisSnapshot.isLoading) {
         const loadAnalyses = async () => {
           analysisActions.setLoading(true);
           try {

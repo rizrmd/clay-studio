@@ -15,6 +15,8 @@ pub struct Message {
     pub processing_time_ms: Option<i64>,
     pub file_attachments: Option<Vec<FileUploadResponse>>,
     pub tool_usages: Option<Vec<ToolUsage>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub progress_content: Option<String>,
 }
 
 impl Message {
@@ -28,6 +30,7 @@ impl Message {
             processing_time_ms: None,
             file_attachments: None,
             tool_usages: None,
+            progress_content: None,
         }
     }
 
@@ -41,6 +44,7 @@ impl Message {
             processing_time_ms: None,
             file_attachments: None,
             tool_usages: None,
+            progress_content: None,
         }
     }
 

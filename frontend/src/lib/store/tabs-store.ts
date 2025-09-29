@@ -36,6 +36,13 @@ interface TabsState {
   activeTabByType: Record<TabType, string>;
   tabHistory: string[];
   isRemovingTab: boolean; // Flag to prevent interference during removal
+  currentProjectId: string | null;
+  projectTabs: Record<string, {
+    tabs: Tab[];
+    activeTabId: string | null;
+    activeTabByType: Record<TabType, string>;
+    tabHistory: string[];
+  }>;
 }
 
 const initialTabsState: TabsState = {
@@ -44,6 +51,8 @@ const initialTabsState: TabsState = {
   activeTabByType: {} as Record<TabType, string>,
   tabHistory: [],
   isRemovingTab: false,
+  currentProjectId: null,
+  projectTabs: {},
 };
 
 // Load persisted tabs from localStorage
@@ -53,7 +62,34 @@ const loadPersistedTabs = (): TabsState => {
     if (saved) {
       const parsed = JSON.parse(saved);
       // Validate the structure
-      if (parsed && typeof parsed === 'object' && Array.isArray(parsed.tabs)) {
+      if (parsed && typeof parsed === 'object') {
+        // Handle migration from old format to new project-based format
+        if (Array.isArray(parsed.tabs) && !parsed.projectTabs) {
+          // Old format - migrate to new format
+          const migratedState = { ...initialTabsState };
+          // Group tabs by projectId
+          const tabsByProject: Record<string, Tab[]> = {};
+          parsed.tabs.forEach((tab: Tab) => {
+            const projectId = tab.metadata?.projectId;
+            if (projectId) {
+              if (!tabsByProject[projectId]) {
+                tabsByProject[projectId] = [];
+              }
+              tabsByProject[projectId].push(tab);
+            }
+          });
+          // Create project tabs structure
+          Object.entries(tabsByProject).forEach(([projectId, tabs]) => {
+            migratedState.projectTabs[projectId] = {
+              tabs,
+              activeTabId: parsed.activeTabId || null,
+              activeTabByType: parsed.activeTabByType || {},
+              tabHistory: parsed.tabHistory || [],
+            };
+          });
+          return migratedState;
+        }
+        // New format
         return { ...initialTabsState, ...parsed };
       }
     }
@@ -73,34 +109,59 @@ if (typeof window !== 'undefined') {
   }, 0);
 }
 
-// Subscribe to changes and persist to localStorage
-subscribeKey(tabsStore, 'tabs', () => {
+// Helper function to persist state
+const persistState = () => {
   try {
     localStorage.setItem('clay-studio-tabs', JSON.stringify({
       tabs: tabsStore.tabs,
       activeTabId: tabsStore.activeTabId,
       activeTabByType: tabsStore.activeTabByType,
       tabHistory: tabsStore.tabHistory,
+      currentProjectId: tabsStore.currentProjectId,
+      projectTabs: tabsStore.projectTabs,
     }));
   } catch (error) {
     console.warn('Failed to persist tabs:', error);
   }
-});
+};
 
-subscribeKey(tabsStore, 'activeTabId', () => {
-  try {
-    localStorage.setItem('clay-studio-tabs', JSON.stringify({
-      tabs: tabsStore.tabs,
-      activeTabId: tabsStore.activeTabId,
-      activeTabByType: tabsStore.activeTabByType,
-      tabHistory: tabsStore.tabHistory,
-    }));
-  } catch (error) {
-    console.warn('Failed to persist tabs:', error);
-  }
-});
+// Subscribe to changes and persist to localStorage
+subscribeKey(tabsStore, 'tabs', persistState);
+subscribeKey(tabsStore, 'activeTabId', persistState);
+subscribeKey(tabsStore, 'projectTabs', persistState);
+subscribeKey(tabsStore, 'currentProjectId', persistState);
 
 export const tabsActions = {
+  switchToProject: (projectId: string) => {
+    // Save current project's tabs if there's a current project
+    if (tabsStore.currentProjectId && tabsStore.currentProjectId !== projectId) {
+      tabsStore.projectTabs[tabsStore.currentProjectId] = {
+        tabs: [...tabsStore.tabs],
+        activeTabId: tabsStore.activeTabId,
+        activeTabByType: { ...tabsStore.activeTabByType },
+        tabHistory: [...tabsStore.tabHistory],
+      };
+    }
+
+    // Switch to new project
+    tabsStore.currentProjectId = projectId;
+
+    // Load the new project's tabs
+    if (tabsStore.projectTabs[projectId]) {
+      const projectData = tabsStore.projectTabs[projectId];
+      tabsStore.tabs = [...projectData.tabs];
+      tabsStore.activeTabId = projectData.activeTabId;
+      tabsStore.activeTabByType = { ...projectData.activeTabByType };
+      tabsStore.tabHistory = [...projectData.tabHistory];
+    } else {
+      // Initialize empty tabs for new project
+      tabsStore.tabs = [];
+      tabsStore.activeTabId = null;
+      tabsStore.activeTabByType = {} as Record<TabType, string>;
+      tabsStore.tabHistory = [];
+    }
+  },
+
   addTab: (tabData: Omit<Tab, 'id' | 'isActiveForType'>) => {
     const id = nanoid();
     const tab: Tab = {

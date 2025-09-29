@@ -37,6 +37,20 @@ export function ContextEditor({ projectId }: ContextEditorProps) {
     loadContext();
   }, [projectId]);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+        e.preventDefault();
+        if (contextEditorState.isDirty && !contextEditorState.isSaving) {
+          saveContext();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [projectId]);
+
   const loadContext = async () => {
     contextEditorState.isLoading = true;
     contextEditorState.error = null;
@@ -61,17 +75,19 @@ export function ContextEditor({ projectId }: ContextEditorProps) {
     contextEditorState.error = null;
     
     try {
+      // First save the context
       await api.put(`/projects/${projectId}/context`, {
         context: contextEditorState.sourceContent,
       });
       contextEditorState.isDirty = false;
       contextEditorState.lastSaved = new Date();
       
-      // Clear compiled cache since source changed
-      contextEditorState.compiledContent = '';
-      contextEditorState.lastCompiled = null;
+      // Then compile it automatically
+      const response = await api.post(`/projects/${projectId}/context/compile`);
+      contextEditorState.compiledContent = response.compiled || '';
+      contextEditorState.lastCompiled = new Date();
     } catch (error: any) {
-      contextEditorState.error = error.response?.data?.message || 'Failed to save context';
+      contextEditorState.error = error.response?.data?.message || 'Failed to save/compile context';
     } finally {
       contextEditorState.isSaving = false;
     }
@@ -228,7 +244,7 @@ return \`Messages in last 24h: \${recent[0].count}\`;
               ) : (
                 <Save className="h-4 w-4 mr-1" />
               )}
-              Save
+              Save ({navigator.platform.includes('Mac') ? 'Cmd' : 'Ctrl'}+S)
             </Button>
           </div>
         </div>

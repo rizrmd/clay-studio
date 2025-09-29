@@ -190,8 +190,21 @@ export function MessageItem({
               // For export_excel specifically, also check the original output
               let dataToCheck = interactionData;
               if (invocation.toolName === 'mcp__interaction__export_excel') {
-                // First try originalOutput, then fall back to result
-                const sourceData = (invocation as any).originalOutput || invocation.result;
+                // Check if originalOutput is successful (not an error array)
+                const originalOutput = (invocation as any).originalOutput;
+                let sourceData;
+                
+                if (Array.isArray(originalOutput) && originalOutput.length > 0) {
+                  const firstItem = originalOutput[0];
+                  // If first item has 'code' and 'unionErrors', it's a Zod error
+                  if (firstItem && typeof firstItem === 'object' && firstItem.code && firstItem.unionErrors) {
+                    sourceData = invocation.result; // Fallback to input params 
+                  } else {
+                    sourceData = originalOutput;
+                  }
+                } else {
+                  sourceData = invocation.result;
+                }
                 
                 try {
                   // Handle array format with MCP tool result (same as tool-usage-dialog.tsx)
@@ -206,6 +219,10 @@ export function MessageItem({
                       const parsedMcp = parseMcpToolResult(firstItem.text);
                       if (parsedMcp) {
                         dataToCheck = parsedMcp;
+                      } else {
+                        // If parseMcpToolResult fails, try direct JSON parsing
+                        const directParsed = JSON.parse(firstItem.text);
+                        dataToCheck = directParsed;
                       }
                     }
                   }
@@ -238,8 +255,20 @@ export function MessageItem({
           {/* Render TodoWrite invocations as proper todo lists - show only the most recent */}
           {todoWriteInvocations?.slice(-1).map((invocation) => {
             if (invocation.state === "result") {
-              // Check for todos data in result
-              const todos = invocation.result?.todos;
+              // For TodoWrite, the result contains the parameters object with todos
+              // Handle both string and object formats
+              let todos = null;
+              
+              if (typeof invocation.result === 'string') {
+                try {
+                  const parsed = JSON.parse(invocation.result);
+                  todos = parsed.todos;
+                } catch (e) {
+                  console.error("Failed to parse TodoWrite result:", e);
+                }
+              } else if (invocation.result?.todos) {
+                todos = invocation.result.todos;
+              }
               
               if (todos && Array.isArray(todos) && todos.length > 0) {
                 return (
@@ -248,7 +277,6 @@ export function MessageItem({
                     todos={todos}
                   />
                 );
-              } else {
               }
             }
             return null;

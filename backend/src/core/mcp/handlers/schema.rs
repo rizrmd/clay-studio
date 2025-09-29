@@ -61,7 +61,11 @@ impl McpHandlers {
             if let Some(table_name) = table_name {
                 // For now, we still need to create a connector for schema operations
                 // as these involve complex queries that vary by database type
-                let connector = create_connector(&source.source_type, &source.connection_config)
+                let mut config_with_id = source.connection_config.clone();
+                if let Some(config_obj) = config_with_id.as_object_mut() {
+                    config_obj.insert("id".to_string(), Value::String(datasource_id.to_string()));
+                }
+                let connector = create_connector(&source.source_type, &config_with_id)
                     .await
                     .map_err(|e| format!("Failed to create connector: {}", e))?;
 
@@ -164,7 +168,11 @@ impl McpHandlers {
             // Fetch fresh schema from database
             // For now, we still need to create a connector for schema operations
             // as these involve complex queries that vary by database type
-            let connector = create_connector(&source.source_type, &source.connection_config)
+            let mut config_with_id = source.connection_config.clone();
+            if let Some(config_obj) = config_with_id.as_object_mut() {
+                config_obj.insert("id".to_string(), Value::String(datasource_id.to_string()));
+            }
+            let connector = create_connector(&source.source_type, &config_with_id)
                 .await
                 .map_err(|e| format!("Failed to create connector: {}", e))?;
 
@@ -252,7 +260,11 @@ impl McpHandlers {
 
             // Get connector
             let source = self.get_datasource_connector(datasource_id).await?;
-            let connector = create_connector(&source.source_type, &source.connection_config)
+            let mut config_with_id = source.connection_config.clone();
+            if let Some(config_obj) = config_with_id.as_object_mut() {
+                config_obj.insert("id".to_string(), Value::String(datasource_id.to_string()));
+            }
+            let connector = create_connector(&source.source_type, &config_with_id)
                 .await
                 .map_err(|e| format!("Failed to create connector: {}", e))?;
 
@@ -292,7 +304,11 @@ impl McpHandlers {
 
             // Get connector
             let source = self.get_datasource_connector(datasource_id).await?;
-            let connector = create_connector(&source.source_type, &source.connection_config)
+            let mut config_with_id = source.connection_config.clone();
+            if let Some(config_obj) = config_with_id.as_object_mut() {
+                config_obj.insert("id".to_string(), Value::String(datasource_id.to_string()));
+            }
+            let connector = create_connector(&source.source_type, &config_with_id)
                 .await
                 .map_err(|e| format!("Failed to create connector: {}", e))?;
 
@@ -327,7 +343,11 @@ impl McpHandlers {
 
             // Get connector
             let source = self.get_datasource_connector(datasource_id).await?;
-            let connector = create_connector(&source.source_type, &source.connection_config)
+            let mut config_with_id = source.connection_config.clone();
+            if let Some(config_obj) = config_with_id.as_object_mut() {
+                config_obj.insert("id".to_string(), Value::String(datasource_id.to_string()));
+            }
+            let connector = create_connector(&source.source_type, &config_with_id)
                 .await
                 .map_err(|e| format!("Failed to create connector: {}", e))?;
 
