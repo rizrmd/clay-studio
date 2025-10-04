@@ -275,8 +275,16 @@ export function JsonTableRenderer({ data, title }: JsonTableRendererProps) {
 
   if (items.length === 0) {
     return (
-      <div className="text-muted-foreground text-sm">
-        Empty data
+      <div className="space-y-2 p-4 border rounded-lg">
+        <div className="text-muted-foreground text-sm">
+          Empty data
+        </div>
+        <details className="text-xs">
+          <summary className="cursor-pointer text-muted-foreground">Debug: Raw data</summary>
+          <pre className="mt-2 p-2 bg-muted rounded text-xs overflow-auto">
+            {JSON.stringify(data, null, 2)}
+          </pre>
+        </details>
       </div>
     );
   }

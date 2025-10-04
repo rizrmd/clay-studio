@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, analysis_id, status, created_at, started_at, completed_at, execution_time_ms\n        FROM analysis_jobs \n        WHERE id = $1\n        ",
+  "query": "\n        SELECT id, analysis_id, status, error_message, created_at, started_at, completed_at, execution_time_ms\n        FROM analysis_jobs\n        WHERE id = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -20,21 +20,26 @@
       },
       {
         "ordinal": 3,
+        "name": "error_message",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "started_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 5,
+        "ordinal": 6,
         "name": "completed_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "execution_time_ms",
         "type_info": "Int8"
       }
@@ -51,8 +56,9 @@
       true,
       true,
       true,
+      true,
       true
     ]
   },
-  "hash": "1da40873e7d477b2d9a5abf1e5e0bda74df3a6f2cf93f105dbda39dc5bc7d4ed"
+  "hash": "5ced894bbb9382a34572eea28003d4f0b5e7cca55783b7a5c6d5c62cf419a3e1"
 }

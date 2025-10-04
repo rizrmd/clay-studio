@@ -279,14 +279,18 @@ async fn handle_client_message(
             }
         }
 
-        ClientMessage::CreateConversation { project_id, title } => {
+        ClientMessage::CreateConversation { project_id, title, first_message, file_ids } => {
             tracing::info!(
                 "Received create conversation request for project: {}",
                 project_id
             );
 
             if let Some(client_id_str) = client_id.clone() {
-                match handle_create_conversation(&project_id, title, &client_id_str, state).await {
+                // Store first_message and file_ids for use after conversation creation
+                let first_msg = first_message.clone();
+                let files = file_ids.clone();
+
+                match handle_create_conversation(&project_id, title, None, None, &client_id_str, user_id, state).await {
                     Ok(conversation) => {
                         // Automatically subscribe the connection to the new conversation
                         let conversation_id = conversation.id.clone();
@@ -313,13 +317,42 @@ async fn handle_client_message(
                             conversation_id
                         );
 
+                        // If there's a first message, start processing it in background
+                        // but send conversation_created immediately so frontend can navigate
+                        if let Some(message_content) = first_msg {
+                            tracing::info!("Processing first message for new conversation {}", conversation_id);
+
+                            // Clone values before moving into spawn
+                            let state_clone = state.clone();
+                            let project_id_clone = project_id.clone();
+                            let conversation_id_clone = conversation_id.clone();
+                            let client_id_clone = client_id_str.clone();
+                            let file_ids_clone = files.unwrap_or_default();
+
+                            // Spawn async task to handle the first message
+                            tokio::spawn(async move {
+                                if let Err(e) = crate::api::chat::chat_ws::handle_chat_message_ws(
+                                    project_id_clone,
+                                    conversation_id_clone,
+                                    message_content,
+                                    file_ids_clone,
+                                    client_id_clone,
+                                    state_clone,
+                                )
+                                .await
+                                {
+                                    tracing::error!("Failed to handle first message: {}", e);
+                                }
+                            });
+                        }
+
                         // Send creation confirmation
                         let _ = sender.send(ServerMessage::ConversationCreated { conversation });
 
                         // Send subscription confirmation
                         let _ = sender.send(ServerMessage::Subscribed {
-                            project_id,
-                            conversation_id: Some(conversation_id),
+                            project_id: project_id.clone(),
+                            conversation_id: Some(conversation_id.clone()),
                         });
                     }
                     Err(e) => {

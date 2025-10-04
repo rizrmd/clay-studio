@@ -29,6 +29,8 @@ pub enum ClientMessage {
     CreateConversation {
         project_id: String,
         title: Option<String>,
+        first_message: Option<String>,
+        file_ids: Option<Vec<String>>,
     },
     ListConversations {
         project_id: String,

@@ -15,6 +15,7 @@ import {
 import { TodoList } from "@/components/chat/display/message/item/interaction/todo-list";
 import { parseMcpToolResult } from "@/components/chat/display/tool/tool-call-utils";
 import { FileAttachmentDisplay } from "./file-attachment-display";
+import { Timestamp } from "@/components/ui/timestamp";
 
 export interface MessageItemProps {
   message: Message;
@@ -114,10 +115,6 @@ export function MessageItem({
 
   const isUser = message.role === "user";
   const createdAt = message.createdAt ? new Date(message.createdAt) : undefined;
-  const formattedTime = createdAt?.toLocaleTimeString("en-US", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 
   const completedToolInvocations = toolInvocations?.filter(
     (invocation) =>
@@ -146,16 +143,15 @@ export function MessageItem({
         <MarkdownRenderer>{message.content}</MarkdownRenderer>
       </div>
 
-      {showTimeStamp && createdAt ? (
-        <time
-          dateTime={createdAt.toISOString()}
+      {showTimeStamp && createdAt && isUser ? (
+        <Timestamp
+          date={createdAt}
+          format="relative"
           className={cn(
-            "mt-1 block px-1 text-xs opacity-50",
+            "mt-1 block px-1 opacity-50",
             animation !== "none" && "duration-500 animate-in fade-in-0"
           )}
-        >
-          {formattedTime}
-        </time>
+        />
       ) : null}
     </div>
   );
@@ -288,6 +284,16 @@ export function MessageItem({
               "bg-white border border-transparent hover:border-slate-200 transition-all"
             }
           />
+          {showTimeStamp && createdAt ? (
+            <Timestamp
+              date={createdAt}
+              format="relative"
+              className={cn(
+                "mt-1 block px-1 opacity-50",
+                animation !== "none" && "duration-500 animate-in fade-in-0"
+              )}
+            />
+          ) : null}
         </div>
       )}
     </div>

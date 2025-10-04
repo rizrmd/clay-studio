@@ -6,7 +6,7 @@ import { chatStore } from "../store/chat/chat-store";
 import { sidebarActions } from "../store/chat/sidebar-store";
 import type { CONVERSATION_ID, Message, PROJECT_ID } from "../types/chat";
 import type { ServerMessage } from "../types/ws";
-import { stream } from "./chat-streaming";
+import { stream, checkAndCompleteIfTodosDone } from "./chat-streaming";
 import { messageUIActions } from "../store/chat/message-ui-store";
 import { tabsActions, tabsStore } from "../store/tabs-store";
 
@@ -20,31 +20,33 @@ export const useChat = () => {
     const handleConversationMessages = (
       message: ServerMessage & { type: "conversation_messages" }
     ) => {
+      // Debug: Log raw message data
+      console.log("[handleConversationMessages] Raw message:", message);
+      console.log("[handleConversationMessages] Messages:", message.messages.map(m => ({
+        id: m.id,
+        role: m.role,
+        hasContent: !!m.content,
+        hasProgressContent: !!m.progress_content,
+        progressContentValue: m.progress_content,
+        processing_time_ms: m.processing_time_ms,
+      })));
+
       // Clear loading state for this conversation
       chatStore.loadingMessages[message.conversation_id] = false;
-      
+
       // Check if conversation exists in store
       let conversation = chatStore.map[message.conversation_id];
 
       if (!conversation) {
         // Create new conversation if it doesn't exist
-        // Clean up progress_content from completed messages
-        const cleanedMessages = (message.messages || []).map(msg => {
-          // If message is completed (has processing_time_ms), clear progress_content
-          if (msg.processing_time_ms !== null && msg.processing_time_ms !== undefined) {
-            return { ...msg, progress_content: undefined };
-          }
-          return msg;
-        });
-        
         conversation = {
           id: message.conversation_id,
           project_id: chatStore.project_id, // Use chatStore directly instead of snap
           title: `Conversation ${message.conversation_id}`,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
-          message_count: cleanedMessages.length,
-          messages: cleanedMessages,
+          message_count: message.messages.length,
+          messages: message.messages,
         };
         chatStore.map[message.conversation_id] = conversation;
         if (!chatStore.list.includes(message.conversation_id)) {
@@ -60,14 +62,7 @@ export const useChat = () => {
           chatStore.expectingInitialMessage = undefined; // Clear the flag
         } else {
           // Normal update - replace messages
-          // Clean up progress_content from completed messages
-          conversation.messages = message.messages.map(msg => {
-            // If message is completed (has processing_time_ms), clear progress_content
-            if (msg.processing_time_ms !== null && msg.processing_time_ms !== undefined) {
-              return { ...msg, progress_content: undefined };
-            }
-            return msg;
-          });
+          conversation.messages = message.messages;
           conversation.message_count = message.messages.length;
         }
       }
@@ -92,20 +87,49 @@ export const useChat = () => {
     const handleConversationList = (
       message: ServerMessage & { type: "conversation_list" }
     ) => {
-      // Clear existing conversations and update with new ones
-      chatStore.map = {};
+      // Update conversation list without clearing messages
       chatStore.list = message.conversations.map((c) => c.id);
       message.conversations.forEach((conversation) => {
-        chatStore.map[conversation.id] = conversation;
+        // Preserve existing messages if they exist
+        const existing = chatStore.map[conversation.id];
+        if (existing?.messages) {
+          // Merge: keep existing messages, update metadata
+          chatStore.map[conversation.id] = {
+            ...conversation,
+            messages: existing.messages,
+          };
+        } else {
+          // New conversation, no messages yet
+          chatStore.map[conversation.id] = conversation;
+        }
       });
     };
 
     const handleConversationCreated = (
       message: ServerMessage & { type: "conversation_created" }
     ) => {
-      
-      // Add new conversation to store
-      chatStore.map[message.conversation.id] = message.conversation;
+
+      // Check if there's a pending first message in chatStore
+      const hasPendingMessage = chatStore.pendingFirstChat && chatStore.pendingFirstChat.trim().length > 0;
+
+      // Initialize messages array - add pending user message if it exists
+      const initialMessages = [];
+      if (hasPendingMessage) {
+        initialMessages.push({
+          id: crypto.randomUUID(),
+          content: chatStore.pendingFirstChat,
+          role: "user" as const,
+          createdAt: new Date().toISOString(),
+        });
+        // Clear pending message after adding it
+        chatStore.pendingFirstChat = "";
+      }
+
+      // Add new conversation to store with initial messages
+      chatStore.map[message.conversation.id] = {
+        ...message.conversation,
+        messages: initialMessages
+      };
       if (!chatStore.list.includes(message.conversation.id)) {
         chatStore.list.unshift(message.conversation.id); // Add to beginning instead of end
       }
@@ -114,11 +138,11 @@ export const useChat = () => {
       messageUIActions.setPreviousConversationId("new");
 
       // Remove all chat tabs with conversationId="new" since we now have a real conversation
-      const newChatTabs = tabsStore.tabs.filter(t => 
+      const newChatTabs = tabsStore.tabs.filter(t =>
         t.type === 'chat' && t.metadata.conversationId === 'new'
       );
       newChatTabs.forEach(tab => tabsActions.removeTab(tab.id));
-      
+
       // Create a proper chat tab for the new conversation
       tabsActions.addTab({
         type: "chat",
@@ -130,43 +154,8 @@ export const useChat = () => {
         },
       });
 
-      // If we have a pending message, add it optimistically to the conversation
-      if (chatStore.pendingFirstChat) {
-        const pendingMessage = chatStore.pendingFirstChat;
-        chatStore.pendingFirstChat = ""; // Clear it to prevent duplicate sends
-        
-        // Add the message to the conversation immediately for UI display
-        if (!chatStore.map[message.conversation.id].messages) {
-          chatStore.map[message.conversation.id].messages = [];
-        }
-        
-        const userMessage: Message = {
-          id: crypto.randomUUID(),
-          content: pendingMessage,
-          role: "user",
-          createdAt: new Date().toISOString(),
-        };
-        chatStore.map[message.conversation.id].messages.push(userMessage);
-        
-        // Mark that we're expecting this conversation to have initial messages
-        chatStore.expectingInitialMessage = message.conversation.id;
-        
-        // Navigate to trigger subscription
-        navigate(`/p/${chatStore.project_id}/c/${message.conversation.id}`);
-        
-        // Send the message after ensuring subscription
-        setTimeout(() => {
-          // Send the message via WebSocket directly
-          wsService.sendChatMessage(
-            chatStore.project_id,
-            message.conversation.id,
-            pendingMessage
-          );
-        }, 500);
-      } else {
-        // No pending message, just navigate
-        navigate(`/p/${chatStore.project_id}/c/${message.conversation.id}`);
-      }
+      // Navigate to the new conversation (no need to send message - backend already did it)
+      navigate(`/p/${chatStore.project_id}/c/${message.conversation.id}`);
     };
 
     const handleConversationDetails = (
@@ -349,6 +338,12 @@ export const useChat = () => {
                 output: message.output,
               },
             });
+
+            // If this is a TodoWrite completion, check if all todos are done
+            const toolName = message.tool || activeTools[toolIndex].tool;
+            if (toolName === "TodoWrite") {
+              checkAndCompleteIfTodosDone(message.conversationId);
+            }
           }
         } else {
           // Tool wasn't in activeTools (might be from reconnection/refresh)
@@ -365,6 +360,11 @@ export const useChat = () => {
                 output: message.output,
               },
             });
+
+            // If this is a TodoWrite completion, check if all todos are done
+            if (message.tool === "TodoWrite") {
+              checkAndCompleteIfTodosDone(message.conversationId);
+            }
           }
         }
       }
@@ -455,12 +455,14 @@ export const useChat = () => {
 
   // Conversation management methods
   const createConversation = useCallback(
-    (message: string) => {
+    (message: string, fileIds?: string[]) => {
       if (snap.project_id) {
+        // Store the pending message so we can display it optimistically when conversation is created
         chatStore.pendingFirstChat = message;
+
         const conversationTitle =
           message.slice(0, 50).trim() + (message.length > 50 ? "..." : "");
-        wsService.createConversation(snap.project_id, conversationTitle);
+        wsService.createConversation(snap.project_id, conversationTitle, message, fileIds);
       }
     },
     [snap.project_id]

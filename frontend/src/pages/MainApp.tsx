@@ -116,28 +116,6 @@ export function MainApp() {
     }
   }, [projectId, conversationId, location.state]);
 
-  // Sync context tab with route
-  useEffect(() => {
-    if (isContextRoute && projectId) {
-      // Find or create context tab
-      const existingContextTab = tabsSnapshot.tabs.find(t => 
-        t.type === 'context' && t.metadata.projectId === projectId
-      );
-      
-      if (existingContextTab) {
-        tabsActions.setActiveTab(existingContextTab.id);
-      } else {
-        // Create the context tab if it doesn't exist
-        tabsActions.addTab({
-          type: 'context',
-          title: 'Context',
-          metadata: {
-            projectId,
-          }
-        });
-      }
-    }
-  }, [isContextRoute, projectId, location.pathname]);
 
   // Handle redirection when visiting /p/:projectId without conversation ID
   // Don't redirect if we're on the /new route or data browser route or query editor route
@@ -475,6 +453,26 @@ export function MainApp() {
         );
         shouldCreateTab = false;
       }
+    } else if (isContextRoute) {
+      // Look for existing context tab
+      const existingTab = projectTabs.find(
+        (t) => t.type === "context" && t.metadata.projectId === projectId
+      );
+
+      if (existingTab) {
+        targetTabId = existingTab.id;
+        shouldCreateTab = false;
+      } else {
+        // Create new context tab
+        targetTabId = tabsActions.getOrCreateActiveTab(
+          "context",
+          {
+            projectId,
+          },
+          "Context"
+        );
+        shouldCreateTab = false;
+      }
     } else if (isNewRoute) {
       // Always create/reuse chat tab for new conversations
       targetTabId = tabsActions.getOrCreateActiveTab(
@@ -516,6 +514,7 @@ export function MainApp() {
     isAnalysisViewRoute,
     isAnalysisNewRoute,
     isNewRoute,
+    isContextRoute,
     location.pathname,
     tabsSnapshot.tabs,
     tabsSnapshot.activeTabId,

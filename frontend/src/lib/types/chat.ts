@@ -46,6 +46,8 @@ export type Conversation = {
   updated_at: string;
   message_count: number;
   is_title_manually_set?: boolean;
+  created_by_user_id?: string;
+  visibility?: "private" | "public";
   messages: Message[];
 };
 

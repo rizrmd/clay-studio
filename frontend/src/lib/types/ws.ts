@@ -124,7 +124,7 @@ export type ClientMessage =
       content: string;
       file_ids?: string[];
     }
-  | { type: "create_conversation"; project_id: string; title?: string }
+  | { type: "create_conversation"; project_id: string; title?: string; first_message?: string; file_ids?: string[] }
   | { type: "list_conversations"; project_id: string }
   | { type: "get_conversation"; conversation_id: string }
   | {

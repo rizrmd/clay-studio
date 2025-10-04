@@ -44,41 +44,57 @@ export const MessageList = () => {
       <div className="flex flex-col absolute inset-0 mx-auto max-w-2xl">
         {currentMessages.map((message, index) => {
           const isLastMessage = index === currentMessages.length - 1;
-          
+
           // Check if this is an in-progress message (during active streaming)
           // Must have events to be considered actively streaming (not just a stale state after refresh)
-          const isActivelyStreaming = 
-            message.role === "assistant" && 
-            isLastMessage && 
-            streamingState && 
+          const isActivelyStreaming =
+            message.role === "assistant" &&
+            isLastMessage &&
+            streamingState &&
             streamingState.messageId === message.id &&
             !streamingState.isComplete &&
-            streamingState.events && 
+            streamingState.events &&
             streamingState.events.length > 0;
-          
+
           // Check if message appears incomplete (after refresh, no streaming state)
           // An incomplete message has no processing_time_ms and is the last assistant message
-          // processing_time_ms is null for incomplete messages, and a number (even 0) for complete ones
+          // processing_time_ms is null/undefined for incomplete messages, and a number (even 0) for complete ones
           // Note: Sometimes null values come through as objects from JSON parsing
-          const hasValidProcessingTime = 
-            typeof message.processing_time_ms === 'number' && 
+          const hasValidProcessingTime =
+            message.processing_time_ms !== null &&
+            message.processing_time_ms !== undefined &&
+            typeof message.processing_time_ms === 'number' &&
             !isNaN(message.processing_time_ms);
-          
-          // Check if any tools are still in progress (no output)
-          const hasInProgressTools = message.tool_usages?.some(usage => 
-            usage.output === null || usage.output === undefined
-          ) || false;
-          
-          // A message is only incomplete if it has no valid processing time OR has in-progress tools
-          // AND it's not actively streaming AND the streaming state isn't marked as complete
-          // progress_content alone doesn't make a message incomplete
+
+          // A message is incomplete if it has no processing_time_ms
+          // The presence of processing_time_ms is the definitive indicator that streaming completed
+          // Note: Some tools may have null output (filtered tools like TodoWrite) but that's OK
           const isStreamingComplete = streamingState && streamingState.isComplete;
-          const isIncompleteMessage = 
-            message.role === "assistant" && 
+          const isIncompleteMessage =
+            message.role === "assistant" &&
             isLastMessage &&
-            (!hasValidProcessingTime || hasInProgressTools) &&
-            !isActivelyStreaming && // Not actively streaming (which would handle it differently)
-            !isStreamingComplete; // Not completed streaming either
+            !hasValidProcessingTime &&  // Only check processing_time_ms, not tool outputs
+            !isActivelyStreaming &&     // Not actively streaming (which would handle it differently)
+            !isStreamingComplete;       // Not completed streaming either
+
+          // Debug logging for last assistant message
+          if (message.role === "assistant" && isLastMessage) {
+            console.log("[MessageList] Last assistant message debug:", {
+              messageId: message.id,
+              hasValidProcessingTime,
+              processing_time_ms: message.processing_time_ms,
+              isActivelyStreaming,
+              isStreamingComplete,
+              isIncompleteMessage,
+              hasProgressContent: !!message.progress_content,
+              progressContentLength: message.progress_content?.length || 0,
+              contentLength: message.content?.length || 0,
+              toolUsagesCount: message.tool_usages?.length || 0,
+              streamingStateExists: !!streamingState,
+              streamingStateMessageId: streamingState?.messageId,
+              streamingStateIsComplete: streamingState?.isComplete,
+            });
+          }
           
           
           
@@ -98,12 +114,14 @@ export const MessageList = () => {
           if (isIncompleteMessage) {
             // Reconstruct events from existing tool usages
             const reconstructedEvents = [];
-            
+
             // Use progress_content if available (contains internal thinking), otherwise use regular content
             const contentToShow = message.progress_content || message.content;
-            
-            // Add content event if message has content
-            if (contentToShow) {
+
+            // Only add content event if there's actual content to show
+            // Note: We don't add content event for progress_content to avoid showing it twice
+            // The InProgressMessage component will show "Thinking..." indicator instead
+            if (contentToShow && contentToShow.trim() && message.content) {
               reconstructedEvents.push({
                 type: "content" as const,
                 timestamp: new Date(message.createdAt || Date.now()).getTime(),
@@ -132,20 +150,19 @@ export const MessageList = () => {
                   output = usage.parameters;
                 }
                 
+                // Always add the tool_start event first
+                reconstructedEvents.push({
+                  type: "tool_start" as const,
+                  timestamp: new Date(usage.createdAt || Date.now()).getTime(),
+                  tool: {
+                    toolUsageId: usage.id,
+                    toolName: usage.tool_name,
+                    status: "active" as const,
+                  },
+                });
+
+                // If complete, immediately add the tool_complete event
                 if (isComplete) {
-                  // Add both start and complete events for completed tools
-                  // First add the tool_start event
-                  reconstructedEvents.push({
-                    type: "tool_start" as const,
-                    timestamp: new Date(usage.createdAt || Date.now()).getTime(),
-                    tool: {
-                      toolUsageId: usage.id,
-                      toolName: usage.tool_name,
-                      status: "active" as const,
-                    },
-                  });
-                  
-                  // Then add the tool_complete event
                   reconstructedEvents.push({
                     type: "tool_complete" as const,
                     timestamp: new Date(usage.createdAt || Date.now()).getTime() + 1, // Slightly later timestamp
@@ -157,27 +174,17 @@ export const MessageList = () => {
                       output: output,
                     },
                   });
-                } else {
-                  // Add as in-progress tool (tool_start event)
-                  reconstructedEvents.push({
-                    type: "tool_start" as const,
-                    timestamp: new Date(usage.createdAt || Date.now()).getTime(),
-                    tool: {
-                      toolUsageId: usage.id,
-                      toolName: usage.tool_name,
-                      status: "active" as const,
-                    },
-                  });
                 }
               });
             }
-            
-            
+
+
             return (
               <InProgressMessage
                 key={message.id || index}
                 message={message as Message}
                 events={reconstructedEvents}
+                isIncomplete={true}
               />
             );
           }
@@ -196,6 +203,7 @@ export const MessageList = () => {
               message={message as Message}
               activeTools={currentActiveTools}
               isLastMessage={isLastMessage}
+              showTimeStamp={true}
             />
           );
         })}

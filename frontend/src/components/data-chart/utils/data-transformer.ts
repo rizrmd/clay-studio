@@ -10,12 +10,20 @@ export function transformChartData(chartType: ChartType, data: ChartData): Parti
   // Transform based on chart type
   switch (chartType) {
     case "line":
+      return transformCartesianData(data, "line", false);
+
     case "bar":
-      return transformCartesianData(data, chartType);
+      return transformCartesianData(data, "bar", false);
+
+    case "column":
+      return transformCartesianData(data, "bar", true);
     
     case "pie":
     case "funnel":
       return transformPieData(data, chartType);
+
+    case "donut":
+      return transformDonutData(data);
     
     case "scatter":
       return transformScatterData(data);
@@ -61,16 +69,26 @@ export function transformChartData(chartType: ChartType, data: ChartData): Parti
   }
 }
 
-function transformCartesianData(data: ChartData, type: "line" | "bar"): Partial<EChartsOption> {
+function transformCartesianData(data: ChartData, type: "line" | "bar", isHorizontal: boolean = false): Partial<EChartsOption> {
   const options: Partial<EChartsOption> = {};
 
-  // Handle categories (x-axis)
+  // Handle categories
   if (data.categories) {
-    options.xAxis = {
-      type: "category",
-      data: data.categories,
-    };
-    options.yAxis = { type: "value" };
+    if (isHorizontal) {
+      // Horizontal bar: categories on y-axis, values on x-axis
+      options.yAxis = {
+        type: "category",
+        data: data.categories,
+      };
+      options.xAxis = { type: "value" };
+    } else {
+      // Vertical column/line: categories on x-axis, values on y-axis
+      options.xAxis = {
+        type: "category",
+        data: data.categories,
+      };
+      options.yAxis = { type: "value" };
+    }
   }
 
   // Handle series
@@ -90,10 +108,10 @@ function transformCartesianData(data: ChartData, type: "line" | "bar"): Partial<
   if (data.dataset) {
     options.dataset = data.dataset;
     if (!options.xAxis) {
-      options.xAxis = { type: "category" };
+      options.xAxis = { type: isHorizontal ? "value" : "category" };
     }
     if (!options.yAxis) {
-      options.yAxis = { type: "value" };
+      options.yAxis = { type: isHorizontal ? "category" : "value" };
     }
   }
 
@@ -122,6 +140,35 @@ function transformPieData(data: ChartData, type: "pie" | "funnel" = "pie"): Part
     options.series = [{
       type: type as any,
       radius: type === "pie" ? "50%" : undefined,
+      data: Array.isArray(data.data) ? data.data : [],
+    }];
+  }
+
+  return options;
+}
+
+function transformDonutData(data: ChartData): Partial<EChartsOption> {
+  const options: Partial<EChartsOption> = {};
+
+  if (data.series) {
+    options.series = data.series.map(s => {
+      const { type: _, name, data: seriesData, ...rest } = s;
+      return {
+        type: "pie" as any,
+        name: name,
+        radius: ["40%", "70%"], // Inner and outer radius for donut effect
+        data: seriesData.map((value: any, index: number) => ({
+          value: typeof value === "object" ? value.value : value,
+          name: typeof value === "object" ? value.name : (data.categories?.[index] || `Item ${index + 1}`),
+        })),
+        ...rest,
+      };
+    });
+  } else if (data.data) {
+    // Simple donut data format
+    options.series = [{
+      type: "pie" as any,
+      radius: ["40%", "70%"], // Inner and outer radius for donut effect
       data: Array.isArray(data.data) ? data.data : [],
     }];
   }

@@ -445,12 +445,40 @@ pub fn get_interaction_tools() -> Vec<Tool> {
                 "additionalProperties": false
             }),
         },
+        Tool {
+            name: "analysis_show".to_string(),
+            description: "Display an analysis with a run button so users can execute it directly in chat".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "analysis_id": {
+                        "type": "string",
+                        "description": "ID of the analysis to display"
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Title to display for the analysis"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Optional description of what the analysis does"
+                    },
+                    "parameters": {
+                        "type": "object",
+                        "description": "Optional default parameters for the analysis",
+                        "additionalProperties": true
+                    }
+                },
+                "required": ["analysis_id", "title"],
+                "additionalProperties": false
+            }),
+        },
     ]
 }
 
 /// Check if a tool name is an interaction tool
 pub fn is_interaction_tool(tool_name: &str) -> bool {
-    matches!(tool_name, "ask_user" | "export_excel" | "show_table" | "show_chart" | "file_list" | "file_read" | "file_search" | "file_metadata" | "file_peek" | "file_search_content" | "file_range" | "file_download_url")
+    matches!(tool_name, "ask_user" | "export_excel" | "show_table" | "show_chart" | "file_list" | "file_read" | "file_search" | "file_metadata" | "file_peek" | "file_search_content" | "file_range" | "file_download_url" | "analysis_show")
 }
 
 /// Handle interaction tool calls
@@ -597,6 +625,48 @@ pub async fn handle_tool_call(
                 data: None,
             })?;
             Ok(parsed_result)
+        },
+        "analysis_show" => {
+            let args = arguments
+                .and_then(|v| v.as_object())
+                .ok_or_else(|| JsonRpcError {
+                    code: INVALID_PARAMS,
+                    message: "Invalid arguments".to_string(),
+                    data: None,
+                })?;
+
+            let analysis_id = args.get("analysis_id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| JsonRpcError {
+                    code: INVALID_PARAMS,
+                    message: "Missing required field: analysis_id".to_string(),
+                    data: None,
+                })?;
+
+            let title = args.get("title")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| JsonRpcError {
+                    code: INVALID_PARAMS,
+                    message: "Missing required field: title".to_string(),
+                    data: None,
+                })?;
+
+            let description = args.get("description")
+                .and_then(|v| v.as_str());
+
+            let parameters = args.get("parameters")
+                .cloned()
+                .unwrap_or(json!({}));
+
+            Ok(json!({
+                "status": "success",
+                "interaction_type": "analysis_show",
+                "analysis_id": analysis_id,
+                "title": title,
+                "description": description,
+                "parameters": parameters,
+                "message": "Analysis displayed with run button"
+            }))
         },
         _ => Err(JsonRpcError {
             code: METHOD_NOT_FOUND,

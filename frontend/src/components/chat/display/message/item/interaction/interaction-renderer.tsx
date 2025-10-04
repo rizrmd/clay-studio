@@ -26,7 +26,8 @@ interface InteractionSpec {
     | "show_chart"
     | "show_table"
     | "markdown"
-    | "excel_export";
+    | "excel_export"
+    | "analysis_show";
   title: string;
   data: any;
   headers?: string[];
@@ -34,6 +35,9 @@ interface InteractionSpec {
   options?: any;
   requires_response: boolean;
   created_at: string;
+  analysis_id?: string;
+  description?: string;
+  parameters?: any;
 }
 
 interface InteractionRendererProps {
@@ -110,6 +114,21 @@ export function InteractionRenderer({
             title: "Excel Export",
             data: actualOutput,
             interaction_id: `excel-${Date.now()}`,
+            requires_response: false,
+            created_at: new Date().toISOString(),
+          } as InteractionSpec;
+        }
+
+        // analysis_show format: {interaction_type: "analysis_show", analysis_id: "...", title: "...", ...}
+        if (actualOutput.interaction_type === "analysis_show" && actualOutput.analysis_id) {
+          return {
+            interaction_type: "analysis_show",
+            title: actualOutput.title || "Analysis",
+            analysis_id: actualOutput.analysis_id,
+            description: actualOutput.description,
+            parameters: actualOutput.parameters || {},
+            data: actualOutput,
+            interaction_id: `analysis-${Date.now()}`,
             requires_response: false,
             created_at: new Date().toISOString(),
           } as InteractionSpec;
@@ -394,6 +413,34 @@ export function InteractionRenderer({
         </div>
       );
 
+    case "analysis_show":
+      // Render analysis with a run button
+      return (
+        <div className="border rounded-lg p-4 bg-blue-50/50 border-blue-200">
+          <h3 className="font-medium text-sm mb-2 text-blue-800 flex items-center gap-2">
+            📊 {interactionSpec.title}
+          </h3>
+          {interactionSpec.description && (
+            <p className="text-sm text-gray-700 mb-3">{interactionSpec.description}</p>
+          )}
+          <div className="mt-3">
+            <button
+              onClick={() => {
+                // TODO: Trigger analysis execution via WebSocket or API
+                console.log("Running analysis:", interactionSpec.analysis_id, interactionSpec.parameters);
+              }}
+              className="inline-flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-md transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              Run Analysis
+            </button>
+          </div>
+        </div>
+      );
+
     default:
       return null;
   }
@@ -447,6 +494,11 @@ export function hasInteraction(toolOutput: any): boolean {
 
       // excel_export format: {status: "success", download_url: "...", filename: "...", ...}
       if (actualOutput.status === "success" && actualOutput.download_url) {
+        return true;
+      }
+
+      // analysis_show format: {interaction_type: "analysis_show", analysis_id: "...", ...}
+      if (actualOutput.interaction_type === "analysis_show" && actualOutput.analysis_id) {
         return true;
       }
     }

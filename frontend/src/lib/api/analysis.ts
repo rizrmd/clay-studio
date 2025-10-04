@@ -78,7 +78,7 @@ export const analysisApi = {
   },
 
   getJob: async (jobId: string): Promise<AnalysisJob> => {
-    return await api.get<AnalysisJob>(`/analysis/jobs/${jobId}`);
+    return await api.get<AnalysisJob>(`/jobs/${jobId}`);
   },
 
   executeAnalysis: async (analysisId: string, data?: CreateJobRequest): Promise<ExecuteAnalysisResponse> => {
@@ -89,11 +89,11 @@ export const analysisApi = {
   },
 
   cancelJob: async (jobId: string): Promise<void> => {
-    await api.post(`/analysis/jobs/${jobId}/cancel`);
+    await api.post(`/jobs/${jobId}/cancel`);
   },
 
   getJobResult: async (jobId: string): Promise<AnalysisResult> => {
-    return await api.get<AnalysisResult>(`/analysis/jobs/${jobId}/result`);
+    return await api.get<AnalysisResult>(`/jobs/${jobId}/result`);
   },
 
   // Schedule operations

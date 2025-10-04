@@ -1,17 +1,14 @@
 import { cn } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
   Play,
-  Clock,
-  CheckCircle,
-  XCircle,
   Code,
   Database,
   FileText,
-  MoreVertical,
+  MoreHorizontal,
+  Trash2,
   BarChart,
+  Loader2,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -19,7 +16,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Analysis } from "@/lib/store/analysis-store";
+import { Analysis, analysisActions } from "@/lib/store/analysis-store";
+import { analysisApi } from "@/lib/api/analysis";
+import { tabsActions, tabsStore } from "@/lib/store/tabs-store";
+import { useSnapshot } from "valtio";
+import { useNavigate } from "react-router-dom";
 
 interface AnalysisListProps {
   analyses: Analysis[];
@@ -27,6 +28,7 @@ interface AnalysisListProps {
   onRunAnalysis: (analysisId: string) => void;
   onAddNew?: () => void;
   activeAnalysisId?: string;
+  projectId?: string;
 }
 
 export function AnalysisList({
@@ -34,49 +36,69 @@ export function AnalysisList({
   onAnalysisClick,
   onRunAnalysis,
   activeAnalysisId,
+  projectId,
 }: AnalysisListProps) {
-  const getTypeIcon = (type: "sql" | "python" | "r") => {
-    switch (type) {
+  const tabsSnapshot = useSnapshot(tabsStore);
+  const navigate = useNavigate();
+
+  const getTypeIcon = (type?: "sql" | "python" | "r" | string) => {
+    if (!type) {
+      return <Code className="h-4 w-4 text-muted-foreground" />;
+    }
+
+    switch (type.toLowerCase()) {
       case "sql":
-        return <Database className="w-4 h-4 text-muted-foreground" />;
+        return <Database className="h-4 w-4 text-blue-500" />;
       case "python":
-        return <Code className="w-4 h-4 text-muted-foreground" />;
+        return <Code className="h-4 w-4 text-green-500" />;
       case "r":
-        return <FileText className="w-4 h-4 text-muted-foreground" />;
+        return <FileText className="h-4 w-4 text-purple-500" />;
+      case "javascript":
+      case "js":
+        return <Code className="h-4 w-4 text-yellow-500" />;
       default:
-        return <Code className="w-4 h-4 text-muted-foreground" />;
+        return <Code className="h-4 w-4 text-muted-foreground" />;
     }
   };
 
-  const getStatusIcon = (status: Analysis["status"]) => {
-    switch (status) {
-      case "running":
-        return <Play className="h-3 w-3" />;
-      case "completed":
-        return <CheckCircle className="h-3 w-3 text-green-500" />;
-      case "failed":
-        return <XCircle className="h-3 w-3 text-red-500" />;
-      default:
-        return <Clock className="h-3 w-3" />;
-    }
-  };
+  const handleDelete = async (analysisId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
 
-  const getStatusColor = (status: Analysis["status"]) => {
-    switch (status) {
-      case "running":
-        return "bg-blue-100 text-blue-700";
-      case "completed":
-        return "bg-green-100 text-green-700";
-      case "failed":
-        return "bg-red-100 text-red-700";
-      default:
-        return "bg-gray-100 text-gray-700";
+    if (!confirm('Are you sure you want to delete this analysis?')) return;
+
+    try {
+      // Check if we're currently viewing this analysis
+      const isCurrentlyViewing = tabsSnapshot.tabs.some(
+        t => t.type === 'analysis' &&
+             t.metadata.analysisId === analysisId &&
+             t.id === tabsSnapshot.activeTabId
+      );
+
+      await analysisApi.deleteAnalysis(analysisId);
+
+      // Remove from store
+      analysisActions.removeAnalysis(analysisId);
+
+      // Close the tab if it's open
+      const analysisTab = tabsSnapshot.tabs.find(
+        t => t.type === 'analysis' && t.metadata.analysisId === analysisId
+      );
+      if (analysisTab) {
+        tabsActions.removeTab(analysisTab.id);
+      }
+
+      // If we were viewing this analysis, navigate away
+      if (isCurrentlyViewing && projectId) {
+        navigate(`/p/${projectId}`);
+      }
+    } catch (error) {
+      console.error('Failed to delete analysis:', error);
+      alert('Failed to delete analysis');
     }
   };
 
   return (
     <div className="flex flex-col h-full">
-      {/* Analysis list */}
       <div className="flex-1 overflow-y-auto">
         {analyses.length === 0 ? (
           <div className="p-4 text-center">
@@ -87,80 +109,81 @@ export function AnalysisList({
             </p>
           </div>
         ) : (
-          <div className="p-2 space-y-1">
+          <div className="px-2">
             {analyses.map((analysis) => (
-              <Card
+              <div
                 key={analysis.id}
                 className={cn(
-                  "p-2 cursor-pointer transition-all hover:bg-accent/50",
-                  activeAnalysisId === analysis.id && "bg-accent border-accent"
+                  "block w-full group text-left p-2 rounded-md hover:bg-muted border border-transparent transition-colors mb-1 cursor-pointer relative",
+                  activeAnalysisId === analysis.id && "bg-muted border-blue-700/30"
                 )}
                 onClick={() => onAnalysisClick(analysis.id)}
               >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      {getTypeIcon(analysis.type)}
-                      <span className="text-sm font-medium truncate">
-                        {analysis.name}
-                      </span>
-                    </div>
-
-                    {analysis.description && (
-                      <p className="text-xs text-muted-foreground line-clamp-2">
-                        {analysis.description}
-                      </p>
+                <div className="flex items-start gap-2 overflow-hidden group-hover:pr-8">
+                  {/* Icon */}
+                  <div className="pt-1">
+                    {analysis.status === 'running' ? (
+                      <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+                    ) : (
+                      getTypeIcon(analysis.type)
                     )}
-
-                    <div className="flex items-center gap-2 mt-2">
-                      <Badge
-                        variant="secondary"
-                        className={cn(
-                          "text-xs",
-                          getStatusColor(analysis.status)
-                        )}
-                      >
-                        {getStatusIcon(analysis.status)}
-                        <span className="ml-1 capitalize">
-                          {analysis.status}
-                        </span>
-                      </Badge>
-
-                      {analysis.last_job &&
-                        analysis.last_job.execution_time_ms && (
-                          <span className="text-xs text-muted-foreground">
-                            {Math.round(
-                              analysis.last_job.execution_time_ms / 1000
-                            )}
-                            s
-                          </span>
-                        )}
-                    </div>
                   </div>
 
+                  {/* Content */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium truncate">
+                        {analysis.name || "Untitled Analysis"}
+                      </p>
+                      {analysis.status === 'running' && (
+                        <span className="text-xs text-blue-500 font-medium">Running</span>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {analysis.description || "No description"}
+                    </p>
+                    {analysis.created_at && (
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {new Date(analysis.created_at).toLocaleDateString()}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Actions dropdown */}
+                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 hover:bg-accent"
+                        className="h-6 w-6 p-0"
+                        onClick={(e) => e.stopPropagation()}
                       >
-                        <MoreVertical className="h-3 w-3" />
+                        <MoreHorizontal className="h-3 w-3" />
                       </Button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-48">
+                    <DropdownMenuContent align="end">
                       <DropdownMenuItem
-                        onClick={() => onRunAnalysis(analysis.id)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onRunAnalysis(analysis.id);
+                        }}
                       >
+                        <Play className="h-4 w-4 mr-2" />
                         Run Analysis
                       </DropdownMenuItem>
-                      <DropdownMenuItem>View Results</DropdownMenuItem>
-                      <DropdownMenuItem>Schedule</DropdownMenuItem>
-                      <DropdownMenuItem>Export Results</DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={(e) => handleDelete(analysis.id, e)}
+                        className="text-destructive"
+                      >
+                        <Trash2 className="h-4 w-4 mr-2" />
+                        Delete
+                      </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>
-              </Card>
+              </div>
             ))}
           </div>
         )}

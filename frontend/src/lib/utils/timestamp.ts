@@ -65,7 +65,7 @@ export function getRelativeTime(date: Date | string): string {
   const diffDay = Math.floor(diffHour / 24);
 
   if (diffSec < 60) {
-    return "just now";
+    return diffSec === 0 ? "just now" : `${diffSec} second${diffSec === 1 ? "" : "s"} ago`;
   } else if (diffMin < 60) {
     return `${diffMin} minute${diffMin === 1 ? "" : "s"} ago`;
   } else if (diffHour < 24) {

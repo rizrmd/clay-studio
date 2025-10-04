@@ -1,6 +1,7 @@
 import { ToolUsageDialog } from "@/components/chat/display/message/item/tools/tool-usage-dialog";
 import { type ToolInvocation } from "@/components/chat/display/message/item/types";
 import { cn } from "@/lib/utils";
+import { getFriendlyToolName } from "@/lib/utils/tool-names";
 import { Code2 } from "lucide-react";
 import React, { useState } from "react";
 
@@ -38,8 +39,8 @@ export const ChatToolUsage: React.FC<CompletedToolCallProps> = ({
           <div className="flex items-center gap-2 text-muted-foreground px-1">
             <Code2 />
             <span>
-              <span className="font-mono capitalize">
-                {invocation.toolName.split("__").pop()?.split("_").join(" ")}
+              <span className="font-mono">
+                {getFriendlyToolName(invocation.toolName)}
               </span>
             </span>
           </div>
@@ -79,12 +80,8 @@ export const ChatToolUsage: React.FC<CompletedToolCallProps> = ({
                   <div className="flex items-center gap-2 text-muted-foreground px-1">
                     <Code2 />
                     <span>
-                      <span className="font-mono capitalize">
-                        {invocation.toolName
-                          .split("__")
-                          .pop()
-                          ?.split("_")
-                          .join(" ")}
+                      <span className="font-mono">
+                        {getFriendlyToolName(invocation.toolName)}
                       </span>
                     </span>
                   </div>

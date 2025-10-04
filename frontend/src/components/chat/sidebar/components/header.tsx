@@ -1,23 +1,34 @@
-import { ChevronLeft, X, MessageSquare, Trash2, Code } from "lucide-react";
+import { ChevronLeft, X, MessageSquare, Trash2, Code, Users, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useSnapshot } from "valtio";
 import { useNavigate } from "react-router-dom";
 import { sidebarActions, sidebarStore } from "@/lib/store/chat/sidebar-store";
 import { tabsActions } from "@/lib/store/tabs-store";
+import { ProjectMembersDialog } from "./project-members-dialog";
+import { useState } from "react";
 
 interface ConversationSidebarHeaderProps {
   onNavigateToProjects: () => void;
   onBulkDelete: () => void;
   projectId?: string;
+  currentUserId?: string;
 }
 
 export function ConversationSidebarHeader({
   onNavigateToProjects,
   onBulkDelete,
   projectId,
+  currentUserId,
 }: ConversationSidebarHeaderProps) {
   const sidebarSnapshot = useSnapshot(sidebarStore);
   const navigate = useNavigate();
+  const [membersDialogOpen, setMembersDialogOpen] = useState(false);
 
   return (
     <div className="px-1 py-2 border-b">
@@ -64,26 +75,58 @@ export function ConversationSidebarHeader({
           </div>
         ) : (
           <div className="flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                if (projectId) {
-                  // Open context in a new tab
-                  tabsActions.openInNewTab('context', {
-                    projectId,
-                  }, 'Context');
-                  
-                  // Navigate to context route
-                  navigate(`/p/${projectId}/context`);
-                }
-              }}
-              className="gap-1 h-[25px] border border-transparent hover:border-gray-200"
-              title="Project Context"
-            >
-              <Code size={10} />
-              <span className="text-xs">Context</span>
-            </Button>
+            {projectId && (
+              <>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="gap-1 h-[25px] border border-transparent hover:border-gray-200"
+                      title="Project Settings"
+                    >
+                      <Settings size={10} />
+                      <span className="text-xs">Project</span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem
+                      onClick={() => {
+                        setMembersDialogOpen(true);
+                        // Open members in a new tab
+                        tabsActions.openInNewTab('members', {
+                          projectId,
+                        }, 'Members');
+                      }}
+                    >
+                      <Users className="h-4 w-4 mr-2" />
+                      Members
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => {
+                        // Open context in a new tab
+                        tabsActions.openInNewTab('context', {
+                          projectId,
+                        }, 'Context');
+                        // Navigate to context route
+                        navigate(`/p/${projectId}/context`);
+                      }}
+                    >
+                      <Code className="h-4 w-4 mr-2" />
+                      Context
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                <ProjectMembersDialog
+                  projectId={projectId}
+                  currentUserId={currentUserId}
+                  trigger={null}
+                  open={membersDialogOpen}
+                  onOpenChange={setMembersDialogOpen}
+                />
+              </>
+            )}
             <Button
               variant="ghost"
               size="sm"
@@ -94,7 +137,7 @@ export function ConversationSidebarHeader({
                     projectId,
                     conversationId: 'new',
                   }, 'New Chat');
-                  
+
                   // Navigate to the new route
                   navigate(`/p/${projectId}/new`);
                 }

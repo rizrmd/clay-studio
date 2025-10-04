@@ -7,7 +7,7 @@ pub mod file_upload;
 pub mod message;
 pub mod message_role;
 pub mod project;
-pub mod project_share;
+pub mod project_member;
 pub mod session;
 pub mod tool;
 pub mod tool_usage;
@@ -26,6 +26,7 @@ pub use file_upload::*;
 pub use message::*;
 pub use message_role::*;
 pub use project::*;
+pub use project_member::*;
 #[allow(unused_imports)]
 pub use session::*;
 pub use tool::*;

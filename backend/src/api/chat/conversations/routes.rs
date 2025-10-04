@@ -1,5 +1,5 @@
 use salvo::prelude::*;
-use super::crud::{list_conversations, get_conversation, create_conversation, update_conversation, delete_conversation};
+use super::crud::{list_conversations, get_conversation, create_conversation, update_conversation, delete_conversation, toggle_conversation_visibility};
 use crate::utils::middleware::auth::auth_required;
 use crate::utils::middleware::client_scoped;
 
@@ -14,4 +14,6 @@ pub fn conversation_routes() -> Router {
             .get(get_conversation)
             .put(update_conversation)
             .delete(delete_conversation))
+        .push(Router::with_path("/conversations/{conversation_id}/visibility")
+            .patch(toggle_conversation_visibility))
 }

@@ -1,15 +1,16 @@
 import { useSnapshot } from "valtio";
 import { useNavigate } from "react-router-dom";
-import { 
-  MessageSquare, 
-  Database, 
-  TableProperties, 
+import {
+  MessageSquare,
+  Database,
+  TableProperties,
   Terminal,
-  Edit, 
+  Edit,
   Plus,
   BarChart3,
   Code,
-  X 
+  Users,
+  X
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { tabsStore, tabsActions, Tab, TabType } from "@/lib/store/tabs-store";
@@ -24,6 +25,7 @@ const TAB_ICONS: Record<TabType, typeof MessageSquare> = {
   'datasource_list': Database,
   'analysis': BarChart3,
   'context': Code,
+  'members': Users,
 };
 
 interface TabItemProps {
@@ -34,7 +36,7 @@ export function TabItem({ tab }: TabItemProps) {
   const snapshot = useSnapshot(tabsStore);
   const navigate = useNavigate();
   const isActive = snapshot.activeTabId === tab.id;
-  const Icon = TAB_ICONS[tab.type];
+  const Icon = TAB_ICONS[tab.type] || MessageSquare; // Fallback to MessageSquare if icon not found
 
   const getTabHref = (tab: Tab): string => {
     const { projectId, conversationId, datasourceId, tableName } = tab.metadata;

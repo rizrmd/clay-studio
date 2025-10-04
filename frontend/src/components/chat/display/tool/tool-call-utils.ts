@@ -13,24 +13,24 @@ import {
 
 export const parseMcpToolResult = (text: string): any => {
   try {
-    if (text.includes("[Resource from data-analysis at mcp://tool-result/")) {
-      const match = text.match(
-        /\[Resource from data-analysis at mcp:\/\/tool-result\/[^\]]+\]\s*(.+)/s
-      );
-      if (match && match[1]) {
-        const jsonText = match[1].trim();
-        return JSON.parse(jsonText);
+    // Handle MCP resource format: [Resource from <server-name> at mcp://tool-result/<tool-name>]
+    const resourcePatterns = [
+      /\[Resource from data-analysis at mcp:\/\/tool-result\/[^\]]+\]\s*(.+)/s,
+      /\[Resource from interaction at mcp:\/\/tool-result\/[^\]]+\]\s*(.+)/s,
+      /\[Resource from analysis at mcp:\/\/tool-result\/[^\]]+\]\s*(.+)/s,
+      /\[Resource from operation at mcp:\/\/tool-result\/[^\]]+\]\s*(.+)/s,
+    ];
+
+    for (const pattern of resourcePatterns) {
+      if (text.match(pattern)) {
+        const match = text.match(pattern);
+        if (match && match[1]) {
+          const jsonText = match[1].trim();
+          return JSON.parse(jsonText);
+        }
       }
     }
-    if (text.includes("[Resource from interaction at mcp://tool-result/")) {
-      const match = text.match(
-        /\[Resource from interaction at mcp:\/\/tool-result\/[^\]]+\]\s*(.+)/s
-      );
-      if (match && match[1]) {
-        const jsonText = match[1].trim();
-        return JSON.parse(jsonText);
-      }
-    }
+
     return null;
   } catch {
     return null;

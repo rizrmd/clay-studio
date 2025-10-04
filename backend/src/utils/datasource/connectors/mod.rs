@@ -1,3 +1,4 @@
+pub mod common;
 pub mod clickhouse;
 pub mod mysql;
 pub mod oracle;

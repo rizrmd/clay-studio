@@ -312,6 +312,16 @@ pub async fn create_project(
     .await
     .map_err(|e| AppError::InternalServerError(format!("Failed to create project: {}", e)))?;
 
+    // Add creator as project owner in project_members table
+    sqlx::query(
+        "INSERT INTO project_members (project_id, user_id, role) VALUES ($1, $2, 'owner')"
+    )
+    .bind(&project_id)
+    .bind(user_id)
+    .execute(&state.db_pool)
+    .await
+    .map_err(|e| AppError::InternalServerError(format!("Failed to add project owner: {}", e)))?;
+
     let project_id: String = project_row.get("id");
     let project_name: String = project_row.get("name");
     let created_at: chrono::DateTime<chrono::Utc> = project_row.get("created_at");
@@ -345,7 +355,7 @@ pub async fn list_projects(depot: &mut Depot, res: &mut Response) -> Result<(), 
     // Get current user's ID for filtering
     let user_id = get_current_user_id(depot)?;
 
-    // Get projects filtered by user_id (unless user is root), excluding soft-deleted projects
+    // Get projects where user is a member (via project_members table), excluding soft-deleted projects
     let project_rows = if is_current_user_root(depot) {
         sqlx::query(
             "SELECT id, name, created_at, updated_at FROM projects WHERE deleted_at IS NULL ORDER BY created_at DESC"
@@ -355,7 +365,11 @@ pub async fn list_projects(depot: &mut Depot, res: &mut Response) -> Result<(), 
         .map_err(|e| AppError::InternalServerError(format!("Failed to fetch projects: {}", e)))?
     } else {
         sqlx::query(
-            "SELECT id, name, created_at, updated_at FROM projects WHERE user_id = $1 AND deleted_at IS NULL ORDER BY created_at DESC"
+            "SELECT DISTINCT p.id, p.name, p.created_at, p.updated_at
+             FROM projects p
+             JOIN project_members pm ON p.id = pm.project_id
+             WHERE pm.user_id = $1 AND p.deleted_at IS NULL
+             ORDER BY p.created_at DESC"
         )
         .bind(user_id)
         .fetch_all(&state.db_pool)

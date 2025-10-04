@@ -5,6 +5,7 @@ import { MultimodalInput } from "../input";
 import { uiStore, uiActions } from "@/lib/store/chat/ui-store";
 import { chatInputStore, chatInputActions } from "@/lib/store/chat-input-store";
 import { inputStore } from "@/lib/store/chat/input-store";
+import { chatStore } from "@/lib/store/chat/chat-store";
 import { useChat } from "@/lib/hooks/use-chat";
 import { useFileUpload } from "../input/use-file-upload";
 import { FileText, PanelLeftOpen, PanelLeftClose } from "lucide-react";
@@ -15,6 +16,7 @@ export function Chat() {
   const uiSnapshot = useSnapshot(uiStore, { sync: true });
   const chatInputSnapshot = useSnapshot(chatInputStore);
   const inputSnapshot = useSnapshot(inputStore);
+  const chatSnapshot = useSnapshot(chatStore);
 
   // Current conversation info
   const projectId = uiSnapshot.currentProject;
@@ -45,6 +47,15 @@ export function Chat() {
   useEffect(() => {
     uiActions.setWsSubscribed(isConnected);
   }, [isConnected]);
+
+  // Handle pending input text from chat helpers (e.g., "Fix with Chat" button)
+  useEffect(() => {
+    if (conversationId === 'new' && chatSnapshot.pendingInputText) {
+      console.log('Applying pending input text:', chatSnapshot.pendingInputText);
+      chatInputActions.setInput(chatSnapshot.pendingInputText);
+      chatStore.pendingInputText = ''; // Clear after applying
+    }
+  }, [conversationId, chatSnapshot.pendingInputText]);
 
   const handleSubmit = async (
     e: React.FormEvent,

@@ -45,7 +45,27 @@ export function getDefaultOptions(chartType: ChartType, title: string): Partial<
         yAxis: { type: "value" },
       };
 
+    case "column":
+      return {
+        ...baseOptions,
+        xAxis: { type: "value" },
+        yAxis: { type: "category" },
+      };
+
     case "pie":
+      return {
+        ...baseOptions,
+        tooltip: {
+          trigger: "item",
+          formatter: "{a} <br/>{b}: {c} ({d}%)",
+        },
+        legend: {
+          orient: "vertical",
+          left: "left",
+        },
+      };
+
+    case "donut":
       return {
         ...baseOptions,
         tooltip: {
@@ -298,9 +318,11 @@ function getTooltipTrigger(chartType: ChartType): "item" | "axis" | "none" {
   switch (chartType) {
     case "line":
     case "bar":
+    case "column":
     case "candlestick":
       return "axis";
     case "pie":
+    case "donut":
     case "funnel":
     case "gauge":
     case "scatter":

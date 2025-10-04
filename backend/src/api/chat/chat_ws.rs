@@ -39,6 +39,8 @@ async fn save_message(
         .map_err(|e| AppError::InternalServerError(format!("Failed to insert user message: {}", e)))?;
     } else {
         // Update the existing message (created as placeholder during streaming)
+        // Note: We intentionally don't update progress_content here to preserve the "thinking" content
+        // that was saved during streaming. Only update content and processing_time_ms.
         sqlx::query(
             "UPDATE messages SET content = $1, processing_time_ms = $2 WHERE id = $3",
         )
@@ -212,7 +214,9 @@ pub async fn handle_chat_message_ws(
     tracing::info!("Got conversation history");
 
     // Build the full prompt with conversation history
-    let mut full_prompt = String::new();
+    // Pre-allocate capacity: estimate ~300 chars per message + current content
+    let estimated_capacity = (cached_messages.len() * 300) + content.len() + 1000;
+    let mut full_prompt = String::with_capacity(estimated_capacity);
     let mut history_count = 0;
     if !cached_messages.is_empty() {
         full_prompt.push_str("Previous conversation:\n\n");
@@ -313,20 +317,37 @@ pub async fn handle_chat_message_ws(
 
     // Create a placeholder assistant message immediately to satisfy foreign key constraints
     // This will be updated with the final content when streaming completes
+    let assistant_created_at = Utc::now();
     if let Err(e) = sqlx::query(
-        "INSERT INTO messages (id, conversation_id, content, role, created_at) 
+        "INSERT INTO messages (id, conversation_id, content, role, created_at)
          VALUES ($1, $2, $3, $4, $5)"
     )
     .bind(message_id)
     .bind(&actual_conversation_id)
     .bind("") // Empty content initially, will be updated
     .bind("assistant")
-    .bind(Utc::now())
+    .bind(assistant_created_at)
     .execute(&db_pool)
     .await {
         tracing::error!("Failed to create placeholder assistant message: {}", e);
         return Err(format!("Failed to create message: {}", e).into());
     }
+
+    // Add the placeholder assistant message to cache so it's visible during streaming
+    let placeholder_message = crate::models::Message {
+        id: message_id.to_string(),
+        content: String::new(),
+        role: crate::models::MessageRole::Assistant,
+        created_at: Some(assistant_created_at.to_rfc3339()),
+        processing_time_ms: None,
+        file_attachments: None,
+        tool_usages: None,
+        progress_content: None,
+    };
+    state
+        .update_conversation_cache(&actual_conversation_id, placeholder_message)
+        .await;
+    tracing::info!("Added placeholder assistant message to cache");
 
     // Track this conversation as actively streaming
     {
@@ -414,10 +435,11 @@ pub async fn handle_chat_message_ws(
     {
         Ok(mut receiver) => {
             tracing::info!("Claude query successful, starting message loop");
-            let mut progress_content = String::new();  // For internal thinking/progress
-            let mut assistant_content = String::new();  // For final user-facing content
-            let mut tool_usages = Vec::new();
-            let mut pending_tools = std::collections::HashMap::new();
+            // Pre-allocate capacity for better performance
+            let mut progress_content = String::with_capacity(2048);  // For internal thinking/progress
+            let mut assistant_content = String::with_capacity(1024);  // For final user-facing content
+            let mut tool_usages = Vec::with_capacity(8);
+            let mut pending_tools = std::collections::HashMap::with_capacity(8);
             let mut last_content_save = std::time::Instant::now();
             const CONTENT_SAVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
 
@@ -561,6 +583,11 @@ pub async fn handle_chat_message_ws(
                                 tracing::error!("Failed to update tool usage record: {}", e);
                             }
 
+                            // Invalidate cache so next fetch gets updated tool usages from database
+                            if let Err(e) = state.invalidate_conversation_cache(&actual_conversation_id).await {
+                                tracing::warn!("Failed to invalidate conversation cache: {}", e);
+                            }
+
                             // Store tool complete event for replay on reconnection
                             {
                                 let mut streams = active_claude_streams.write().await;
@@ -650,7 +677,12 @@ pub async fn handle_chat_message_ws(
                                     .await {
                                         tracing::error!("Failed to update tool usage record: {}", e);
                                     }
-                                    
+
+                                    // Invalidate cache so next fetch gets updated tool usages from database
+                                    if let Err(e) = state.invalidate_conversation_cache(&actual_conversation_id).await {
+                                        tracing::warn!("Failed to invalidate conversation cache: {}", e);
+                                    }
+
                                     // Send ToolComplete event
                                     broadcast_to_subscribers(
                                         &project_id,

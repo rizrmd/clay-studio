@@ -1,9 +1,11 @@
 import type { EChartsOption } from "echarts";
 
-export type ChartType = 
+export type ChartType =
   | "line"
   | "bar"
+  | "column"
   | "pie"
+  | "donut"
   | "scatter"
   | "radar"
   | "gauge"

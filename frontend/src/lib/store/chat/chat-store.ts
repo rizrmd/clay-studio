@@ -23,6 +23,7 @@ export const chatStore = proxy({
   project_id: "" as PROJECT_ID,
   conversation_id: "" as CONVERSATION_ID,
   pendingFirstChat: "",
+  pendingInputText: "", // Text to prefill in chat input after navigation
   expectingInitialMessage: undefined as CONVERSATION_ID | undefined,
   list: [] as CONVERSATION_ID[],
   map: {} as Record<CONVERSATION_ID, Conversation>,

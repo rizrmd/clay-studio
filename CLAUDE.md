@@ -5,3 +5,5 @@
   - Check compilation: `npm run check` (works without DATABASE_URL using existing cache)
 - using useState considered code smell, use valtio instead.
 - file that has more than 1000 lines is code smell.
+- database url is in backend/.env
+- never rerun mcp or dev server by yourself

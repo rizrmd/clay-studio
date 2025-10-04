@@ -25,26 +25,28 @@ pub async fn list_conversations(
     let project_id = req.query::<String>("project_id");
 
     // Build query based on filters - calculate actual message count excluding forgotten messages
-    // Include client_id filtering through projects table join
+    // Filter by visibility: show public conversations and private conversations owned by current user
     let conversations = if let Some(pid) = project_id {
         if is_current_user_root(depot) {
             sqlx::query(
-                "SELECT 
-                    c.id, 
-                    c.project_id, 
-                    c.title, 
+                "SELECT
+                    c.id,
+                    c.project_id,
+                    c.title,
                     (
-                        SELECT COUNT(*)::INTEGER 
-                        FROM messages m 
+                        SELECT COUNT(*)::INTEGER
+                        FROM messages m
                         WHERE m.conversation_id = c.id
                         AND (m.is_forgotten = false OR m.is_forgotten IS NULL)
                     ) AS message_count,
-                    c.created_at, 
-                    c.updated_at, 
-                    c.is_title_manually_set 
+                    c.created_at,
+                    c.updated_at,
+                    c.is_title_manually_set,
+                    c.created_by_user_id,
+                    c.visibility
                  FROM conversations c
-                 WHERE c.project_id = $1 
-                 ORDER BY c.created_at DESC 
+                 WHERE c.project_id = $1
+                 ORDER BY c.created_at DESC
                  LIMIT 100",
             )
             .bind(pid)
@@ -52,68 +54,79 @@ pub async fn list_conversations(
             .await
         } else {
             sqlx::query(
-                "SELECT 
-                    c.id, 
-                    c.project_id, 
-                    c.title, 
+                "SELECT
+                    c.id,
+                    c.project_id,
+                    c.title,
                     (
-                        SELECT COUNT(*)::INTEGER 
-                        FROM messages m 
+                        SELECT COUNT(*)::INTEGER
+                        FROM messages m
                         WHERE m.conversation_id = c.id
                         AND (m.is_forgotten = false OR m.is_forgotten IS NULL)
                     ) AS message_count,
-                    c.created_at, 
-                    c.updated_at, 
-                    c.is_title_manually_set 
+                    c.created_at,
+                    c.updated_at,
+                    c.is_title_manually_set,
+                    c.created_by_user_id,
+                    c.visibility
                  FROM conversations c
+                 JOIN project_members pm ON c.project_id = pm.project_id
                  WHERE c.project_id = $1
-                 ORDER BY c.created_at DESC 
+                   AND pm.user_id = $2
+                   AND (c.visibility = 'public' OR c.created_by_user_id = $2 OR c.visibility IS NULL)
+                 ORDER BY c.created_at DESC
                  LIMIT 100",
             )
             .bind(pid)
+            .bind(user_id)
             .fetch_all(&state.db_pool)
             .await
         }
     } else if is_current_user_root(depot) {
         sqlx::query(
-            "SELECT 
-                c.id, 
-                c.project_id, 
-                c.title, 
+            "SELECT
+                c.id,
+                c.project_id,
+                c.title,
                 (
-                    SELECT COUNT(*)::INTEGER 
-                    FROM messages m 
+                    SELECT COUNT(*)::INTEGER
+                    FROM messages m
                     WHERE m.conversation_id = c.id
                     AND (m.is_forgotten = false OR m.is_forgotten IS NULL)
                 ) AS message_count,
-                c.created_at, 
-                c.updated_at, 
-                c.is_title_manually_set 
+                c.created_at,
+                c.updated_at,
+                c.is_title_manually_set,
+                c.created_by_user_id,
+                c.visibility
              FROM conversations c
-             ORDER BY c.created_at DESC 
+             ORDER BY c.created_at DESC
              LIMIT 100",
         )
         .fetch_all(&state.db_pool)
         .await
     } else {
         sqlx::query(
-            "SELECT 
-                c.id, 
-                c.project_id, 
-                c.title, 
+            "SELECT
+                c.id,
+                c.project_id,
+                c.title,
                 (
-                    SELECT COUNT(*)::INTEGER 
-                    FROM messages m 
+                    SELECT COUNT(*)::INTEGER
+                    FROM messages m
                     WHERE m.conversation_id = c.id
                     AND (m.is_forgotten = false OR m.is_forgotten IS NULL)
                 ) AS message_count,
-                c.created_at, 
-                c.updated_at, 
-                c.is_title_manually_set 
+                c.created_at,
+                c.updated_at,
+                c.is_title_manually_set,
+                c.created_by_user_id,
+                c.visibility
              FROM conversations c
-             JOIN projects p ON c.project_id = p.id
-             WHERE p.user_id = $1
-             ORDER BY c.created_at DESC 
+             JOIN project_members pm ON c.project_id = pm.project_id
+             WHERE pm.user_id = $1
+               AND (c.visibility = 'public' OR c.created_by_user_id = $1 OR c.visibility IS NULL)
+             ORDER BY c.created_at DESC
              LIMIT 100",
         )
         .bind(user_id)
@@ -134,6 +147,10 @@ pub async fn list_conversations(
         // Debug logging
         tracing::debug!("Conversation {} has message_count: {}", id, message_count);
 
+        let created_by_user_id: Option<Uuid> = row.try_get("created_by_user_id").ok();
+        let visibility_str: Option<String> = row.try_get("visibility").ok();
+        let visibility = visibility_str.and_then(|v| ConversationVisibility::from_str(&v).ok());
+
         conversation_list.push(Conversation {
             id,
             project_id: row.try_get("project_id").map_err(|e| {
@@ -148,6 +165,8 @@ pub async fn list_conversations(
             })?,
             message_count,
             is_title_manually_set: row.try_get("is_title_manually_set").ok(),
+            created_by_user_id,
+            visibility,
         });
     }
 
@@ -167,19 +186,21 @@ pub async fn get_conversation(
         .ok_or(AppError::BadRequest("Missing conversation_id".to_string()))?;
 
     let conversation_row = sqlx::query(
-        "SELECT 
-            c.id, 
-            c.project_id, 
-            c.title, 
+        "SELECT
+            c.id,
+            c.project_id,
+            c.title,
             (
-                SELECT COUNT(*)::INTEGER 
-                FROM messages m 
+                SELECT COUNT(*)::INTEGER
+                FROM messages m
                 WHERE m.conversation_id = c.id
                 AND (m.is_forgotten = false OR m.is_forgotten IS NULL)
             ) AS message_count,
-            c.created_at, 
-            c.updated_at, 
-            c.is_title_manually_set 
+            c.created_at,
+            c.updated_at,
+            c.is_title_manually_set,
+            c.created_by_user_id,
+            c.visibility
          FROM conversations c
          WHERE c.id = $1",
     )
@@ -191,6 +212,10 @@ pub async fn get_conversation(
         "Conversation {} not found",
         conversation_id
     )))?;
+
+    let created_by_user_id: Option<Uuid> = conversation_row.try_get("created_by_user_id").ok();
+    let visibility_str: Option<String> = conversation_row.try_get("visibility").ok();
+    let visibility = visibility_str.and_then(|v| ConversationVisibility::from_str(&v).ok());
 
     let conversation = Conversation {
         id: conversation_row
@@ -210,6 +235,8 @@ pub async fn get_conversation(
             AppError::InternalServerError(format!("Failed to get message_count: {}", e))
         })?,
         is_title_manually_set: conversation_row.try_get("is_title_manually_set").ok(),
+        created_by_user_id,
+        visibility,
     };
 
     res.render(Json(conversation));
@@ -241,10 +268,13 @@ pub async fn create_conversation(
     // If title is explicitly provided, mark it as manually set
     let is_manually_set = title.is_some();
 
-    // Insert into database
+    // Get current user for created_by_user_id
+    let user_id = get_current_user_id(depot)?;
+
+    // Insert into database with default private visibility
     sqlx::query(
-        "INSERT INTO conversations (id, project_id, title, message_count, created_at, updated_at, is_title_manually_set) 
-         VALUES ($1, $2, $3, $4, $5, $6, $7)"
+        "INSERT INTO conversations (id, project_id, title, message_count, created_at, updated_at, is_title_manually_set, created_by_user_id, visibility)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'private')"
     )
     .bind(&conversation_id)
     .bind(&create_req.project_id)
@@ -253,6 +283,7 @@ pub async fn create_conversation(
     .bind(now)
     .bind(now)
     .bind(is_manually_set)
+    .bind(user_id)
     .execute(&state.db_pool)
     .await
     .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
@@ -265,6 +296,8 @@ pub async fn create_conversation(
         updated_at: now,
         message_count: 0,
         is_title_manually_set: Some(is_manually_set),
+        created_by_user_id: Some(user_id),
+        visibility: Some(ConversationVisibility::Private),
     };
 
     res.render(Json(conversation));
@@ -303,15 +336,18 @@ pub async fn create_conversation_from_message(
     let conversation_id = Uuid::new_v4().to_string();
     let now = Utc::now();
 
+    // Get current user for created_by_user_id
+    let user_id = get_current_user_id(depot)?;
+
     // Start a transaction
     let mut tx = state.db_pool.begin().await.map_err(|e| {
         AppError::InternalServerError(format!("Failed to start transaction: {}", e))
     })?;
 
-    // Create the new conversation
+    // Create the new conversation with default private visibility
     sqlx::query(
-        "INSERT INTO conversations (id, project_id, title, message_count, created_at, updated_at, is_title_manually_set) 
-         VALUES ($1, $2, $3, $4, $5, $6, $7)"
+        "INSERT INTO conversations (id, project_id, title, message_count, created_at, updated_at, is_title_manually_set, created_by_user_id, visibility)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'private')"
     )
     .bind(&conversation_id)
     .bind(&create_req.project_id)
@@ -320,6 +356,7 @@ pub async fn create_conversation_from_message(
     .bind(now)
     .bind(now)
     .bind(false) // Auto-generated title
+    .bind(user_id)
     .execute(&mut *tx)
     .await
     .map_err(|e| AppError::InternalServerError(format!("Failed to create conversation: {}", e)))?;
@@ -443,19 +480,21 @@ pub async fn update_conversation(
 
     // Fetch updated conversation - calculate actual message count excluding forgotten messages
     let updated = sqlx::query(
-        "SELECT 
-            c.id, 
-            c.project_id, 
-            c.title, 
+        "SELECT
+            c.id,
+            c.project_id,
+            c.title,
             (
-                SELECT COUNT(*)::INTEGER 
-                FROM messages m 
+                SELECT COUNT(*)::INTEGER
+                FROM messages m
                 WHERE m.conversation_id = c.id
                 AND (m.is_forgotten = false OR m.is_forgotten IS NULL)
             ) AS message_count,
-            c.created_at, 
-            c.updated_at, 
-            c.is_title_manually_set 
+            c.created_at,
+            c.updated_at,
+            c.is_title_manually_set,
+            c.created_by_user_id,
+            c.visibility
          FROM conversations c
          WHERE c.id = $1",
     )
@@ -463,6 +502,10 @@ pub async fn update_conversation(
     .fetch_one(&state.db_pool)
     .await
     .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
+
+    let created_by_user_id: Option<Uuid> = updated.try_get("created_by_user_id").ok();
+    let visibility_str: Option<String> = updated.try_get("visibility").ok();
+    let visibility = visibility_str.and_then(|v| ConversationVisibility::from_str(&v).ok());
 
     let conversation = Conversation {
         id: updated
@@ -482,6 +525,8 @@ pub async fn update_conversation(
             AppError::InternalServerError(format!("Failed to get message_count: {}", e))
         })?,
         is_title_manually_set: updated.try_get("is_title_manually_set").ok(),
+        created_by_user_id,
+        visibility,
     };
 
     res.render(Json(conversation));
@@ -510,5 +555,82 @@ pub async fn delete_conversation(
         "success": true,
         "deleted_id": conversation_id
     })));
+    Ok(())
+}
+
+/// Toggle conversation visibility between private and public
+#[handler]
+pub async fn toggle_conversation_visibility(
+    req: &mut Request,
+    depot: &mut Depot,
+    res: &mut Response,
+) -> Result<(), AppError> {
+    let state = get_app_state(depot)?;
+    let conversation_id = req
+        .param::<String>("conversation_id")
+        .ok_or(AppError::BadRequest("Missing conversation_id".to_string()))?;
+
+    let current_user_id = get_current_user_id(depot)?;
+
+    // Get conversation details
+    let conversation_row = sqlx::query(
+        "SELECT created_by_user_id, visibility, project_id FROM conversations WHERE id = $1",
+    )
+    .bind(&conversation_id)
+    .fetch_optional(&state.db_pool)
+    .await
+    .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?
+    .ok_or(AppError::NotFound("Conversation not found".to_string()))?;
+
+    let created_by: Option<Uuid> = conversation_row.get("created_by_user_id");
+    let current_visibility: Option<String> = conversation_row.get("visibility");
+    let project_id: String = conversation_row.get("project_id");
+
+    // Check if user is the creator or is a project owner (or root)
+    let is_creator = created_by.map(|id| id == current_user_id).unwrap_or(false);
+    let is_project_owner = if is_current_user_root(depot) {
+        true
+    } else {
+        sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM project_members WHERE project_id = $1 AND user_id = $2 AND role = 'owner')",
+        )
+        .bind(&project_id)
+        .bind(current_user_id)
+        .fetch_one(&state.db_pool)
+        .await
+        .unwrap_or(false)
+    };
+
+    if !is_creator && !is_project_owner {
+        return Err(AppError::Forbidden(
+            "Only the conversation creator or project owner can change visibility".to_string(),
+        ));
+    }
+
+    // Toggle visibility
+    let new_visibility = match current_visibility.as_deref() {
+        Some("private") | None => "public",
+        Some("public") => "private",
+        _ => "private",
+    };
+
+    sqlx::query("UPDATE conversations SET visibility = $1 WHERE id = $2")
+        .bind(new_visibility)
+        .bind(&conversation_id)
+        .execute(&state.db_pool)
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("Failed to update visibility: {}", e)))?;
+
+    use serde::Serialize;
+    #[derive(Serialize)]
+    struct VisibilityResponse {
+        conversation_id: String,
+        visibility: String,
+    }
+
+    res.render(Json(VisibilityResponse {
+        conversation_id,
+        visibility: new_visibility.to_string(),
+    }));
     Ok(())
 }

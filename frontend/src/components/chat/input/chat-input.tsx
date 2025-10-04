@@ -105,6 +105,21 @@ export function ChatInput({
     }
   }, [input, activeConversationId]);
 
+  // Focus the textarea when navigating to a new conversation
+  useEffect(() => {
+    if (conversationId === 'new' && textareaRef.current) {
+      textareaRef.current.focus();
+      // Move cursor to end of any prefilled text
+      setTimeout(() => {
+        if (textareaRef.current) {
+          const length = textareaRef.current.value.length;
+          textareaRef.current.selectionStart = length;
+          textareaRef.current.selectionEnd = length;
+        }
+      }, 0);
+    }
+  }, [conversationId]);
+
   // Focus the textarea when shouldFocus is true
   useEffect(() => {
     if (shouldFocus && textareaRef.current) {

@@ -25,6 +25,7 @@ export interface InProgressMessageProps {
   message: Message;
   events: StreamingEvent[];
   className?: string;
+  isIncomplete?: boolean; // Whether this message is incomplete (for showing thinking indicator)
 }
 
 function ToolStatusIcon({ status }: { status: string }) {
@@ -44,6 +45,7 @@ export function InProgressMessage({
   message,
   events,
   className,
+  isIncomplete = false,
 }: InProgressMessageProps) {
   // Update timeago strings every second for live updates
   const [, setUpdateTrigger] = useState(0);
@@ -124,20 +126,21 @@ export function InProgressMessage({
           status: event.tool.status,
           executionTime: event.tool.executionTime
         };
-        
+
         // Update in tracking map
         toolStates.set(event.tool.toolUsageId, updatedTool);
-        
-        // Find and update the tool in processedEvents
+
+        // Find and update the tool in processedEvents (only if it exists)
         const toolEventIndex = processedEvents.findIndex(
           e => e.type === "tool" && e.toolUsageId === event.tool?.toolUsageId
         );
         if (toolEventIndex !== -1) {
-          processedEvents[toolEventIndex].tool = updatedTool;
-          // Update timestamp to completion time if needed
-          if (!processedEvents[toolEventIndex].timestamp) {
-            processedEvents[toolEventIndex].timestamp = event.timestamp;
-          }
+          // Replace the entire event object to ensure proper re-render
+          processedEvents[toolEventIndex] = {
+            ...processedEvents[toolEventIndex],
+            tool: updatedTool,
+            timestamp: processedEvents[toolEventIndex].timestamp || event.timestamp
+          };
         }
         
         // If this is TodoWrite tool, extract and add todos
@@ -234,13 +237,14 @@ export function InProgressMessage({
       )}
     >
       <div className="flex flex-col gap-2">
-        {processedEvents.length === 0 && !message.content && (
+        {/* Show thinking indicator if message is incomplete (no processing_time_ms) */}
+        {isIncomplete && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
             <span>Thinking...</span>
           </div>
         )}
-        
+
         {processedEvents.map((event, index) => {
           const timestamp = event.timestamp ? new Date(event.timestamp) : null;
             

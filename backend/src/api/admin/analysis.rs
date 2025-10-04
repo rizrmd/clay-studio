@@ -41,12 +41,24 @@ pub struct UpdateAnalysisRequest {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct AnalysisParameter {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub param_type: String,
+    pub required: bool,
+    pub default: Option<Value>,
+    pub description: Option<String>,
+    pub options: Option<Vec<Value>>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AnalysisResponse {
     pub id: Uuid,
     pub title: String,
     pub script_content: String,
     pub description: Option<String>,
     pub tags: Vec<String>,
+    pub parameters: Vec<AnalysisParameter>,
     pub metadata: HashMap<String, Value>,
     pub project_id: String,
     pub is_active: bool,
@@ -193,12 +205,12 @@ pub async fn list_analysis(req: &mut Request, depot: &mut Depot, res: &mut Respo
 
     let query = if active_only {
         format!(
-            "SELECT id, title, script_content, metadata, project_id, is_active, version, created_at, updated_at FROM analyses WHERE project_id = '{}' AND is_active = true ORDER BY updated_at DESC LIMIT {}",
+            "SELECT id, title, metadata, project_id, is_active, version, created_at, updated_at FROM analyses WHERE project_id = '{}' AND is_active = true ORDER BY updated_at DESC LIMIT {}",
             project_id, limit
         )
     } else {
         format!(
-            "SELECT id, title, script_content, metadata, project_id, is_active, version, created_at, updated_at FROM analyses WHERE project_id = '{}' ORDER BY updated_at DESC LIMIT {}",
+            "SELECT id, title, metadata, project_id, is_active, version, created_at, updated_at FROM analyses WHERE project_id = '{}' ORDER BY updated_at DESC LIMIT {}",
             project_id, limit
         )
     };
@@ -231,15 +243,36 @@ pub async fn list_analysis(req: &mut Request, depot: &mut Depot, res: &mut Respo
             })
             .unwrap_or_default();
 
+        // Extract parameters from metadata
+        let parameters: Vec<AnalysisParameter> = metadata_map.get("parameters")
+            .and_then(|p| p.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| {
+                        let obj = v.as_object()?;
+                        Some(AnalysisParameter {
+                            name: obj.get("name")?.as_str()?.to_string(),
+                            param_type: obj.get("type")?.as_str()?.to_string(),
+                            required: obj.get("required")?.as_bool().unwrap_or(false),
+                            default: obj.get("default").cloned(),
+                            description: obj.get("description").and_then(|d| d.as_str()).map(|s| s.to_string()),
+                            options: obj.get("options").and_then(|o| o.as_array()).cloned(),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
         let created_at: Option<time::OffsetDateTime> = row.try_get("created_at").ok();
         let updated_at: Option<time::OffsetDateTime> = row.try_get("updated_at").ok();
 
         AnalysisResponse {
             id: row.get("id"),
             title: row.get("title"),
-            script_content: row.get("script_content"),
+            script_content: String::new(), // Don't include script_content in list response
             description,
             tags,
+            parameters,
             metadata: metadata_map,
             project_id: row.get("project_id"),
             is_active: row.try_get("is_active").unwrap_or(Some(true)).unwrap_or(true),
@@ -294,12 +327,33 @@ pub async fn get_analysis(req: &mut Request, depot: &mut Depot, res: &mut Respon
                 })
                 .unwrap_or_default();
 
+            // Extract parameters from metadata
+            let parameters: Vec<AnalysisParameter> = metadata_map.get("parameters")
+                .and_then(|p| p.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| {
+                            let obj = v.as_object()?;
+                            Some(AnalysisParameter {
+                                name: obj.get("name")?.as_str()?.to_string(),
+                                param_type: obj.get("type")?.as_str()?.to_string(),
+                                required: obj.get("required")?.as_bool().unwrap_or(false),
+                                default: obj.get("default").cloned(),
+                                description: obj.get("description").and_then(|d| d.as_str()).map(|s| s.to_string()),
+                                options: obj.get("options").and_then(|o| o.as_array()).cloned(),
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+
             let response = AnalysisResponse {
                 id: row.id,
                 title: row.title,
                 script_content: row.script_content,
                 description,
                 tags,
+                parameters,
                 metadata: metadata_map,
                 project_id: row.project_id,
                 is_active: row.is_active.unwrap_or(true),
@@ -366,6 +420,7 @@ pub async fn create_analysis(req: &mut Request, depot: &mut Depot, res: &mut Res
         script_content: create_req.script_content,
         description: create_req.description,
         tags: create_req.tags.unwrap_or_default(),
+        parameters: vec![], // Empty parameters for newly created analysis
         metadata,
         project_id,
         is_active: true,
@@ -683,8 +738,8 @@ pub async fn get_job_status(req: &mut Request, depot: &mut Depot, res: &mut Resp
 
     let job = sqlx::query!(
         r#"
-        SELECT id, analysis_id, status, created_at, started_at, completed_at, execution_time_ms
-        FROM analysis_jobs 
+        SELECT id, analysis_id, status, error_message, created_at, started_at, completed_at, execution_time_ms
+        FROM analysis_jobs
         WHERE id = $1
         "#,
         job_id
@@ -700,7 +755,7 @@ pub async fn get_job_status(req: &mut Request, depot: &mut Depot, res: &mut Resp
                 analysis_id: row.analysis_id,
                 status: row.status,
                 progress: None, // Could be enhanced to track actual progress
-                message: None,  // Could be enhanced with status messages
+                message: row.error_message,  // Include error message
                 created_at: row.created_at.map(convert_time_to_chrono).unwrap_or_else(Utc::now),
                 started_at: row.started_at.map(convert_time_to_chrono),
                 completed_at: row.completed_at.map(convert_time_to_chrono),
@@ -739,11 +794,15 @@ pub async fn get_job_result(req: &mut Request, depot: &mut Depot, res: &mut Resp
         Some(row) => {
             match row.status.as_str() {
                 "completed" => {
-                    res.render(Json(serde_json::json!({
-                        "job_id": job_id,
-                        "status": "completed",
-                        "result": row.result
-                    })));
+                    // Return the result content directly, or the entire result object if it contains the expected structure
+                    if let Some(result) = row.result {
+                        res.render(Json(result));
+                    } else {
+                        res.render(Json(serde_json::json!({
+                            "data": null,
+                            "message": "Job completed but no result data"
+                        })));
+                    }
                 }
                 "failed" => {
                     res.render(Json(serde_json::json!({
@@ -1407,37 +1466,60 @@ pub async fn get_result_analytics(req: &mut Request, depot: &mut Depot, res: &mu
 
     let days = req.query::<i32>("days").unwrap_or(30).clamp(1, 365);
 
-    // Get analytics data
-    let analytics = sqlx::query!(
+    // Optimized: Use CTE to scan analysis_jobs once instead of 3 separate queries
+    let result = sqlx::query!(
         r#"
-        SELECT 
-            DATE(created_at) as date,
-            COUNT(*) as total_runs,
-            COUNT(CASE WHEN status = 'completed' THEN 1 END) as successful_runs,
-            COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed_runs,
-            AVG(CASE WHEN execution_time_ms IS NOT NULL THEN execution_time_ms::float END) as avg_execution_time
-        FROM analysis_jobs
-        WHERE analysis_id = $1 AND created_at >= NOW() - INTERVAL '1 day' * $2
-        GROUP BY DATE(created_at)
-        ORDER BY date DESC
-        "#,
-        analysis_id,
-        days as f64
-    )
-    .fetch_all(&state.db_pool)
-    .await
-    .map_err(AppError::SqlxError)?;
-
-    // Get performance trends
-    let performance = sqlx::query!(
-        r#"
-        SELECT 
-            AVG(CASE WHEN execution_time_ms IS NOT NULL THEN execution_time_ms::float END) as avg_time,
-            MIN(CASE WHEN execution_time_ms IS NOT NULL THEN execution_time_ms END) as min_time,
-            MAX(CASE WHEN execution_time_ms IS NOT NULL THEN execution_time_ms END) as max_time,
-            COUNT(*) as total_completed
-        FROM analysis_jobs
-        WHERE analysis_id = $1 AND status = 'completed' AND created_at >= NOW() - INTERVAL '1 day' * $2
+        WITH filtered_jobs AS (
+            SELECT
+                DATE(created_at) as job_date,
+                status,
+                execution_time_ms,
+                error_message
+            FROM analysis_jobs
+            WHERE analysis_id = $1 AND created_at >= NOW() - INTERVAL '1 day' * $2
+        ),
+        daily_stats AS (
+            SELECT
+                job_date as date,
+                COUNT(*) as total_runs,
+                COUNT(CASE WHEN status = 'completed' THEN 1 END) as successful_runs,
+                COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed_runs,
+                AVG(CASE WHEN execution_time_ms IS NOT NULL THEN execution_time_ms::float END) as avg_execution_time
+            FROM filtered_jobs
+            GROUP BY job_date
+        ),
+        perf_stats AS (
+            SELECT
+                AVG(CASE WHEN execution_time_ms IS NOT NULL THEN execution_time_ms::float END) as avg_time,
+                MIN(execution_time_ms) as min_time,
+                MAX(execution_time_ms) as max_time,
+                COUNT(*) as total_completed
+            FROM filtered_jobs
+            WHERE status = 'completed'
+        ),
+        error_stats AS (
+            SELECT
+                error_message,
+                COUNT(*) as occurrence_count,
+                ROW_NUMBER() OVER (ORDER BY COUNT(*) DESC) as rn
+            FROM filtered_jobs
+            WHERE status = 'failed' AND error_message IS NOT NULL
+            GROUP BY error_message
+        )
+        SELECT
+            json_agg(json_build_object(
+                'date', ds.date,
+                'total_runs', ds.total_runs,
+                'successful_runs', ds.successful_runs,
+                'failed_runs', ds.failed_runs,
+                'avg_execution_time', ds.avg_execution_time
+            ) ORDER BY ds.date DESC) FILTER (WHERE ds.date IS NOT NULL) as daily_stats,
+            (SELECT row_to_json(ps.*) FROM perf_stats ps) as performance,
+            (SELECT json_agg(json_build_object(
+                'error_message', es.error_message,
+                'occurrence_count', es.occurrence_count
+            )) FROM error_stats es WHERE es.rn <= 10) as top_errors
+        FROM daily_stats ds
         "#,
         analysis_id,
         days as f64
@@ -1446,52 +1528,33 @@ pub async fn get_result_analytics(req: &mut Request, depot: &mut Depot, res: &mu
     .await
     .map_err(AppError::SqlxError)?;
 
-    // Get error patterns
-    let errors = sqlx::query!(
-        r#"
-        SELECT 
-            error_message,
-            COUNT(*) as occurrence_count
-        FROM analysis_jobs
-        WHERE analysis_id = $1 AND status = 'failed' AND created_at >= NOW() - INTERVAL '1 day' * $2
-        GROUP BY error_message
-        ORDER BY occurrence_count DESC
-        LIMIT 10
-        "#,
-        analysis_id,
-        days as f64
-    )
-    .fetch_all(&state.db_pool)
-    .await
-    .map_err(AppError::SqlxError)?;
+    // Parse JSON results from optimized CTE query
+    let daily_stats: Vec<serde_json::Value> = result.daily_stats
+        .and_then(|v| v.as_array().cloned())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|mut stat| {
+            // Add computed success_rate to each daily stat
+            if let Some(obj) = stat.as_object_mut() {
+                let total = obj.get("total_runs").and_then(|v| v.as_i64()).unwrap_or(0);
+                let successful = obj.get("successful_runs").and_then(|v| v.as_i64()).unwrap_or(0);
+                let success_rate = if total > 0 {
+                    (successful as f64 / total as f64) * 100.0
+                } else {
+                    0.0
+                };
+                obj.insert("success_rate".to_string(), serde_json::json!(success_rate));
+            }
+            stat
+        })
+        .collect();
 
     let response = serde_json::json!({
         "analysis_id": analysis_id,
         "period_days": days,
-        "daily_stats": analytics.into_iter().map(|row| {
-            serde_json::json!({
-                "date": row.date,
-                "total_runs": row.total_runs,
-                "successful_runs": row.successful_runs,
-                "failed_runs": row.failed_runs,
-                "success_rate": if row.total_runs.unwrap_or(0) > 0 { 
-                    (row.successful_runs.unwrap_or(0) as f64 / row.total_runs.unwrap_or(1) as f64) * 100.0 
-                } else { 0.0 },
-                "avg_execution_time_ms": row.avg_execution_time
-            })
-        }).collect::<Vec<_>>(),
-        "performance": {
-            "avg_execution_time_ms": performance.avg_time,
-            "min_execution_time_ms": performance.min_time,
-            "max_execution_time_ms": performance.max_time,
-            "total_completed": performance.total_completed
-        },
-        "top_errors": errors.into_iter().map(|row| {
-            serde_json::json!({
-                "error_message": row.error_message,
-                "occurrence_count": row.occurrence_count
-            })
-        }).collect::<Vec<_>>()
+        "daily_stats": daily_stats,
+        "performance": result.performance.unwrap_or(serde_json::json!({})),
+        "top_errors": result.top_errors.unwrap_or(serde_json::json!([]))
     });
 
     res.render(Json(response));

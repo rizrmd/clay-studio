@@ -50,7 +50,21 @@ const chartLoaders: Record<ChartType, ChartLoader> = {
       return BarChart;
     },
   },
+  column: {
+    load: async () => {
+      const { BarChart } = await import("echarts/charts");
+      echarts.use([BarChart, MarkLineComponent, MarkPointComponent]);
+      return BarChart;
+    },
+  },
   pie: {
+    load: async () => {
+      const { PieChart } = await import("echarts/charts");
+      echarts.use([PieChart]);
+      return PieChart;
+    },
+  },
+  donut: {
     load: async () => {
       const { PieChart } = await import("echarts/charts");
       echarts.use([PieChart]);

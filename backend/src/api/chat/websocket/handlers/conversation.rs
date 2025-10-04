@@ -5,7 +5,10 @@ use sqlx::Row;
 pub async fn handle_create_conversation(
     project_id: &str,
     title: Option<String>,
+    _first_message: Option<String>, // Unused - handled in websocket mod.rs
+    _file_ids: Option<Vec<String>>, // Unused - handled in websocket mod.rs
     client_id_str: &str,
+    user_id: &str,
     state: &AppState,
 ) -> Result<crate::models::Conversation, crate::utils::AppError> {
     let client_id = uuid::Uuid::parse_str(client_id_str)
@@ -32,31 +35,43 @@ pub async fn handle_create_conversation(
     let conversation_id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now();
 
+    // Parse user_id to UUID
+    let user_uuid = uuid::Uuid::parse_str(user_id)
+        .map_err(|_| crate::utils::AppError::BadRequest("Invalid user ID".to_string()))?;
+
     // Insert new conversation
     sqlx::query!(
         r#"
-        INSERT INTO conversations (id, project_id, title, created_at, updated_at, is_title_manually_set)
-        VALUES ($1, $2, $3, NOW(), NOW(), $4)
+        INSERT INTO conversations (id, project_id, title, created_at, updated_at, is_title_manually_set, created_by_user_id, visibility)
+        VALUES ($1, $2, $3, NOW(), NOW(), $4, $5, $6)
         "#,
         conversation_id,
         project_id,
         title,
-        title.is_some() // Set manually if title was provided
+        title.is_some(), // Set manually if title was provided
+        user_uuid,
+        "private" // Set as private by default
     )
     .execute(&state.db_pool)
     .await
     .map_err(|e| crate::utils::AppError::InternalServerError(format!("Failed to create conversation: {}", e)))?;
 
+    // Message handling is done in mod.rs after conversation is created
+    let message_count = 0;
+
     // Return the created conversation
     let is_title_set = title.is_some();
+
     Ok(crate::models::Conversation {
         id: conversation_id,
         project_id: project_id.to_string(),
         title,
         created_at: now,
         updated_at: now,
-        message_count: 0, // New conversation has no messages
+        message_count,
         is_title_manually_set: Some(is_title_set),
+        created_by_user_id: Some(user_uuid),
+        visibility: Some(crate::models::ConversationVisibility::Private),
     })
 }
 
@@ -125,6 +140,8 @@ pub async fn handle_list_conversations(
                     e
                 ))
             })?,
+            created_by_user_id: None,
+            visibility: Some(crate::models::ConversationVisibility::Private),
             is_title_manually_set: row.try_get("is_title_manually_set").ok(),
         });
     }
@@ -189,6 +206,8 @@ pub async fn handle_get_conversation(
             ))
         })?,
         is_title_manually_set: conversation_row.try_get("is_title_manually_set").ok(),
+        created_by_user_id: None,
+        visibility: Some(crate::models::ConversationVisibility::Private),
     })
 }
 
@@ -203,56 +222,69 @@ pub async fn handle_update_conversation(
 
     let now = chrono::Utc::now();
 
-    // Update in database and mark as manually set if title is provided
-    // Include authorization check
-    if title.is_some() {
+    // Optimized: Update and fetch in a single query using RETURNING and CTE
+    let updated = if title.is_some() {
         sqlx::query(
-            "UPDATE conversations 
-             SET title = $1, is_title_manually_set = true, updated_at = $2 
-             FROM projects p
-             WHERE conversations.id = $3 AND conversations.project_id = p.id AND p.client_id = $4",
+            "WITH updated_conv AS (
+                UPDATE conversations c
+                SET title = $1, is_title_manually_set = true, updated_at = $2
+                FROM projects p
+                WHERE c.id = $3 AND c.project_id = p.id AND p.client_id = $4
+                RETURNING c.id, c.project_id, c.title, c.created_at, c.updated_at, c.is_title_manually_set
+            )
+            SELECT
+                uc.id,
+                uc.project_id,
+                uc.title,
+                (
+                    SELECT COUNT(*)::INTEGER
+                    FROM messages m
+                    WHERE m.conversation_id = uc.id
+                    AND (m.is_forgotten = false OR m.is_forgotten IS NULL)
+                ) AS message_count,
+                uc.created_at,
+                uc.updated_at,
+                uc.is_title_manually_set
+            FROM updated_conv uc",
         )
         .bind(&title)
         .bind(now)
         .bind(conversation_id)
         .bind(client_id)
+        .fetch_one(&state.db_pool)
+        .await
+        .map_err(|e| crate::utils::AppError::InternalServerError(format!("Database error: {}", e)))?
     } else {
         sqlx::query(
-            "UPDATE conversations 
-             SET updated_at = $1 
-             FROM projects p
-             WHERE conversations.id = $2 AND conversations.project_id = p.id AND p.client_id = $3",
+            "WITH updated_conv AS (
+                UPDATE conversations c
+                SET updated_at = $1
+                FROM projects p
+                WHERE c.id = $2 AND c.project_id = p.id AND p.client_id = $3
+                RETURNING c.id, c.project_id, c.title, c.created_at, c.updated_at, c.is_title_manually_set
+            )
+            SELECT
+                uc.id,
+                uc.project_id,
+                uc.title,
+                (
+                    SELECT COUNT(*)::INTEGER
+                    FROM messages m
+                    WHERE m.conversation_id = uc.id
+                    AND (m.is_forgotten = false OR m.is_forgotten IS NULL)
+                ) AS message_count,
+                uc.created_at,
+                uc.updated_at,
+                uc.is_title_manually_set
+            FROM updated_conv uc",
         )
         .bind(now)
         .bind(conversation_id)
         .bind(client_id)
-    }
-    .execute(&state.db_pool)
-    .await
-    .map_err(|e| crate::utils::AppError::InternalServerError(format!("Database error: {}", e)))?;
-
-    // Fetch updated conversation
-    let updated = sqlx::query(
-        "SELECT 
-            c.id, 
-            c.project_id, 
-            c.title, 
-            (
-                SELECT COUNT(*)::INTEGER 
-                FROM messages m 
-                WHERE m.conversation_id = c.id
-                AND (m.is_forgotten = false OR m.is_forgotten IS NULL)
-            ) AS message_count,
-            c.created_at, 
-            c.updated_at, 
-            c.is_title_manually_set 
-         FROM conversations c
-         WHERE c.id = $1",
-    )
-    .bind(conversation_id)
-    .fetch_one(&state.db_pool)
-    .await
-    .map_err(|e| crate::utils::AppError::InternalServerError(format!("Database error: {}", e)))?;
+        .fetch_one(&state.db_pool)
+        .await
+        .map_err(|e| crate::utils::AppError::InternalServerError(format!("Database error: {}", e)))?
+    };
 
     Ok(crate::models::Conversation {
         id: updated.try_get("id").map_err(|e| {
@@ -275,6 +307,8 @@ pub async fn handle_update_conversation(
             ))
         })?,
         is_title_manually_set: updated.try_get("is_title_manually_set").ok(),
+        created_by_user_id: None,
+        visibility: Some(crate::models::ConversationVisibility::Private),
     })
 }
 
@@ -317,7 +351,28 @@ pub async fn handle_get_conversation_messages(
         .map_err(|_| crate::utils::AppError::BadRequest("Invalid client ID".to_string()))?;
     // Try to get from cache first
     match state.get_conversation_messages(conversation_id).await {
-        Ok(messages) => Ok(messages),
+        Ok(messages) => {
+            tracing::info!(
+                "📦 Returning {} messages from cache for conversation {}",
+                messages.len(),
+                conversation_id
+            );
+            for msg in &messages {
+                tracing::debug!(
+                    "  - {} message: id={}, content_len={}, progress_content_len={}, processing_time={:?}",
+                    match msg.role {
+                        crate::models::MessageRole::User => "User",
+                        crate::models::MessageRole::Assistant => "Assistant",
+                        crate::models::MessageRole::System => "System",
+                    },
+                    &msg.id[..8],
+                    msg.content.len(),
+                    msg.progress_content.as_ref().map(|p| p.len()).unwrap_or(0),
+                    msg.processing_time_ms
+                );
+            }
+            Ok(messages)
+        },
         Err(_) => {
             // Fall back to direct database query with authorization check
             let message_rows = sqlx::query(
@@ -350,7 +405,7 @@ pub async fn handle_get_conversation_messages(
                 JOIN projects p ON c.project_id = p.id
                 WHERE m.conversation_id = $1 AND p.client_id = $2
                 AND (m.is_forgotten = false OR m.is_forgotten IS NULL)
-                GROUP BY m.id, m.content, m.role, m.processing_time_ms, m.created_at, m.file_attachments
+                GROUP BY m.id, m.content, m.role, m.processing_time_ms, m.created_at, m.file_attachments, m.progress_content
                 ORDER BY m.created_at ASC"
             )
             .bind(conversation_id)
@@ -358,6 +413,12 @@ pub async fn handle_get_conversation_messages(
             .fetch_all(&state.db_pool)
             .await
             .map_err(|e| crate::utils::AppError::InternalServerError(format!("Database error: {}", e)))?;
+
+            tracing::info!(
+                "💾 Fetched {} messages from database for conversation {}",
+                message_rows.len(),
+                conversation_id
+            );
 
             let mut messages = Vec::new();
             for row in message_rows {

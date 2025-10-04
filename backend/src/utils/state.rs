@@ -308,8 +308,10 @@ impl AppState {
                 None
             };
 
+            let progress_content: Option<String> = row.get("progress_content");
+
             let message = Message {
-                id: msg_id,
+                id: msg_id.clone(),
                 content: row.get("content"),
                 role,
                 processing_time_ms: row.get("processing_time_ms"),
@@ -319,8 +321,17 @@ impl AppState {
                     .into(),
                 file_attachments: None,
                 tool_usages,
-                progress_content: row.get("progress_content"),
+                progress_content: progress_content.clone(),
             };
+
+            // Debug log for messages with progress_content
+            if progress_content.is_some() {
+                info!(
+                    "  📝 Message {} has progress_content (len: {})",
+                    &msg_id[..8],
+                    progress_content.as_ref().unwrap().len()
+                );
+            }
 
             cached_messages.push(message);
         }

@@ -42,4 +42,32 @@ pub struct Conversation {
     pub message_count: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_title_manually_set: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_by_user_id: Option<uuid::Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub visibility: Option<ConversationVisibility>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum ConversationVisibility {
+    Private,
+    Public,
+}
+
+impl ConversationVisibility {
+    pub fn as_str(&self) -> &str {
+        match self {
+            ConversationVisibility::Private => "private",
+            ConversationVisibility::Public => "public",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Result<Self, String> {
+        match s.to_lowercase().as_str() {
+            "private" => Ok(ConversationVisibility::Private),
+            "public" => Ok(ConversationVisibility::Public),
+            _ => Err(format!("Invalid visibility: {}", s)),
+        }
+    }
 }

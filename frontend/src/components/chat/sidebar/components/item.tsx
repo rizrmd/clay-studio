@@ -9,9 +9,23 @@ import {
 import { sidebarActions, sidebarStore } from "@/lib/store/chat/sidebar-store";
 import { tabsActions } from "@/lib/store/tabs-store";
 import { cn } from "@/lib/utils";
-import { Edit, MessageSquare, MoreHorizontal, Trash2, ExternalLink, Share2 } from "lucide-react";
+import {
+  Edit,
+  MessageSquare,
+  MoreHorizontal,
+  Trash2,
+  ExternalLink,
+  Lock,
+  Globe,
+} from "lucide-react";
 import { useSnapshot } from "valtio";
 import { Conversation } from "../types";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 interface ConversationItemProps {
   conversation: Conversation;
@@ -19,7 +33,6 @@ interface ConversationItemProps {
   onClick: (conversationId: string) => void;
   onRename: (conversation: Conversation) => void;
   onDelete: (conversationId: string) => void;
-  onShare: (conversation: Conversation) => void;
   href: string;
   projectId?: string;
 }
@@ -29,7 +42,6 @@ export function ConversationItem({
   isActive,
   onClick,
   onRename,
-  onShare,
   href,
   projectId,
 }: ConversationItemProps) {
@@ -38,10 +50,14 @@ export function ConversationItem({
   const handleOpenInNewTab = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (projectId) {
-      tabsActions.openInNewTab('chat', {
-        conversationId: conversation.id,
-        projectId,
-      }, conversation.title || 'Chat');
+      tabsActions.openInNewTab(
+        "chat",
+        {
+          conversationId: conversation.id,
+          projectId,
+        },
+        conversation.title || "Chat"
+      );
     }
   };
 
@@ -90,6 +106,30 @@ export function ConversationItem({
             !isActive && (
               <div className="h-[6px] w-[6px] rounded-full bg-green-500 mt-1 animate-pulse" />
             )}
+
+          {/* Visibility indicator */}
+          {conversation.visibility && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="pt-1">
+                    {conversation.visibility === "private" ? (
+                      <></>
+                    ) : (
+                      <Globe className="h-3 w-3 text-blue-500" />
+                    )}
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>
+                    {conversation.visibility === "private"
+                      ? "Private - Only you can see this"
+                      : "Public - Visible to all project members"}
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
         </div>
 
         {/* Content section - flexible width */}
@@ -146,20 +186,9 @@ export function ConversationItem({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem
-                onClick={handleOpenInNewTab}
-              >
+              <DropdownMenuItem onClick={handleOpenInNewTab}>
                 <ExternalLink className="h-4 w-4 mr-2" />
                 Open in new Tab
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onShare(conversation);
-                }}
-              >
-                <Share2 className="h-4 w-4 mr-2" />
-                Share
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={(e) => {
@@ -170,6 +199,55 @@ export function ConversationItem({
                 <Edit className="h-4 w-4 mr-2" />
                 Rename
               </DropdownMenuItem>
+              {conversation.visibility && (
+                <DropdownMenuItem
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    try {
+                      const { toggleConversationVisibility } = await import(
+                        "@/lib/api/conversations"
+                      );
+                      const { chatStore } = await import(
+                        "@/lib/store/chat/chat-store"
+                      );
+                      const { toast } = await import("sonner");
+
+                      const result = await toggleConversationVisibility(
+                        conversation.id
+                      );
+
+                      // Update local store
+                      const conv = chatStore.map[conversation.id];
+                      if (conv) {
+                        conv.visibility = result.visibility;
+                      }
+
+                      toast.success(
+                        result.visibility === "public"
+                          ? "Conversation is now public"
+                          : "Conversation is now private"
+                      );
+                    } catch (error: any) {
+                      const { toast } = await import("sonner");
+                      toast.error(
+                        error?.message || "Failed to change visibility"
+                      );
+                    }
+                  }}
+                >
+                  {conversation.visibility === "private" ? (
+                    <>
+                      <Globe className="h-4 w-4 mr-2" />
+                      Make Public
+                    </>
+                  ) : (
+                    <>
+                      <Lock className="h-4 w-4 mr-2" />
+                      Make Private
+                    </>
+                  )}
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem
                 onClick={(e) => {
                   e.stopPropagation();

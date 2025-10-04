@@ -168,11 +168,13 @@ class WebSocketService extends EventEmitter {
   }
 
   // New conversation management methods
-  createConversation(projectId: string, title?: string): void {
+  createConversation(projectId: string, title?: string, firstMessage?: string, fileIds?: string[]): void {
     const message: ClientMessage = {
       type: "create_conversation",
       project_id: projectId,
       title,
+      first_message: firstMessage,
+      file_ids: fileIds,
     };
     this.sendMessage(message);
   }

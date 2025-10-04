@@ -2,16 +2,17 @@ import { proxy } from "valtio";
 import { nanoid } from "nanoid";
 import { subscribeKey } from "valtio/utils";
 
-export type TabType = 
-  | 'chat' 
-  | 'datasource_table_data' 
+export type TabType =
+  | 'chat'
+  | 'datasource_table_data'
   | 'datasource_table_structure'
   | 'datasource_query'
-  | 'datasource_edit' 
+  | 'datasource_edit'
   | 'datasource_new'
   | 'datasource_list'
   | 'analysis'
-  | 'context';
+  | 'context'
+  | 'members';
 
 export interface Tab {
   id: string;
@@ -202,19 +203,19 @@ export const tabsActions = {
   removeTab: (tabId: string) => {
     // Set flag to prevent MainApp interference
     tabsStore.isRemovingTab = true;
-    
+
     const tabIndex = tabsStore.tabs.findIndex(t => t.id === tabId);
     if (tabIndex === -1) {
       tabsStore.isRemovingTab = false;
       return;
     }
-    
+
     const tab = tabsStore.tabs[tabIndex];
     const { type } = tab;
-    
+
     // Remove the tab
     tabsStore.tabs.splice(tabIndex, 1);
-    
+
     // If this was the currently active tab, find the next tab BEFORE removing from history
     let nextTabId: string | null = null;
     if (tabsStore.activeTabId === tabId && tabsStore.tabs.length > 0) {
@@ -226,19 +227,19 @@ export const tabsActions = {
           break;
         }
       }
-      
+
       // If no tab found in history, fall back to the last tab in the array
       if (!nextTabId && tabsStore.tabs.length > 0) {
         nextTabId = tabsStore.tabs[tabsStore.tabs.length - 1].id;
       }
     }
-    
+
     // Remove from tab history
     const historyIndex = tabsStore.tabHistory.indexOf(tabId);
     if (historyIndex > -1) {
       tabsStore.tabHistory.splice(historyIndex, 1);
     }
-    
+
     // If this was the active tab for its type, find another tab of the same type to make active
     if (tabsStore.activeTabByType[type] === tabId) {
       const otherTabOfSameType = tabsStore.tabs.find(t => t.type === type);
@@ -249,7 +250,7 @@ export const tabsActions = {
         delete tabsStore.activeTabByType[type];
       }
     }
-    
+
     // Set the new active tab
     if (tabsStore.activeTabId === tabId) {
       if (nextTabId) {
@@ -263,7 +264,21 @@ export const tabsActions = {
         tabsStore.tabHistory = [];
       }
     }
-    
+
+    // Update the projectTabs entry for the current project to reflect the removed tab
+    if (tabsStore.currentProjectId) {
+      // Create a new object reference to ensure reactivity
+      tabsStore.projectTabs = {
+        ...tabsStore.projectTabs,
+        [tabsStore.currentProjectId]: {
+          tabs: [...tabsStore.tabs],
+          activeTabId: tabsStore.activeTabId,
+          activeTabByType: { ...tabsStore.activeTabByType },
+          tabHistory: [...tabsStore.tabHistory],
+        },
+      };
+    }
+
     // Clear the removal flag after a brief delay to allow navigation to complete
     setTimeout(() => {
       tabsStore.isRemovingTab = false;
@@ -425,6 +440,8 @@ export const tabsActions = {
         return metadata.analysisTitle || 'Analysis';
       case 'context':
         return 'Context';
+      case 'members':
+        return 'Members';
       default:
         return 'Tab';
     }

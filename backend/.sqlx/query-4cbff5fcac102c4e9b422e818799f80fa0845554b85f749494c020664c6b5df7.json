@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                    UPDATE analysis_jobs\n                    SET status = 'completed',\n                        result = $1,\n                        completed_at = NOW(),\n                        execution_time_ms = EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000\n                    WHERE id = $2\n                    ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Jsonb",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4cbff5fcac102c4e9b422e818799f80fa0845554b85f749494c020664c6b5df7"
+}

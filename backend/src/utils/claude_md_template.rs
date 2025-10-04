@@ -523,6 +523,235 @@ show_chart title="Revenue Trend" chart_type="line" data={{
 # Use product_name values as categories, not row indices
 ```
 
+## Analysis Management
+
+### ⚠️ CRITICAL: "Analysis" means Database Analysis Scripts
+
+**IMPORTANT TERMINOLOGY:**
+- **"Analysis" (noun)** = A saved database analysis script that queries datasources
+- **"Analyze" (verb)** = To examine/investigate something (NOT the same as running an Analysis)
+
+**Examples:**
+- ✅ "Run the sales analysis" → Use `mcp__analysis__run` (database analysis tool)
+- ✅ "Fix analysis ID: abc-123" → Use `mcp__analysis__get` and `mcp__analysis__update`
+- ❌ "Analyze this file" → This is NOT about Analysis scripts, use file tools instead
+
+### ⚠️ CRITICAL: Analysis Tools vs File Tools
+
+**DO NOT CONFUSE THESE:**
+- ❌ NEVER use `list` to get analysis details - that's for listing ALL analyses
+- ❌ NEVER use file tools (Read, Write, Edit, Glob) for analysis operations
+- ❌ NEVER use Task/SlashCommand/WebSearch for analysis operations
+- ✅ ALWAYS use `get` tool to fetch a SPECIFIC analysis by ID
+- ✅ ALWAYS use `update` tool to modify analysis content
+- ✅ ALWAYS use analysis MCP tools (prefixed with `mcp__analysis__`)
+
+### ⚠️ CRITICAL: Analysis Script Format (QuickJS Runtime)
+
+**MANDATORY SCRIPT FORMAT** - Analysis scripts run in QuickJS, which has STRICT syntax requirements:
+
+```javascript
+// ✅ CORRECT FORMAT - Wrap object in parentheses!
+({{
+  run: function(ctx, parameters) {{{{
+    // ctx.datasources - Access to configured datasources
+    // ctx.query(sql) - Execute DuckDB queries
+    // ctx.log(...args) - Logging function
+    // parameters - User-provided parameters
+
+    var datasources = ctx.datasources;
+    var limit = parameters && parameters.limit ? parameters.limit : 100;
+
+    // Use string concatenation, NOT template literals
+    var query = 'SELECT * FROM table LIMIT ' + limit;
+
+    var result = ctx.query(query);
+
+    return {{{{
+      success: true,
+      data: result.rows,
+      columns: result.columns
+    }}}};
+  }}}}
+}})
+```
+
+**🛑 COMMON MISTAKES - NEVER DO THESE:**
+
+❌ **WRONG - ES6 export (causes "SyntaxError: expecting ';'"):**
+```javascript
+export default {{{{
+  run: async function({{{{ datasources, parameters }}}}) {{{{ ... }}}}
+}}}}
+```
+
+❌ **WRONG - No parentheses (causes "function name expected"):**
+```javascript
+{{{{
+  run: function(ctx, parameters) {{{{ ... }}}}
+}}}}
+```
+
+❌ **WRONG - Destructuring parameters (causes "function name expected"):**
+```javascript
+run: function({{{{ datasources, parameters }}}}) {{{{ ... }}}}
+```
+
+❌ **WRONG - Template literals (may cause parsing errors):**
+```javascript
+var query = `SELECT * FROM table LIMIT ${{{{limit}}}}`;
+```
+
+❌ **WRONG - const/let (use var for compatibility):**
+```javascript
+const limit = 100;
+let query = "SELECT ...";
+```
+
+**✅ REQUIRED SYNTAX RULES:**
+
+1. **Wrap entire object in `( )`** - Makes it an expression, not a statement block
+2. **Use `var` instead of `const`/`let`** - QuickJS has limited ES6 support
+3. **Use string concatenation (`+`)** - NOT template literals with `${{{{...}}}}`
+4. **No destructuring** - Use `ctx.datasources` instead of `{{{{ datasources }}}}`
+5. **Two parameters: `ctx, parameters`** - The runtime passes both separately
+6. **No `export default`** - QuickJS doesn't support ES6 modules
+7. **No async/await** - Use synchronous calls only
+
+**Example - Correct Analysis Script:**
+
+```javascript
+({{
+  run: function(ctx, parameters) {{{{
+    // Validate datasource
+    if (!ctx.datasources || !ctx.datasources.primary) {{{{
+      throw new Error('Primary datasource is required');
+    }}}}
+
+    // Get parameters with defaults
+    var limit = parameters && parameters.limit ? parameters.limit : 100;
+    var orderBy = parameters && parameters.orderBy ? parameters.orderBy : 'id';
+
+    // Build query with string concatenation
+    var query = 'SELECT * FROM users ORDER BY ' + orderBy + ' LIMIT ' + limit;
+
+    // Execute query
+    var result = ctx.query(query);
+
+    // Return result
+    return {{{{
+      success: true,
+      message: 'Retrieved ' + result.rows.length + ' users',
+      data: result.rows,
+      columns: result.columns
+    }}}};
+  }}}}
+}})
+```
+
+### Available MCP Analysis Tools:
+
+**Tool Prefix**: All analysis tools use the `mcp__analysis__` prefix
+
+- **mcp__analysis__get** - Fetch ONE specific analysis by ID (use this to get analysis details!)
+- **mcp__analysis__list** - List ALL analyses in project (NOT for getting one analysis)
+- **mcp__analysis__update** - Update analysis title, script_content, or description
+- **mcp__analysis__create** - Create a new analysis with script_content
+- **mcp__analysis__run** - Execute an analysis and get results
+- **mcp__analysis__validate** - Validate analysis script without running it
+- **mcp__analysis__job_get** - Get status and results of an analysis job
+- **mcp__analysis__job_list** - List recent analysis jobs
+
+### When Asked to Fix an Analysis:
+
+**CRITICAL**: When a user provides an analysis ID and error message asking you to fix it, you MUST:
+
+1. **Fetch the analysis** - Use `mcp__analysis__get` tool (NOT `list`!) with the analysis_id to retrieve full details
+2. **Identify the issue** - Carefully analyze the error message and locate the problem in the analysis code/query/script
+3. **Apply the fix** - Use `mcp__analysis__update` tool to UPDATE the analysis in the database (DO NOT just suggest fixes)
+4. **Test the fix** - Use `mcp__analysis__run` tool to execute the updated analysis and verify it works
+5. **Iterate if needed** - If the fix doesn't resolve the issue:
+   - Re-fetch the analysis using `mcp__analysis__get` tool to see current state
+   - Identify the new error (it may be different from the original)
+   - Apply another fix using `mcp__analysis__update` tool
+   - Test again using `mcp__analysis__run` tool
+   - Repeat this process up to 3-5 attempts
+6. **Report if stuck** - After multiple failed attempts, clearly explain:
+   - What fixes were attempted
+   - What's still blocking the analysis from working
+   - Ask for user guidance or additional information
+
+**DO NOT**:
+- ❌ Use `mcp__analysis__list` to get a specific analysis (that lists ALL analyses)
+- ❌ Use file tools (Read, Write, Edit) for analysis operations
+- ❌ Just provide suggestions or explanations without actually fixing the analysis
+- ❌ Give up after the first failed fix attempt
+- ❌ Apply the same fix repeatedly without checking results
+- ❌ Continue infinitely - stop after 3-5 attempts and ask for help
+
+**Error Resolution Pattern**:
+```
+User reports error → mcp__analysis__get → Identify issue → mcp__analysis__update → mcp__analysis__run →
+If still broken: mcp__analysis__get again → Identify new error → mcp__analysis__update again → mcp__analysis__run again →
+If still broken after 3-5 attempts: Report blockers and ask for guidance
+```
+
+**Example Workflow**:
+- User: "Fix analysis ID: abc-123 - SyntaxError: expecting ';' at line 34"
+- You:
+  1. Use `mcp__analysis__get analysis_id="abc-123"` to fetch the specific analysis (NOT list!)
+  2. Find missing semicolon at line 34 in script_content from the response
+  3. Use `mcp__analysis__update analysis_id="abc-123" script_content="<fixed_script>"` to apply fix
+  4. Use `mcp__analysis__run analysis_id="abc-123"` to test the fix
+  5. If error persists: Repeat steps 1-4 with new fix
+  6. Use `mcp__interaction__analysis_show analysis_id="abc-123" title="Fixed Analysis" description="Fixed missing semicolon at line 34"` to show the user a run button
+  7. Confirm: "Analysis updated and tested - you can now run it using the button above"
+
+### Running Analyses:
+
+**TWO WAYS to run analyses:**
+
+#### 1. Show Analysis with Run Button (Recommended for User Interaction)
+
+Use `mcp__interaction__analysis_show` to display an interactive analysis card with a run button:
+
+```mcp
+# Display an analysis with a run button so users can execute it
+mcp__interaction__analysis_show analysis_id="<analysis_id>" title="Analysis Title" description="What this analysis does" parameters={{...}}
+```
+
+This creates an interactive UI element where users can click "Run Analysis" to execute it directly in the chat.
+
+**When to use:**
+- When suggesting an analysis for the user to run
+- After creating or fixing an analysis
+- When the user should have control over when to execute
+
+#### 2. Run Analysis Directly (For Automated Execution)
+
+Use `mcp__analysis__run` to execute an analysis immediately:
+
+```mcp
+# Run an analysis (returns job_id)
+mcp__analysis__run analysis_id="<analysis_id>" parameters={{...}}
+
+# Check job status and get results
+mcp__analysis__job_get job_id="<job_id>"
+
+# OR get job results directly
+mcp__analysis__job_result job_id="<job_id>"
+```
+
+**When to use:**
+- When testing a fix you just applied
+- When the user explicitly asks you to run it immediately
+- For automated testing/validation
+
+**IMPORTANT**:
+- After running an analysis with `mcp__analysis__run`, you get a job_id
+- Use `mcp__analysis__job_get` or `mcp__analysis__job_result` to check status and get results
+- Display the results using show_table or show_chart if the data is tabular/visual
+
 ## Project Context
 
 PROJECT_ID: {project_id}

@@ -5,7 +5,7 @@ import {
   datasourcesActions,
 } from "@/lib/store/datasources-store";
 import { cn } from "@/lib/utils";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect } from "react";
 import { useSnapshot } from "valtio";
 import {
   useNavigate,
@@ -23,7 +23,6 @@ import { ConversationSidebarHeader } from "./components/header";
 import { ConversationList } from "./components/list";
 import { DatasourceList } from "./components/datasource-list";
 import { MobileMenuToggle } from "./components/toggle";
-import { ShareProjectDialog } from "@/components/share/ShareProjectDialog";
 import { AnalysisList } from "./components/analysis-list";
 import { useAuth } from "@/hooks/use-auth";
 import {
@@ -33,7 +32,6 @@ import {
   AccordionContent,
 } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
-import { Share2 } from "lucide-react";
 
 interface ProjectSidebarProps {
   isCollapsed: boolean;
@@ -49,8 +47,6 @@ export function ProjectSidebar({
   currentConversationId,
   onConversationSelect,
 }: ProjectSidebarProps) {
-  const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
-  const [shareConversationIds, setShareConversationIds] = useState<string[]>();
   const sidebarSnapshot = useSnapshot(sidebarStore);
   const datasourcesSnapshot = useSnapshot(datasourcesStore);
   const uiSnapshot = useSnapshot(uiStore);
@@ -61,9 +57,10 @@ export function ProjectSidebar({
   const params = useParams();
   const [searchParams] = useSearchParams();
   const location = useLocation();
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
 
   const { datasourceId } = params;
+  const analysisId = params.analysisId as string | undefined;
   const tableFromUrl = searchParams.get("table");
 
   // Check if we're on a datasource browse route (not just the datasources list page)
@@ -79,6 +76,13 @@ export function ProjectSidebar({
   useEffect(() => {
     uiActions.setCurrentTable(tableFromUrl);
   }, [tableFromUrl]);
+
+  // Sync active analysis with URL
+  useEffect(() => {
+    if (analysisId && analysisId !== analysisSnapshot.activeAnalysisId) {
+      analysisActions.setActiveAnalysis(analysisId);
+    }
+  }, [analysisId]);
 
   // Check if we're on an analysis route
   const isOnAnalysisRoute = location.pathname.includes("/analysis");
@@ -220,18 +224,7 @@ export function ProjectSidebar({
   };
 
   const handleProfile = () => {
-    // Implementation for profile
-  };
-
-  const handleShare = () => {
-    setShareConversationIds(undefined);
-    setIsShareDialogOpen(true);
-  };
-
-  const handleShareConversation = (conversation: any) => {
-    // For individual conversation sharing, we'll pre-select it in the dialog
-    setShareConversationIds([conversation.id]);
-    setIsShareDialogOpen(true);
+    navigate("/profile");
   };
 
   // Load datasources when needed (either on datasource routes or when sidebar is expanded)
@@ -242,16 +235,16 @@ export function ProjectSidebar({
     }
   }, [projectId]);
 
-  // Load analyses when needed
+  // Load analyses when needed (only on project change or sidebar expand)
   useEffect(() => {
-    if (projectId && (location.pathname.includes("/analysis") || !isCollapsed)) {
-      // Always load analyses when project changes or when needed
-      if (!analysisSnapshot.isLoading) {
+    if (projectId && !isCollapsed) {
+      // Only load if we don't have analyses yet or if loading hasn't started
+      if (analysisSnapshot.analyses.length === 0 && !analysisSnapshot.isLoading) {
         const loadAnalyses = async () => {
           analysisActions.setLoading(true);
           try {
             const response = await api.get(`/projects/${projectId}/analysis`);
-            analysisActions.setAnalyses(response.data);
+            analysisActions.setAnalyses(response);
           } catch (error) {
             console.error('Failed to load analyses:', error);
             analysisActions.setError('Failed to load analyses');
@@ -262,7 +255,7 @@ export function ProjectSidebar({
         loadAnalyses();
       }
     }
-  }, [projectId, location.pathname, isCollapsed]);
+  }, [projectId, isCollapsed]);
 
   const handleDatasourceClick = (datasourceId: string) => {
     sidebarActions.selectDatasource(datasourceId);
@@ -327,15 +320,18 @@ export function ProjectSidebar({
     if (projectId) {
       // Find the analysis to get its name
       const analysis = analysisSnapshot.analyses?.find(a => a.id === analysisId);
-      const tabTitle = analysis ? analysis.name : 'Analysis';
-      
+      const tabTitle = analysis ? (analysis.name || 'Analysis') : 'Analysis';
+
+      // Set active analysis
+      analysisActions.setActiveAnalysis(analysisId);
+
       // Create or activate an analysis tab
       tabsActions.getOrCreateActiveTab('analysis', {
         analysisId,
         analysisTitle: tabTitle,
         projectId,
       }, tabTitle);
-      
+
       // Navigate to the analysis page
       navigate(`/p/${projectId}/analysis/${analysisId}`);
     }
@@ -398,6 +394,7 @@ export function ProjectSidebar({
             sidebarActions.setMobileMenuOpen(false);
           }}
           projectId={projectId}
+          currentUserId={user?.id}
           onBulkDelete={handleBulkDelete}
         />
 
@@ -418,35 +415,12 @@ export function ProjectSidebar({
               >
                 <AccordionTrigger className="py-2 px-3 hover:no-underline hover:bg-accent/50 flex-shrink-0">
                   <div className="flex items-center justify-between w-full">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium">Conversations</span>
-                      <Badge variant="secondary" className="text-xs px-1.5 py-0">
-                        {typeof chat.conversationList?.length === "number"
-                          ? chat.conversationList?.length
-                          : "..."}
-                      </Badge>
-                    </div>
-                    {!sidebarSnapshot.isDeleteMode && (
-                      <div
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleShare();
-                        }}
-                        className="p-1 hover:bg-accent/50 rounded-sm cursor-pointer"
-                        title="Share Project"
-                        role="button"
-                        tabIndex={0}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            handleShare();
-                          }
-                        }}
-                      >
-                        <Share2 size={14} />
-                      </div>
-                    )}
+                    <span className="text-sm font-medium">Conversations</span>
+                    <Badge variant="secondary" className="text-xs px-1.5 py-0">
+                      {typeof chat.conversationList?.length === "number"
+                        ? chat.conversationList?.length
+                        : "..."}
+                    </Badge>
                   </div>
                 </AccordionTrigger>
                 <AccordionContent className="!p-0 flex flex-col flex-1 min-h-0">
@@ -455,7 +429,6 @@ export function ProjectSidebar({
                     onConversationClick={handleConversationClick}
                     onRenameConversation={openRenameDialog}
                     onDeleteConversation={handleDeleteConversation}
-                    onShareConversation={handleShareConversation}
                     projectId={projectId}
                   />
                 </AccordionContent>
@@ -515,6 +488,7 @@ export function ProjectSidebar({
                       // TODO: Open analysis creation dialog or set focus to chat input
                     }}
                     activeAnalysisId={analysisSnapshot.activeAnalysisId || undefined}
+                    projectId={projectId}
                   />
                 </AccordionContent>
               </AccordionItem>
@@ -539,19 +513,6 @@ export function ProjectSidebar({
 
       {/* Mobile menu toggle button */}
       <MobileMenuToggle />
-      
-      {/* Share Project Dialog */}
-      {projectId && (
-        <ShareProjectDialog
-          isOpen={isShareDialogOpen}
-          onClose={() => {
-            setIsShareDialogOpen(false);
-            setShareConversationIds(undefined);
-          }}
-          projectId={projectId}
-          preSelectedConversations={shareConversationIds}
-        />
-      )}
     </>
   );
 }

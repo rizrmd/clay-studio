@@ -33,16 +33,21 @@ pub struct PoolStats {
     pub usage_count: u64,
     pub last_validation_failure: Option<std::time::Instant>,
     pub consecutive_failures: u32,
+    pub last_validated: Option<std::time::Instant>,
+    pub validations_since_last_check: u32,
 }
 
 impl Default for PoolStats {
     fn default() -> Self {
+        let now = std::time::Instant::now();
         Self {
-            created_at: std::time::Instant::now(),
-            last_used: std::time::Instant::now(),
+            created_at: now,
+            last_used: now,
             usage_count: 0,
             last_validation_failure: None,
             consecutive_failures: 0,
+            last_validated: Some(now), // Assume newly created pools are valid
+            validations_since_last_check: 0,
         }
     }
 }
@@ -166,6 +171,7 @@ impl ConnectionPoolManager {
     }
     
     /// Check if we should retry pool validation or recreate
+    /// Implements exponential backoff: validate less frequently for stable pools
     async fn should_retry_pool(&self, cache_key: &str) -> bool {
         let stats = self.pool_stats.read().await;
         if let Some(stat) = stats.get(cache_key) {
@@ -173,11 +179,29 @@ impl ConnectionPoolManager {
             if stat.consecutive_failures >= 3 {
                 return true;
             }
-            
-            // If the last failure was recent (within 5 seconds), retry
+
+            // If the last failure was recent, use exponential backoff
             if let Some(last_failure) = stat.last_validation_failure {
-                if last_failure.elapsed() < std::time::Duration::from_secs(5) {
+                // Exponential backoff: wait 5s * 2^failures before retrying
+                let backoff_secs = 5 * (2_u64.pow(stat.consecutive_failures.min(5)));
+                if last_failure.elapsed() < std::time::Duration::from_secs(backoff_secs) {
                     return false;
+                }
+            }
+
+            // Optimized: Only validate periodically, not on every request
+            // Validate if:
+            // 1. Never validated, OR
+            // 2. Last validation was > 30 seconds ago, OR
+            // 3. Every 10 uses since last validation
+            if let Some(last_validated) = stat.last_validated {
+                let time_since_validation = last_validated.elapsed();
+                const VALIDATION_INTERVAL_SECS: u64 = 30;
+                const VALIDATION_EVERY_N_USES: u32 = 10;
+
+                if time_since_validation < std::time::Duration::from_secs(VALIDATION_INTERVAL_SECS)
+                    && stat.validations_since_last_check < VALIDATION_EVERY_N_USES {
+                    return false; // Skip validation
                 }
             }
         }
@@ -199,6 +223,8 @@ impl ConnectionPoolManager {
         if let Some(stat) = stats.get_mut(cache_key) {
             stat.last_validation_failure = None;
             stat.consecutive_failures = 0;
+            stat.last_validated = Some(std::time::Instant::now());
+            stat.validations_since_last_check = 0;
         }
     }
     
@@ -208,18 +234,22 @@ impl ConnectionPoolManager {
         if let Some(stat) = stats.get_mut(cache_key) {
             stat.last_used = std::time::Instant::now();
             stat.usage_count += 1;
+            stat.validations_since_last_check += 1;
         }
     }
     
     /// Initialize statistics for a new pool
     async fn initialize_stats(&self, cache_key: &str) {
         let mut stats = self.pool_stats.write().await;
+        let now = std::time::Instant::now();
         stats.insert(cache_key.to_string(), PoolStats {
-            created_at: std::time::Instant::now(),
-            last_used: std::time::Instant::now(),
+            created_at: now,
+            last_used: now,
             usage_count: 1,
             last_validation_failure: None,
             consecutive_failures: 0,
+            last_validated: Some(now),
+            validations_since_last_check: 0,
         });
     }
     
