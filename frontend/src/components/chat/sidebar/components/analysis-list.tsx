@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Play,
   Code,
@@ -16,11 +17,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Analysis, analysisActions } from "@/lib/store/analysis-store";
-import { analysisApi } from "@/lib/api/analysis";
-import { tabsActions, tabsStore } from "@/lib/store/tabs-store";
+import { Analysis } from "@/lib/store/analysis-store";
+import { sidebarActions, sidebarStore } from "@/lib/store/chat/sidebar-store";
 import { useSnapshot } from "valtio";
-import { useNavigate } from "react-router-dom";
 
 interface AnalysisListProps {
   analyses: Analysis[];
@@ -36,10 +35,8 @@ export function AnalysisList({
   onAnalysisClick,
   onRunAnalysis,
   activeAnalysisId,
-  projectId,
 }: AnalysisListProps) {
-  const tabsSnapshot = useSnapshot(tabsStore);
-  const navigate = useNavigate();
+  const sidebarSnapshot = useSnapshot(sidebarStore);
 
   const getTypeIcon = (type?: "sql" | "python" | "r" | string) => {
     if (!type) {
@@ -61,40 +58,9 @@ export function AnalysisList({
     }
   };
 
-  const handleDelete = async (analysisId: string, e: React.MouseEvent) => {
+  const handleDeleteSingle = async (analysisId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-
-    if (!confirm('Are you sure you want to delete this analysis?')) return;
-
-    try {
-      // Check if we're currently viewing this analysis
-      const isCurrentlyViewing = tabsSnapshot.tabs.some(
-        t => t.type === 'analysis' &&
-             t.metadata.analysisId === analysisId &&
-             t.id === tabsSnapshot.activeTabId
-      );
-
-      await analysisApi.deleteAnalysis(analysisId);
-
-      // Remove from store
-      analysisActions.removeAnalysis(analysisId);
-
-      // Close the tab if it's open
-      const analysisTab = tabsSnapshot.tabs.find(
-        t => t.type === 'analysis' && t.metadata.analysisId === analysisId
-      );
-      if (analysisTab) {
-        tabsActions.removeTab(analysisTab.id);
-      }
-
-      // If we were viewing this analysis, navigate away
-      if (isCurrentlyViewing && projectId) {
-        navigate(`/p/${projectId}`);
-      }
-    } catch (error) {
-      console.error('Failed to delete analysis:', error);
-      alert('Failed to delete analysis');
-    }
+    sidebarActions.enterAnalysisDeleteMode(analysisId);
   };
 
   return (
@@ -115,11 +81,25 @@ export function AnalysisList({
                 key={analysis.id}
                 className={cn(
                   "block w-full group text-left p-2 rounded-md hover:bg-muted border border-transparent transition-colors mb-1 cursor-pointer relative",
-                  activeAnalysisId === analysis.id && "bg-muted border-blue-700/30"
+                  activeAnalysisId === analysis.id && "bg-muted border-blue-700/30",
+                  sidebarSnapshot.isAnalysisDeleteMode &&
+                    sidebarSnapshot.selectedAnalyses.includes(analysis.id) &&
+                    "bg-red-50 dark:bg-red-900/20 border-red-500/30",
+                  sidebarSnapshot.isAnalysisDeleteMode &&
+                    "hover:bg-red-50 dark:hover:bg-red-900/10"
                 )}
-                onClick={() => onAnalysisClick(analysis.id)}
+                onClick={() => {
+                  if (sidebarSnapshot.isAnalysisDeleteMode) {
+                    sidebarActions.toggleAnalysisSelection(analysis.id);
+                  } else {
+                    onAnalysisClick(analysis.id);
+                  }
+                }}
               >
-                <div className="flex items-start gap-2 overflow-hidden group-hover:pr-8">
+                <div className={cn(
+                  "flex items-start gap-2 overflow-hidden",
+                  !sidebarSnapshot.isAnalysisDeleteMode && "group-hover:pr-8"
+                )}>
                   {/* Icon */}
                   <div className="pt-1">
                     {analysis.status === 'running' ? (
@@ -148,41 +128,52 @@ export function AnalysisList({
                       </p>
                     )}
                   </div>
+
+                  {/* Checkbox on the right in delete mode */}
+                  {sidebarSnapshot.isAnalysisDeleteMode && (
+                    <div className="pt-1 flex-shrink-0">
+                      <Checkbox
+                        checked={sidebarSnapshot.selectedAnalyses.includes(analysis.id)}
+                      />
+                    </div>
+                  )}
                 </div>
 
-                {/* Actions dropdown */}
-                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 w-6 p-0"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <MoreHorizontal className="h-3 w-3" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onRunAnalysis(analysis.id);
-                        }}
-                      >
-                        <Play className="h-4 w-4 mr-2" />
-                        Run Analysis
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={(e) => handleDelete(analysis.id, e)}
-                        className="text-destructive"
-                      >
-                        <Trash2 className="h-4 w-4 mr-2" />
-                        Delete
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
+                {/* Actions dropdown - hidden in delete mode */}
+                {!sidebarSnapshot.isAnalysisDeleteMode && (
+                  <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <MoreHorizontal className="h-3 w-3" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onRunAnalysis(analysis.id);
+                          }}
+                        >
+                          <Play className="h-4 w-4 mr-2" />
+                          Run Analysis
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={(e) => handleDeleteSingle(analysis.id, e)}
+                          className="text-red-600 focus:text-red-600"
+                        >
+                          <Trash2 className="h-4 w-4 mr-2" />
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                )}
               </div>
             ))}
           </div>

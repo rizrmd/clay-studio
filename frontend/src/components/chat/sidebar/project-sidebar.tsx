@@ -207,6 +207,41 @@ export function ProjectSidebar({
     }
   }, [sidebarSnapshot.selectedConversations]);
 
+  const handleBulkDeleteAnalyses = useCallback(async () => {
+    if (sidebarSnapshot.selectedAnalyses.length === 0) return;
+
+    if (!confirm(`Are you sure you want to delete ${sidebarSnapshot.selectedAnalyses.length} analysis/analyses? There is no undo.`)) {
+      return;
+    }
+
+    try {
+      const { analysisApi } = await import("@/lib/api/analysis");
+      const { tabsStore } = await import("@/lib/store/tabs-store");
+
+      // Delete each analysis
+      for (const analysisId of sidebarSnapshot.selectedAnalyses) {
+        await analysisApi.deleteAnalysis(analysisId);
+
+        // Remove from store
+        analysisActions.removeAnalysis(analysisId);
+
+        // Close the tab if it's open
+        const analysisTab = tabsStore.tabs.find(
+          t => t.type === 'analysis' && t.metadata.analysisId === analysisId
+        );
+        if (analysisTab) {
+          tabsActions.removeTab(analysisTab.id);
+        }
+      }
+
+      // Exit delete mode
+      sidebarActions.exitAnalysisDeleteMode();
+    } catch (error) {
+      console.error('Failed to delete analyses:', error);
+      alert('Failed to delete some analyses');
+    }
+  }, [sidebarSnapshot.selectedAnalyses]);
+
   const openRenameDialog = (conversation: any) => {
     // Set the conversation as selected for renaming
     sidebarActions.clearSelection();
@@ -396,6 +431,7 @@ export function ProjectSidebar({
           projectId={projectId}
           currentUserId={user?.id}
           onBulkDelete={handleBulkDelete}
+          onBulkDeleteAnalyses={handleBulkDeleteAnalyses}
         />
 
         {/* Accordion content */}

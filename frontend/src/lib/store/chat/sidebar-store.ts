@@ -9,6 +9,8 @@ export const sidebarStore = proxy({
   isOpen: true,
   selectedConversations: [] as string[],
   isDeleteMode: false,
+  selectedAnalyses: [] as string[],
+  isAnalysisDeleteMode: false,
   isMobileMenuOpen: false,
   recentlyUpdatedConversations: new Set(),
   loading: false,
@@ -115,5 +117,41 @@ export const sidebarActions = {
   },
   selectDatasource: (datasourceId: string | null) => {
     sidebarStore.selectedDatasourceId = datasourceId;
+  },
+  // Analysis delete mode actions
+  toggleAnalysisSelection: (id: string) => {
+    if (sidebarStore.isAnalysisDeleteMode) {
+      // Multi-select mode for delete
+      if (sidebarStore.selectedAnalyses.includes(id)) {
+        sidebarStore.selectedAnalyses = sidebarStore.selectedAnalyses.filter(analysisId => analysisId !== id);
+      } else {
+        sidebarStore.selectedAnalyses.push(id);
+      }
+    }
+  },
+  addAnalysisToSelection: (id: string) => {
+    if (!sidebarStore.selectedAnalyses.includes(id)) {
+      sidebarStore.selectedAnalyses.push(id);
+    }
+  },
+  removeAnalysisFromSelection: (id: string) => {
+    sidebarStore.selectedAnalyses = sidebarStore.selectedAnalyses.filter(analysisId => analysisId !== id);
+  },
+  clearAnalysisSelection: () => {
+    sidebarStore.selectedAnalyses = [];
+  },
+  selectAllAnalyses: (analysisIds: string[]) => {
+    sidebarStore.selectedAnalyses = [...analysisIds];
+  },
+  enterAnalysisDeleteMode: (id?: string) => {
+    sidebarStore.isAnalysisDeleteMode = true;
+    sidebarStore.selectedAnalyses = [];
+    if (id) {
+      sidebarStore.selectedAnalyses.push(id);
+    }
+  },
+  exitAnalysisDeleteMode: () => {
+    sidebarStore.isAnalysisDeleteMode = false;
+    sidebarStore.selectedAnalyses = [];
   },
 };

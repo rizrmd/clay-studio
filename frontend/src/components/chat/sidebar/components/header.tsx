@@ -16,6 +16,7 @@ import { useState } from "react";
 interface ConversationSidebarHeaderProps {
   onNavigateToProjects: () => void;
   onBulkDelete: () => void;
+  onBulkDeleteAnalyses?: () => void;
   projectId?: string;
   currentUserId?: string;
 }
@@ -23,6 +24,7 @@ interface ConversationSidebarHeaderProps {
 export function ConversationSidebarHeader({
   onNavigateToProjects,
   onBulkDelete,
+  onBulkDeleteAnalyses,
   projectId,
   currentUserId,
 }: ConversationSidebarHeaderProps) {
@@ -30,10 +32,12 @@ export function ConversationSidebarHeader({
   const navigate = useNavigate();
   const [membersDialogOpen, setMembersDialogOpen] = useState(false);
 
+  const isInDeleteMode = sidebarSnapshot.isDeleteMode || sidebarSnapshot.isAnalysisDeleteMode;
+
   return (
     <div className="px-1 py-2 border-b">
       <div className="flex items-center justify-between">
-        {!sidebarSnapshot.isDeleteMode && (
+        {!isInDeleteMode && (
           <Button
             variant="ghost"
             size="sm"
@@ -70,6 +74,31 @@ export function ConversationSidebarHeader({
               <Trash2 size={10} />
               <span className="text-xs">
                 Delete ({sidebarSnapshot.selectedConversations.length})
+              </span>
+            </Button>
+          </div>
+        ) : sidebarSnapshot.isAnalysisDeleteMode ? (
+          <div className="flex items-center justify-center flex-1 gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => sidebarActions.exitAnalysisDeleteMode()}
+              className="gap-1 h-[25px] border border-transparent hover:border-gray-200"
+              title="Cancel"
+            >
+              <X size={10} />
+              <span className="text-xs">Cancel</span>
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onBulkDeleteAnalyses}
+              className="gap-1 h-[25px] border border-transparent hover:border-red-500 hover:text-red-600"
+              title="Delete Selected"
+            >
+              <Trash2 size={10} />
+              <span className="text-xs">
+                Delete ({sidebarSnapshot.selectedAnalyses.length})
               </span>
             </Button>
           </div>
