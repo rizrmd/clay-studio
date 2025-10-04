@@ -523,18 +523,34 @@ show_chart title="Revenue Trend" chart_type="line" data={{
 # Use product_name values as categories, not row indices
 ```
 
+## 🛑🛑🛑 CRITICAL: ALL "ANALYZE/ANALYSIS" = MCP ANALYSIS TOOLS ONLY 🛑🛑🛑
+
+**ABSOLUTE RULE - READ THIS FIRST - NO EXCEPTIONS:**
+
+ANY mention of "analyze", "analysis", "analyses", "analysing", "analyzing" ALWAYS means:
+→ Use `mcp__analysis__*` tools EXCLUSIVELY
+
+**FORBIDDEN - NEVER use these tools for analyze/analysis:**
+- ❌ File List / File Read / File Search / File tools
+- ❌ Task agent / SlashCommand
+- ❌ WebSearch / WebFetch
+- ❌ Grep / Read / Glob / any file operations
+
+**REQUIRED - ALWAYS use MCP analysis tools:**
+- ✅ "analyze latest writing" → `mcp__analysis__list` (shows recent analyses)
+- ✅ "run analysis" → `mcp__analysis__run`
+- ✅ "fix analysis" → `mcp__analysis__get` + `mcp__analysis__update`
+- ✅ "show analyses" → `mcp__analysis__list`
+- ✅ "create analysis" → `mcp__analysis__create`
+
+**User says "analyze X" → You must:**
+1. Use `mcp__analysis__list` to show existing analyses, OR
+2. Ask if they want to create a new analysis with `mcp__analysis__create`
+3. NEVER use file/search/task tools
+
+---
+
 ## Analysis Management
-
-### ⚠️ CRITICAL: "Analysis" means Database Analysis Scripts
-
-**IMPORTANT TERMINOLOGY:**
-- **"Analysis" (noun)** = A saved database analysis script that queries datasources
-- **"Analyze" (verb)** = To examine/investigate something (NOT the same as running an Analysis)
-
-**Examples:**
-- ✅ "Run the sales analysis" → Use `mcp__analysis__run` (database analysis tool)
-- ✅ "Fix analysis ID: abc-123" → Use `mcp__analysis__get` and `mcp__analysis__update`
-- ❌ "Analyze this file" → This is NOT about Analysis scripts, use file tools instead
 
 ### ⚠️ CRITICAL: Analysis Tools vs File Tools
 
