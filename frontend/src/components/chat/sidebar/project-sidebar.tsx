@@ -218,6 +218,15 @@ export function ProjectSidebar({
       const { analysisApi } = await import("@/lib/api/analysis");
       const { tabsStore } = await import("@/lib/store/tabs-store");
 
+      // Check if we're currently viewing any of the analyses being deleted
+      const isViewingDeletedAnalysis = sidebarSnapshot.selectedAnalyses.some(analysisId => {
+        return tabsStore.tabs.some(
+          t => t.type === 'analysis' &&
+               t.metadata.analysisId === analysisId &&
+               t.id === tabsStore.activeTabId
+        );
+      });
+
       // Delete each analysis
       for (const analysisId of sidebarSnapshot.selectedAnalyses) {
         await analysisApi.deleteAnalysis(analysisId);
@@ -225,13 +234,18 @@ export function ProjectSidebar({
         // Remove from store
         analysisActions.removeAnalysis(analysisId);
 
-        // Close the tab if it's open
-        const analysisTab = tabsStore.tabs.find(
+        // Close all tabs for this analysis
+        const analysisTabs = tabsStore.tabs.filter(
           t => t.type === 'analysis' && t.metadata.analysisId === analysisId
         );
-        if (analysisTab) {
-          tabsActions.removeTab(analysisTab.id);
+        for (const tab of analysisTabs) {
+          tabsActions.removeTab(tab.id);
         }
+      }
+
+      // If we were viewing a deleted analysis, navigate to project home
+      if (isViewingDeletedAnalysis && projectId) {
+        navigate(`/p/${projectId}`);
       }
 
       // Exit delete mode
@@ -240,7 +254,7 @@ export function ProjectSidebar({
       console.error('Failed to delete analyses:', error);
       alert('Failed to delete some analyses');
     }
-  }, [sidebarSnapshot.selectedAnalyses]);
+  }, [sidebarSnapshot.selectedAnalyses, projectId, navigate]);
 
   const openRenameDialog = (conversation: any) => {
     // Set the conversation as selected for renaming
