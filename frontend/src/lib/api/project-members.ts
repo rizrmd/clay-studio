@@ -28,7 +28,7 @@ export interface TransferOwnershipRequest {
 export async function listProjectMembers(
   projectId: string
 ): Promise<ProjectMember[]> {
-  return api.get(`/api/projects/${projectId}/members`);
+  return api.get(`/projects/${projectId}/members`);
 }
 
 /**
@@ -38,7 +38,7 @@ export async function addProjectMember(
   projectId: string,
   request: AddMemberRequest
 ): Promise<ProjectMember> {
-  return api.post(`/api/projects/${projectId}/members`, request);
+  return api.post(`/projects/${projectId}/members`, request);
 }
 
 /**
@@ -48,7 +48,7 @@ export async function removeProjectMember(
   projectId: string,
   userId: string
 ): Promise<{ message: string; user_id: string }> {
-  return api.delete(`/api/projects/${projectId}/members/${userId}`);
+  return api.delete(`/projects/${projectId}/members/${userId}`);
 }
 
 /**
@@ -59,7 +59,7 @@ export async function updateMemberRole(
   userId: string,
   request: UpdateMemberRoleRequest
 ): Promise<{ message: string; user_id: string; new_role: string }> {
-  return api.patch(`/api/projects/${projectId}/members/${userId}`, request);
+  return api.patch(`/projects/${projectId}/members/${userId}`, request);
 }
 
 /**
@@ -69,5 +69,5 @@ export async function transferProjectOwnership(
   projectId: string,
   request: TransferOwnershipRequest
 ): Promise<{ message: string; new_owner_user_id: string }> {
-  return api.post(`/api/projects/${projectId}/transfer`, request);
+  return api.post(`/projects/${projectId}/transfer`, request);
 }

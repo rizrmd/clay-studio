@@ -97,7 +97,7 @@ impl AppState {
         tokio::fs::create_dir_all(&data_dir).await?;
         let analysis_service = AnalysisService::new(db_pool.clone());
 
-        Ok(AppState {
+        let state = AppState {
             db: db_arc,
             db_pool,
             config: Arc::new(config.clone()),
@@ -106,24 +106,34 @@ impl AppState {
             conversation_cache: Arc::new(RwLock::new(HashMap::new())),
             session_store,
             analysis_service,
-        })
+        };
+
+        // Start pool health monitor
+        state.start_pool_health_monitor();
+
+        Ok(state)
     }
 
     async fn create_sqlx_pool(database_url: &str) -> Result<PgPool, Box<dyn std::error::Error>> {
         info!("📊 SQLx Pool configuration:");
-        info!("  - Max connections: 15");
-        info!("  - Min connections: 2");
-        info!("  - Connect timeout: 30s");
-        info!("  - Idle timeout: 600s");
-        info!("  - Max lifetime: 1800s");
+        info!("  - Max connections: 20");
+        info!("  - Min connections: 3");
+        info!("  - Acquire timeout: 10s");
+        info!("  - Idle timeout: 300s");
+        info!("  - Max lifetime: 900s");
 
         let pool_options = PgPoolOptions::new()
-            .max_connections(15)
-            .min_connections(2)
-            .acquire_timeout(Duration::from_secs(30))
-            .idle_timeout(Some(Duration::from_secs(600)))
-            .max_lifetime(Some(Duration::from_secs(1800)))
-            .test_before_acquire(true);
+            .max_connections(20)
+            .min_connections(3)
+            .acquire_timeout(Duration::from_secs(10))
+            .idle_timeout(Some(Duration::from_secs(300)))
+            .max_lifetime(Some(Duration::from_secs(900)))
+            .test_before_acquire(true)
+            .before_acquire(|conn, _meta| Box::pin(async move {
+                // Force close connections that might be hung
+                let result = sqlx::query("SELECT 1").fetch_one(conn).await;
+                Ok(result.is_ok())
+            }));
 
         // Attempt connection with retry logic
         let mut attempts = 0;
@@ -468,6 +478,75 @@ impl AppState {
 
         // Reload from database (this will create a fresh cache entry)
         self.load_conversation_cache(conversation_id).await
+    }
+
+    /// Start background task to monitor pool health and attempt recovery
+    fn start_pool_health_monitor(&self) {
+        let pool = self.db_pool.clone();
+
+        tokio::spawn(async move {
+            let mut check_interval = tokio::time::interval(Duration::from_secs(30));
+            let mut consecutive_failures = 0u32;
+
+            loop {
+                check_interval.tick().await;
+
+                // Health check with timeout
+                let health_check = tokio::time::timeout(
+                    Duration::from_secs(5),
+                    sqlx::query("SELECT 1 as health_check").fetch_one(&pool)
+                ).await;
+
+                match health_check {
+                    Ok(Ok(_)) => {
+                        if consecutive_failures > 0 {
+                            info!("✅ Database pool recovered after {} failures", consecutive_failures);
+                            consecutive_failures = 0;
+                        }
+                    }
+                    Ok(Err(e)) => {
+                        consecutive_failures += 1;
+                        error!("❌ Pool health check failed (attempt {}): {}", consecutive_failures, e);
+
+                        // Try to force close idle connections to trigger reconnection
+                        if consecutive_failures >= 2 {
+                            warn!("🔄 Attempting pool recovery by closing idle connections");
+                            pool.close().await;
+                        }
+
+                        if consecutive_failures >= 5 {
+                            error!("🚨 CRITICAL: Pool has failed {} consecutive health checks", consecutive_failures);
+                        }
+                    }
+                    Err(_) => {
+                        consecutive_failures += 1;
+                        error!("❌ Pool health check timed out (attempt {})", consecutive_failures);
+
+                        // Try to force close idle connections to trigger reconnection
+                        if consecutive_failures >= 2 {
+                            warn!("🔄 Attempting pool recovery by closing idle connections");
+                            pool.close().await;
+                        }
+
+                        if consecutive_failures >= 5 {
+                            error!("🚨 CRITICAL: Pool has failed {} consecutive health checks", consecutive_failures);
+                        }
+                    }
+                }
+
+                // Log pool stats periodically
+                if consecutive_failures == 0 {
+                    let stats = pool.size();
+                    let idle = pool.num_idle() as u32;
+                    info!(
+                        "📊 Pool Health - Total: {}, Idle: {}, Active: {}",
+                        stats,
+                        idle,
+                        stats.saturating_sub(idle)
+                    );
+                }
+            }
+        });
     }
 }
 

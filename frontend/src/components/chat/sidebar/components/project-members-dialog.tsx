@@ -65,15 +65,27 @@ export function ProjectMembersDialog({
   const [removingMemberId, setRemovingMemberId] = useState<string | null>(null);
   const [transferringToUserId, setTransferringToUserId] = useState<string | null>(null);
 
-  const currentUserRole = members.find((m) => m.user_id === currentUserId)?.role;
+  const currentUserRole = Array.isArray(members)
+    ? members.find((m) => m.user_id === currentUserId)?.role
+    : undefined;
   const isCurrentUserOwner = currentUserRole === "owner";
-  const ownerCount = members.filter((m) => m.role === "owner").length;
+  const ownerCount = Array.isArray(members)
+    ? members.filter((m) => m.role === "owner").length
+    : 0;
 
   const loadMembers = async () => {
     setLoading(true);
     try {
       const data = await listProjectMembers(projectId);
-      setMembers(data);
+      console.log("[ProjectMembersDialog] API response:", data);
+      // Ensure data is an array
+      if (Array.isArray(data)) {
+        setMembers(data);
+      } else {
+        console.error("[ProjectMembersDialog] Expected array but got:", typeof data, data);
+        toast.error("Invalid members data format");
+        setMembers([]);
+      }
     } catch (error) {
       toast.error("Failed to load project members");
       console.error(error);
