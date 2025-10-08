@@ -29,8 +29,8 @@ impl McpHandlers {
             // Parse and validate the connection config
             let parsed_config = self.parse_connection_config(config, source_type)?;
 
-            // Test the connection before adding
-            if let Err(e) = shared_service::test_datasource_connection(source_type, &parsed_config).await {
+            // Test the connection directly before adding (no ID required)
+            if let Err(e) = shared_service::test_datasource_connection_direct(source_type, &parsed_config).await {
                 return Err(format!("Connection test failed: {}", e).into());
             }
 
@@ -40,7 +40,13 @@ impl McpHandlers {
             // Generate UUID for the new datasource
             let datasource_id = uuid::Uuid::new_v4().to_string();
 
-            // Insert into database
+            // Add the generated ID to the config for future connection pooling support
+            let mut config_with_id = parsed_config.clone();
+            if let Some(obj) = config_with_id.as_object_mut() {
+                obj.insert("id".to_string(), Value::String(datasource_id.clone()));
+            }
+
+            // Insert into database with config that includes the ID
             sqlx::query(
                 "INSERT INTO data_sources (id, project_id, name, source_type, connection_config, created_at) 
                  VALUES ($1, $2, $3, $4, $5, NOW())"
@@ -49,7 +55,7 @@ impl McpHandlers {
             .bind(&self.project_id)
             .bind(name)
             .bind(source_type)
-            .bind(&parsed_config)
+            .bind(&config_with_id)
             .execute(&self.db_pool)
             .await?;
 

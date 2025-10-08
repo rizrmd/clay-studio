@@ -154,3 +154,241 @@ pub async fn test_datasource_connection(
         .map_err(|e| Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error + Send + Sync>)?;
     Ok(())
 }
+
+/// Test a datasource connection directly without requiring an ID
+/// This is used for initial connection validation before creating a datasource
+pub async fn test_datasource_connection_direct(
+    source_type: &str,
+    connection_config: &Value,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    match source_type.to_lowercase().as_str() {
+        "postgresql" | "postgres" => {
+            test_postgres_connection_direct(connection_config).await
+        },
+        "mysql" => {
+            test_mysql_connection_direct(connection_config).await
+        },
+        "sqlite" => {
+            test_sqlite_connection_direct(connection_config).await
+        },
+        _ => {
+            // For other database types, fall back to the connector-based approach
+            // but with a temporary ID for testing
+            let mut config_with_temp_id = connection_config.clone();
+            if let Some(obj) = config_with_temp_id.as_object_mut() {
+                obj.insert("id".to_string(), Value::String("temp-test-id".to_string()));
+            }
+            test_datasource_connection(source_type, &config_with_temp_id).await
+        }
+    }
+}
+
+/// Test PostgreSQL connection directly using SQLx
+pub async fn test_postgres_connection_direct(config: &Value) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let connection_url = build_postgres_url_from_config(config)?;
+    
+    let pool = sqlx::postgres::PgPool::connect(&connection_url).await
+        .map_err(|e| format!("Failed to connect to PostgreSQL: {}", e))?;
+    
+    // Test with a simple query
+    sqlx::query("SELECT 1").fetch_one(&pool).await
+        .map_err(|e| format!("Connection established but query failed: {}", e))?;
+    
+    Ok(())
+}
+
+/// Test MySQL connection directly using SQLx
+async fn test_mysql_connection_direct(config: &Value) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let connection_url = build_mysql_url_from_config(config)?;
+    
+    let pool = sqlx::mysql::MySqlPool::connect(&connection_url).await
+        .map_err(|e| format!("Failed to connect to MySQL: {}", e))?;
+    
+    // Test with a simple query
+    sqlx::query("SELECT 1").fetch_one(&pool).await
+        .map_err(|e| format!("Connection established but query failed: {}", e))?;
+    
+    Ok(())
+}
+
+/// Test SQLite connection directly using SQLx
+async fn test_sqlite_connection_direct(config: &Value) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let database_path = get_sqlite_path_from_config(config)?;
+    
+    let pool = sqlx::sqlite::SqlitePool::connect(&format!("sqlite:{}", database_path)).await
+        .map_err(|e| format!("Failed to connect to SQLite: {}", e))?;
+    
+    // Test with a simple query
+    sqlx::query("SELECT 1").fetch_one(&pool).await
+        .map_err(|e| format!("Connection established but query failed: {}", e))?;
+    
+    Ok(())
+}
+
+/// Build PostgreSQL connection URL from config
+pub fn build_postgres_url_from_config(config: &Value) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    // If config is a string, treat it as a URL directly
+    if let Some(url) = config.as_str() {
+        return Ok(url.to_string());
+    }
+    
+    // If config is an object, build URL from components
+    let obj = config.as_object()
+        .ok_or("Config must be a string URL or object")?;
+    
+    let host = obj.get("host")
+        .and_then(|v| v.as_str())
+        .unwrap_or("localhost");
+    
+    let port = obj.get("port")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(5432);
+    
+    let database = obj.get("database")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing database name")?;
+    
+    let user = obj.get("user")
+        .and_then(|v| v.as_str())
+        .or_else(|| obj.get("username").and_then(|v| v.as_str()))
+        .unwrap_or("postgres");
+    
+    let password = obj.get("password")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    
+    // Build connection URL
+    let connection_url = if password.is_empty() {
+        format!("postgresql://{}@{}:{}/{}", user, host, port, database)
+    } else {
+        format!("postgresql://{}:{}@{}:{}/{}", user, password, host, port, database)
+    };
+    
+    Ok(connection_url)
+}
+
+/// Build MySQL connection URL from config
+fn build_mysql_url_from_config(config: &Value) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    // If config is a string, treat it as a URL directly
+    if let Some(url) = config.as_str() {
+        return Ok(url.to_string());
+    }
+    
+    // If config is an object, build URL from components
+    let obj = config.as_object()
+        .ok_or("Config must be a string URL or object")?;
+    
+    let host = obj.get("host")
+        .and_then(|v| v.as_str())
+        .unwrap_or("localhost");
+    
+    let port = obj.get("port")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(3306);
+    
+    let database = obj.get("database")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing database name")?;
+    
+    let user = obj.get("user")
+        .and_then(|v| v.as_str())
+        .or_else(|| obj.get("username").and_then(|v| v.as_str()))
+        .unwrap_or("root");
+    
+    let password = obj.get("password")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    
+    // Build connection URL
+    let connection_url = if password.is_empty() {
+        format!("mysql://{}@{}:{}/{}", user, host, port, database)
+    } else {
+        format!("mysql://{}:{}@{}:{}/{}", user, password, host, port, database)
+    };
+    
+    Ok(connection_url)
+}
+
+/// Get SQLite database path from config
+fn get_sqlite_path_from_config(config: &Value) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    // If config is a string, treat it as a database path
+    if let Some(path) = config.as_str() {
+        return Ok(path.to_string());
+    }
+    
+    // If config is an object, get the database path
+    let obj = config.as_object()
+        .ok_or("Config must be a string path or object")?;
+    
+    obj.get("database")
+        .and_then(|v| v.as_str())
+        .or_else(|| obj.get("path").and_then(|v| v.as_str()))
+        .ok_or_else(|| "Missing database path".into())
+        .map(|s| s.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_build_postgres_url_from_config_object() {
+        let config = json!({
+            "database": "pi-smart-stg",
+            "host": "159.65.9.242",
+            "password": "PasswordRO123!",
+            "port": 5432,
+            "user": "readonly_user"
+        });
+        
+        let url = build_postgres_url_from_config(&config).unwrap();
+        assert_eq!(url, "postgresql://readonly_user:PasswordRO123!@159.65.9.242:5432/pi-smart-stg");
+    }
+
+    #[test]
+    fn test_build_postgres_url_from_config_string() {
+        let config = json!("postgresql://user:pass@localhost:5432/testdb");
+        
+        let url = build_postgres_url_from_config(&config).unwrap();
+        assert_eq!(url, "postgresql://user:pass@localhost:5432/testdb");
+    }
+
+    #[test]
+    fn test_build_postgres_url_missing_database() {
+        let config = json!({
+            "host": "localhost",
+            "user": "user"
+        });
+        
+        let result = build_postgres_url_from_config(&config);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Missing database name"));
+    }
+
+    #[tokio::test]
+    async fn test_datasource_connection_direct_postgres() {
+        let config = json!({
+            "database": "pi-smart-stg",
+            "host": "159.65.9.242",
+            "password": "PasswordRO123!",
+            "port": 5432,
+            "user": "readonly_user"
+        });
+        
+        // This should fail with connection error, not "Missing datasource ID"
+        let result = test_datasource_connection_direct("postgresql", &config).await;
+        
+        // We expect this to fail (since the database might not be reachable), 
+        // but it should NOT fail with "Missing datasource ID"
+        match result {
+            Ok(_) => println!("✅ Connection successful"),
+            Err(e) => {
+                let error_msg = e.to_string();
+                assert!(!error_msg.contains("Missing datasource ID"), 
+                    "Error should not contain 'Missing datasource ID', but got: {}", error_msg);
+                println!("✅ Expected connection error: {}", error_msg);
+            }
+        }
+    }
+}
