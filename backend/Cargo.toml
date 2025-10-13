@@ -64,7 +64,6 @@ oracle = "0.6"
 rust_xlsxwriter = "0.70"
 rust_decimal = "1.37.2"
 # Analysis sandbox dependencies
-quickjs_runtime = "0.10"
 polars = { version = "0.44", features = ["lazy", "sql", "temporal", "strings"] }
 cron = "0.12"
 tempfile = "3.12"

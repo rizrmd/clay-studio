@@ -266,9 +266,9 @@ impl AnalysisManager {
             version_number: row.version_number,
             script_content: row.script_content,
             change_description: row.change_description,
-            created_at: row.created_at,
-            created_by: row.created_by,
-            metadata: row.metadata,
+            created_at: row.created_at.map(|dt| chrono::DateTime::<chrono::Utc>::from_timestamp(dt.unix_timestamp(), 0).unwrap_or_else(|| chrono::Utc::now())).unwrap_or_else(|| chrono::Utc::now()),
+            created_by: row.created_by.unwrap_or_else(|| "system".to_string()),
+            metadata: row.metadata.unwrap_or_else(|| serde_json::json!({})),
         }).collect();
 
         Ok(versions)
@@ -294,9 +294,9 @@ impl AnalysisManager {
             version_number: row.version_number,
             script_content: row.script_content,
             change_description: row.change_description,
-            created_at: row.created_at,
-            created_by: row.created_by,
-            metadata: row.metadata,
+            created_at: row.created_at.map(|dt| chrono::DateTime::<chrono::Utc>::from_timestamp(dt.unix_timestamp(), 0).unwrap_or_else(|| chrono::Utc::now())).unwrap_or_else(|| chrono::Utc::now()),
+            created_by: row.created_by.unwrap_or_else(|| "system".to_string()),
+            metadata: row.metadata.unwrap_or_else(|| serde_json::json!({})),
         })
     }
 
@@ -413,8 +413,8 @@ impl AnalysisManager {
 
         Ok(ScheduleConfig {
             cron: row.cron_expression,
-            timezone: Some(row.timezone),
-            enabled: row.enabled,
+            timezone: row.timezone,
+            enabled: row.enabled.unwrap_or(true),
         })
     }
 

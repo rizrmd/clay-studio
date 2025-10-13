@@ -1,19 +1,30 @@
-use anyhow::{Result, Context};
+use anyhow::Result;
 use serde_json::Value;
 use sqlx::types::Uuid;
 use sqlx::PgPool;
 use tokio::task;
-use quickjs_runtime::builder::QuickJsRuntimeBuilder;
-use quickjs_runtime::jsutils::Script;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::collections::HashMap;
+
+use super::bun_runtime::BunRuntime;
 
 #[derive(Clone)]
 pub struct AnalysisService {
     db_pool: PgPool,
+    bun_runtime: Arc<BunRuntime>,
 }
 
 impl AnalysisService {
-    pub fn new(db_pool: PgPool) -> Self {
-        Self { db_pool }
+    pub fn new(db_pool: PgPool, clients_dir: PathBuf) -> Result<Self> {
+        let bun_runtime = Arc::new(
+            BunRuntime::new(clients_dir)?
+                .with_db_pool(db_pool.clone())
+        );
+        Ok(Self {
+            db_pool,
+            bun_runtime,
+        })
     }
 
     pub async fn submit_analysis_job(&self, analysis_id: Uuid, parameters: Value, _trigger_type: String) -> Result<Uuid> {
@@ -51,9 +62,9 @@ impl AnalysisService {
         .execute(&self.db_pool)
         .await?;
 
-        // Get the analysis script
+        // Get the analysis script and project_id
         let analysis = sqlx::query!(
-            "SELECT script_content FROM analyses WHERE id = $1",
+            "SELECT script_content, project_id FROM analyses WHERE id = $1",
             analysis_id
         )
         .fetch_optional(&self.db_pool)
@@ -64,10 +75,35 @@ impl AnalysisService {
             return Ok(());
         }
 
-        let script_content = analysis.unwrap().script_content;
+        let analysis_row = analysis.unwrap();
+        let script_content = analysis_row.script_content;
+        let project_id = Uuid::parse_str(&analysis_row.project_id)?;
 
-        // Execute the JavaScript
-        match self.execute_javascript(&script_content, &parameters).await {
+        // Get datasources for the project
+        let datasources = self.get_project_datasources(project_id).await?;
+
+        // Build context
+        let context = serde_json::json!({
+            "datasources": datasources,
+            "metadata": {},
+        });
+
+        // Get backend URL from environment
+        let backend_url = std::env::var("BACKEND_URL").ok();
+
+        // Generate auth token for this job
+        let auth_token = Some(format!("analysis-job-{}", job_id));
+
+        // Execute using Bun runtime
+        match self.bun_runtime.execute_analysis(
+            project_id,
+            job_id,
+            &script_content,
+            parameters,
+            context,
+            backend_url,
+            auth_token,
+        ).await {
             Ok(result) => {
                 // Update job with completed status
                 sqlx::query!(
@@ -86,107 +122,38 @@ impl AnalysisService {
                 .await?;
             }
             Err(e) => {
-                let error_msg = format!("Script execution failed: {:?}", e);
-                eprintln!("Job {} failed: {}", job_id, error_msg);
-                self.update_job_status(job_id, "failed", None, Some(error_msg.clone())).await?;
+                let error_msg = format!("Script execution failed: {}", e);
+                tracing::error!("Job {} failed: {}", job_id, error_msg);
+                self.update_job_status(job_id, "failed", None, Some(error_msg)).await?;
             }
         }
 
         Ok(())
     }
 
-    async fn execute_javascript(&self, script: &str, parameters: &Value) -> Result<Value> {
-        // Execute in a separate blocking task to avoid blocking the async runtime
-        let script_owned = script.to_string();
-        let parameters_owned = parameters.clone();
+    async fn get_project_datasources(&self, project_id: Uuid) -> Result<HashMap<String, Value>> {
+        let rows = sqlx::query!(
+            r#"
+            SELECT name, source_type, connection_config as config
+            FROM data_sources
+            WHERE project_id = $1 AND deleted_at IS NULL
+            "#,
+            project_id.to_string()
+        )
+        .fetch_all(&self.db_pool)
+        .await?;
 
-        task::spawn_blocking(move || {
-            // Create QuickJS runtime
-            let runtime = QuickJsRuntimeBuilder::new()
-                .build();
+        let mut datasources = HashMap::new();
+        for row in rows {
+            let datasource_info = serde_json::json!({
+                "name": row.name.clone(),
+                "type": row.source_type,
+                "config": row.config
+            });
+            datasources.insert(row.name, datasource_info);
+        }
 
-            // Remove ES6 export syntax and async keywords since QuickJS makes this complicated
-            let processed_script = script_owned
-                .replace("export default async function", "function main")
-                .replace("export default function", "function main")
-                .replace("export default", "const main =")
-                .replace("async run(", "run(")  // Remove async from method definitions
-                .replace("async function(", "function(");
-
-            // Prepare the script with parameters injected (synchronous execution)
-            let wrapped_script = format!(
-                r#"
-                (function() {{
-                    const parameters = {};
-
-                    // Execute the script
-                    {};
-
-                    // Get the result
-                    let result;
-                    if (typeof main === 'function') {{
-                        // main is a function, call it directly
-                        result = main(parameters);
-                    }} else if (typeof main === 'object' && typeof main.run === 'function') {{
-                        // main is an object with a run method
-                        result = main.run(parameters);
-                    }} else if (typeof main !== 'undefined') {{
-                        // main exists but isn't callable
-                        result = main;
-                    }} else {{
-                        result = {{ __executed: true }};
-                    }}
-
-                    // Convert to JSON string for Rust to parse
-                    return JSON.stringify(result);
-                }})()
-                "#,
-                serde_json::to_string(&parameters_owned).unwrap_or_else(|_| "{}".to_string()),
-                processed_script
-            );
-
-            // Execute the script synchronously
-            let script_obj = Script::new("analysis.js", &wrapped_script);
-
-            let result = runtime.eval_sync(None, script_obj)
-                .context("Failed to evaluate script")?;
-
-            // The result is now a JSON string, parse it
-            let json_result = if result.is_null_or_undefined() {
-                serde_json::json!({
-                    "success": true,
-                    "data": null,
-                    "message": "Script executed successfully but returned no data"
-                })
-            } else if result.is_string() {
-                // Parse the JSON string returned by the script
-                let json_str = result.get_str();
-                match serde_json::from_str::<Value>(json_str) {
-                    Ok(parsed_data) => {
-                        serde_json::json!({
-                            "success": true,
-                            "data": parsed_data,
-                            "message": "Script executed successfully"
-                        })
-                    }
-                    Err(e) => {
-                        serde_json::json!({
-                            "success": false,
-                            "data": null,
-                            "message": format!("Failed to parse result as JSON: {}", e)
-                        })
-                    }
-                }
-            } else {
-                serde_json::json!({
-                    "success": false,
-                    "data": null,
-                    "message": "Script did not return a JSON string"
-                })
-            };
-
-            Ok(json_result)
-        }).await?
+        Ok(datasources)
     }
 
     pub async fn create_job(&self, analysis_id: Uuid, parameters: Value) -> Result<Uuid> {
