@@ -106,6 +106,14 @@ function App() {
         }
       />
       <Route
+        path="/p/:projectId/members"
+        element={
+          <AppRoute>
+            <MainApp />
+          </AppRoute>
+        }
+      />
+      <Route
         path="/projects"
         element={
           <AppRoute>

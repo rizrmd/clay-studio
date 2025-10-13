@@ -41,6 +41,11 @@ const ContextEditor = lazy(() =>
     default: m.ContextEditor,
   }))
 );
+const MembersPage = lazy(() =>
+  import("@/components/projects/members-page").then((m) => ({
+    default: m.MembersPage,
+  }))
+);
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useSnapshot } from "valtio";
 import { uiStore, uiActions } from "@/lib/store/chat/ui-store";
@@ -51,6 +56,7 @@ import { api } from "@/lib/utils/api";
 import { useChat } from "@/lib/hooks/use-chat";
 import { wsService } from "@/lib/services/ws-service";
 import { TabBar } from "@/components/layout/tab-bar";
+import { useAuth } from "@/hooks/use-auth";
 
 // Stub implementations
 const useLoggerDebug = () => ({ isDebugMode: false });
@@ -69,6 +75,7 @@ export function MainApp() {
   const navigate = useNavigate();
   const location = useLocation();
   const chat = useChat();
+  const { user } = useAuth();
 
   // Check if we're on the new conversation route
   const isNewRoute = location.pathname.endsWith("/new");
@@ -94,6 +101,8 @@ export function MainApp() {
   const isAnalysisViewRoute = location.pathname.includes("/analysis/") && !isAnalysisNewRoute;
   // Check if we're on the context route
   const isContextRoute = location.pathname.endsWith("/context");
+  // Check if we're on the members route
+  const isMembersRoute = location.pathname.endsWith("/members");
 
   // Enable debug logging hooks
   useLoggerDebug();
@@ -131,7 +140,8 @@ export function MainApp() {
       !isAnalysisListRoute &&
       !isAnalysisNewRoute &&
       !isAnalysisViewRoute &&
-      !isContextRoute
+      !isContextRoute &&
+      !isMembersRoute
     ) {
       // Try to get the last conversation from localStorage
       const lastConversationKey = `last_conversation_${projectId}`;
@@ -473,6 +483,26 @@ export function MainApp() {
         );
         shouldCreateTab = false;
       }
+    } else if (isMembersRoute) {
+      // Look for existing members tab
+      const existingTab = projectTabs.find(
+        (t) => t.type === "members" && t.metadata.projectId === projectId
+      );
+
+      if (existingTab) {
+        targetTabId = existingTab.id;
+        shouldCreateTab = false;
+      } else {
+        // Create new members tab
+        targetTabId = tabsActions.getOrCreateActiveTab(
+          "members",
+          {
+            projectId,
+          },
+          "Members"
+        );
+        shouldCreateTab = false;
+      }
     } else if (isNewRoute) {
       // Always create/reuse chat tab for new conversations
       targetTabId = tabsActions.getOrCreateActiveTab(
@@ -515,6 +545,7 @@ export function MainApp() {
     isAnalysisNewRoute,
     isNewRoute,
     isContextRoute,
+    isMembersRoute,
     location.pathname,
     tabsSnapshot.tabs,
     tabsSnapshot.activeTabId,
@@ -603,6 +634,14 @@ export function MainApp() {
             fallback={<div className="flex-1 animate-pulse bg-gray-50" />}
           >
             <ContextEditor projectId={projectId!} />
+          </Suspense>
+        );
+      } else if (isMembersRoute) {
+        return (
+          <Suspense
+            fallback={<div className="flex-1 animate-pulse bg-gray-50" />}
+          >
+            <MembersPage projectId={projectId!} currentUserId={user?.id} />
           </Suspense>
         );
       } else if (isNewRoute) {
@@ -702,6 +741,14 @@ export function MainApp() {
             fallback={<div className="flex-1 animate-pulse bg-gray-50" />}
           >
             <ContextEditor projectId={projectId!} />
+          </Suspense>
+        );
+      case "members":
+        return (
+          <Suspense
+            fallback={<div className="flex-1 animate-pulse bg-gray-50" />}
+          >
+            <MembersPage projectId={projectId!} currentUserId={user?.id} />
           </Suspense>
         );
       default:

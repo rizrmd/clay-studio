@@ -155,18 +155,31 @@ impl ConnectionPoolManager {
         Ok(pool)
     }
     
-    /// Validate a pool based on its type
+    /// Validate a pool based on its type with timeout to avoid hanging
     async fn validate_pool(&self, pool: &DatabasePool) -> bool {
-        match pool {
-            DatabasePool::PostgreSQL(pool) => {
-                sqlx::query("SELECT 1").fetch_one(pool.as_ref()).await.is_ok()
-            },
-            DatabasePool::MySQL(pool) => {
-                sqlx::query("SELECT 1").fetch_one(pool.as_ref()).await.is_ok()
-            },
-            DatabasePool::SQLite(pool) => {
-                sqlx::query("SELECT 1").fetch_one(pool.as_ref()).await.is_ok()
-            },
+        use tokio::time::{timeout, Duration};
+
+        let validation = async {
+            match pool {
+                DatabasePool::PostgreSQL(pool) => {
+                    sqlx::query("SELECT 1").fetch_one(pool.as_ref()).await.is_ok()
+                },
+                DatabasePool::MySQL(pool) => {
+                    sqlx::query("SELECT 1").fetch_one(pool.as_ref()).await.is_ok()
+                },
+                DatabasePool::SQLite(pool) => {
+                    sqlx::query("SELECT 1").fetch_one(pool.as_ref()).await.is_ok()
+                },
+            }
+        };
+
+        // Timeout after 3 seconds to avoid hanging on dead connections
+        match timeout(Duration::from_secs(3), validation).await {
+            Ok(result) => result,
+            Err(_) => {
+                warn!("Pool validation timed out after 3 seconds");
+                false
+            }
         }
     }
     
@@ -175,15 +188,16 @@ impl ConnectionPoolManager {
     async fn should_retry_pool(&self, cache_key: &str) -> bool {
         let stats = self.pool_stats.read().await;
         if let Some(stat) = stats.get(cache_key) {
-            // If we have too many consecutive failures, recreate the pool
-            if stat.consecutive_failures >= 3 {
+            // If we have consecutive failures, recreate the pool (lowered from 3 to 2 for faster recovery)
+            if stat.consecutive_failures >= 2 {
+                warn!("Pool {} has {} consecutive failures, will recreate", cache_key, stat.consecutive_failures);
                 return true;
             }
 
             // If the last failure was recent, use exponential backoff
             if let Some(last_failure) = stat.last_validation_failure {
-                // Exponential backoff: wait 5s * 2^failures before retrying
-                let backoff_secs = 5 * (2_u64.pow(stat.consecutive_failures.min(5)));
+                // Exponential backoff: wait 2s * 2^failures before retrying (reduced from 5s for faster recovery)
+                let backoff_secs = 2 * (2_u64.pow(stat.consecutive_failures.min(5)));
                 if last_failure.elapsed() < std::time::Duration::from_secs(backoff_secs) {
                     return false;
                 }
@@ -192,11 +206,11 @@ impl ConnectionPoolManager {
             // Optimized: Only validate periodically, not on every request
             // Validate if:
             // 1. Never validated, OR
-            // 2. Last validation was > 30 seconds ago, OR
+            // 2. Last validation was > 15 seconds ago (reduced from 30s for better responsiveness), OR
             // 3. Every 10 uses since last validation
             if let Some(last_validated) = stat.last_validated {
                 let time_since_validation = last_validated.elapsed();
-                const VALIDATION_INTERVAL_SECS: u64 = 30;
+                const VALIDATION_INTERVAL_SECS: u64 = 15; // Reduced from 30
                 const VALIDATION_EVERY_N_USES: u32 = 10;
 
                 if time_since_validation < std::time::Duration::from_secs(VALIDATION_INTERVAL_SECS)

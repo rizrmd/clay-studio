@@ -224,13 +224,15 @@ function TableRowWithExpansion({ item, index }: { item: JsonValue; index: number
               </Badge>
             </Button>
           ) : (
-            <span className="truncate block">{item.preview}</span>
+            <div className="flex items-center gap-1">
+              <span className="truncate block flex-1">{item.preview}</span>
+              {item.isLong && (
+                <ExpandableValueModal value={item.value} keyName={item.key} />
+              )}
+            </div>
           )}
         </TableCell>
         <TableCell className="max-w-[50px] p-1 px-2">
-          {item.isLong && (
-            <ExpandableValueModal value={item.value} keyName={item.key} />
-          )}
         </TableCell>
       </TableRow>
       {isExpanded && (

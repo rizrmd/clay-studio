@@ -1171,7 +1171,7 @@ impl McpHandlers {
     }
 
     pub async fn handle_datasource_detail(
-        &self, 
+        &self,
         arguments: &serde_json::Map<String, serde_json::Value>
     ) -> Result<String, JsonRpcError> {
         let datasource_id = arguments
@@ -1183,10 +1183,10 @@ impl McpHandlers {
                 data: None,
             })?;
 
-        // Query datasource details
+        // Query datasource details including connection_config
         let row = sqlx::query(
-            "SELECT id, name, source_type, is_active, created_at, updated_at, schema_info 
-             FROM data_sources 
+            "SELECT id, name, source_type, is_active, created_at, updated_at, schema_info, connection_config
+             FROM data_sources
              WHERE id = $1 AND project_id = $2 AND deleted_at IS NULL"
         )
         .bind(datasource_id)
@@ -1207,6 +1207,7 @@ impl McpHandlers {
             let created_at: chrono::DateTime<chrono::Utc> = row.get("created_at");
             let updated_at: Option<chrono::DateTime<chrono::Utc>> = row.get("updated_at");
             let schema_info: Option<Value> = row.get("schema_info");
+            let connection_config: Value = row.get("connection_config");
 
             let detail = json!({
                 "status": "success",
@@ -1216,6 +1217,7 @@ impl McpHandlers {
                 "is_active": is_active,
                 "created_at": created_at.to_rfc3339(),
                 "updated_at": updated_at.map(|dt| dt.to_rfc3339()),
+                "connection_details": connection_config,
                 "schema_info": schema_info
             });
 

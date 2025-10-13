@@ -410,7 +410,7 @@ pub async fn list_projects(depot: &mut Depot, res: &mut Response) -> Result<(), 
 
         // Get datasource count for this project
         let datasource_count = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM data_sources WHERE project_id = $1 AND is_active = true",
+            "SELECT COUNT(*) FROM data_sources WHERE project_id = $1 AND is_active = true AND deleted_at IS NULL",
         )
         .bind(&project_id)
         .fetch_one(&state.db_pool)

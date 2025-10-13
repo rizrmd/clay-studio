@@ -141,8 +141,6 @@ pub async fn create_datasource(
     }
 
     let datasource_id = Uuid::new_v4().to_string();
-    let config_json = serde_json::to_string(&request_data.config)
-        .map_err(|e| AppError::BadRequest(format!("Invalid config format: {}", e)))?;
 
     // Insert datasource
     let now = Utc::now();
@@ -155,7 +153,7 @@ pub async fn create_datasource(
     .bind(&datasource_id)
     .bind(&request_data.name)
     .bind(&normalized_source_type)
-    .bind(&config_json)
+    .bind(&request_data.config)
     .bind(&project_id)
     .bind(now)
     .bind(now)
@@ -238,13 +236,12 @@ pub async fn update_datasource(
     // Handle different update scenarios
     let updated_row = match (&request_data.name, &request_data.config) {
         (Some(name), Some(config)) => {
-            let config_json = serde_json::to_string(config)
-                .map_err(|e| AppError::BadRequest(format!("Invalid config format: {}", e)))?;
+            // When config changes, invalidate cache
             sqlx::query(
-                "UPDATE data_sources SET name = $1, connection_config = $2, updated_at = $3 WHERE id = $4 RETURNING *, connection_config as config, last_tested_at"
+                "UPDATE data_sources SET name = $1, connection_config = $2, table_list = NULL, schema_info = NULL, updated_at = $3 WHERE id = $4 RETURNING *, connection_config as config, last_tested_at"
             )
             .bind(name)
-            .bind(&config_json)
+            .bind(config)
             .bind(now)
             .bind(&datasource_id)
             .fetch_one(&state.db_pool)
@@ -252,6 +249,7 @@ pub async fn update_datasource(
             .map_err(|e| AppError::InternalServerError(format!("Failed to update datasource: {}", e)))?
         },
         (Some(name), None) => {
+            // Name-only update doesn't affect cache
             sqlx::query(
                 "UPDATE data_sources SET name = $1, updated_at = $2 WHERE id = $3 RETURNING *, connection_config as config, last_tested_at"
             )
@@ -263,12 +261,11 @@ pub async fn update_datasource(
             .map_err(|e| AppError::InternalServerError(format!("Failed to update datasource: {}", e)))?
         },
         (None, Some(config)) => {
-            let config_json = serde_json::to_string(config)
-                .map_err(|e| AppError::BadRequest(format!("Invalid config format: {}", e)))?;
+            // When config changes, invalidate cache
             sqlx::query(
-                "UPDATE data_sources SET connection_config = $1, updated_at = $2 WHERE id = $3 RETURNING *, connection_config as config, last_tested_at"
+                "UPDATE data_sources SET connection_config = $1, table_list = NULL, schema_info = NULL, updated_at = $2 WHERE id = $3 RETURNING *, connection_config as config, last_tested_at"
             )
-            .bind(&config_json)
+            .bind(config)
             .bind(now)
             .bind(&datasource_id)
             .fetch_one(&state.db_pool)

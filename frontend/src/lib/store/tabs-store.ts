@@ -363,10 +363,10 @@ export const tabsActions = {
         return existingAnalysisTab.id;
       }
     }
-    
+
     // For context tabs, only allow one per project
     if (type === 'context') {
-      const existingContextTab = tabsStore.tabs.find(t => 
+      const existingContextTab = tabsStore.tabs.find(t =>
         t.type === 'context' && t.metadata.projectId === metadata.projectId
       );
       if (existingContextTab) {
@@ -374,7 +374,18 @@ export const tabsActions = {
         return existingContextTab.id;
       }
     }
-    
+
+    // For members tabs, only allow one per project
+    if (type === 'members') {
+      const existingMembersTab = tabsStore.tabs.find(t =>
+        t.type === 'members' && t.metadata.projectId === metadata.projectId
+      );
+      if (existingMembersTab) {
+        tabsActions.setActiveTab(existingMembersTab.id);
+        return existingMembersTab.id;
+      }
+    }
+
     // Check if there's already an active tab of this type (fallback for general types)
     const activeTabId = tabsStore.activeTabByType[type];
     if (activeTabId) {
@@ -403,7 +414,7 @@ export const tabsActions = {
   openInNewTab: (type: TabType, metadata: Tab['metadata'], title?: string) => {
     // For context tabs, only allow one per project
     if (type === 'context') {
-      const existingContextTab = tabsStore.tabs.find(t => 
+      const existingContextTab = tabsStore.tabs.find(t =>
         t.type === 'context' && t.metadata.projectId === metadata.projectId
       );
       if (existingContextTab) {
@@ -411,7 +422,18 @@ export const tabsActions = {
         return existingContextTab.id;
       }
     }
-    
+
+    // For members tabs, only allow one per project
+    if (type === 'members') {
+      const existingMembersTab = tabsStore.tabs.find(t =>
+        t.type === 'members' && t.metadata.projectId === metadata.projectId
+      );
+      if (existingMembersTab) {
+        tabsActions.setActiveTab(existingMembersTab.id);
+        return existingMembersTab.id;
+      }
+    }
+
     // Always create a new tab for other types
     return tabsActions.addTab({
       type,

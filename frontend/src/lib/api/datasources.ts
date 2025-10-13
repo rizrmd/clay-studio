@@ -180,8 +180,9 @@ export const datasourcesApi = {
   },
 
   // Get list of tables
-  getTables: async (datasourceId: string): Promise<string[]> => {
-    return api.get(`/datasources/${datasourceId}/tables`);
+  getTables: async (datasourceId: string, forceRefresh?: boolean): Promise<string[]> => {
+    const params = forceRefresh ? { force_refresh: 'true' } : {};
+    return api.get(`/datasources/${datasourceId}/tables`, { params });
   },
 
   // Get table structure information

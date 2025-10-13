@@ -378,27 +378,10 @@ impl McpHandlers {
             let updated_at: Option<chrono::DateTime<chrono::Utc>> = source.get("updated_at");
             let schema_info: Option<String> = source.get("schema_info");
 
-            // Parse connection config for display (hide sensitive data)
-            let config_display = match serde_json::from_str::<Value>(&connection_config) {
-                Ok(config) => {
-                    let mut display_config = config.clone();
-                    // Hide sensitive fields
-                    if let Some(obj) = display_config.as_object_mut() {
-                        for sensitive_field in &["password", "token", "secret", "key"] {
-                            if obj.contains_key(*sensitive_field) {
-                                obj.insert(sensitive_field.to_string(), json!("***"));
-                            }
-                        }
-                    }
-                    serde_json::to_string_pretty(&display_config).unwrap_or_default()
-                }
-                Err(_) => "Invalid JSON configuration".to_string(),
-            };
-
-            // Parse the config_display back to JSON for structured response
-            let config_json = match serde_json::from_str::<Value>(&config_display) {
+            // Parse full connection details including sensitive information
+            let connection_details = match serde_json::from_str::<Value>(&connection_config) {
                 Ok(config) => config,
-                Err(_) => json!("Invalid JSON configuration")
+                Err(_) => json!("Invalid connection configuration")
             };
 
             // Parse schema_info if it's JSON, otherwise keep as string
@@ -419,11 +402,10 @@ impl McpHandlers {
                     "source_type": source_type,
                     "created_at": created_at.to_rfc3339(),
                     "updated_at": updated_at.map(|dt| dt.to_rfc3339()),
-                    "configuration": config_json,
+                    "connection_details": connection_details,
                     "schema_info": schema_json
                 },
                 "metadata": {
-                    "sensitive_data_hidden": true,
                     "schema_analyzed": schema_info.is_some()
                 }
             });

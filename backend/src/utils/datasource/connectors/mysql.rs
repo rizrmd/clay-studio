@@ -53,11 +53,11 @@ impl MySQLConnector {
     }
 
     pub fn new(config: &Value) -> Result<Self, Box<dyn Error + Send + Sync>> {
-        // Get datasource ID from config
+        // Get datasource ID from config (optional - only needed for connection pooling)
         let datasource_id = config
             .get("id")
             .and_then(|v| v.as_str())
-            .ok_or("Missing datasource ID in config")?
+            .unwrap_or("temp-connection-test")
             .to_string();
         
         // Check for SSL/TLS settings

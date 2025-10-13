@@ -229,6 +229,13 @@ export function InProgressMessage({
   }
 
 
+  // Show thinking indicator if:
+  // 1. Message is incomplete (after refresh), OR
+  // 2. No events yet (just started streaming), OR
+  // 3. No content/tool events yet (still thinking)
+  const hasContentOrToolEvents = processedEvents.some(e => e.type === "content" || e.type === "tool");
+  const shouldShowThinking = isIncomplete || events.length === 0 || !hasContentOrToolEvents;
+
   return (
     <div
       className={cn(
@@ -237,8 +244,8 @@ export function InProgressMessage({
       )}
     >
       <div className="flex flex-col gap-2">
-        {/* Show thinking indicator if message is incomplete (no processing_time_ms) */}
-        {isIncomplete && (
+        {/* Show thinking indicator if message is incomplete (no processing_time_ms) or no events yet */}
+        {shouldShowThinking && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
             <span>Thinking...</span>

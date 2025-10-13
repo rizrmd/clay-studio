@@ -304,7 +304,7 @@ export const useChat = () => {
 
     };
 
-    const handleToolCompleted = (message: {
+    const handleToolCompleted = async (message: {
       tool: string;
       toolUsageId: string;
       executionTimeMs?: number;
@@ -344,6 +344,29 @@ export const useChat = () => {
             if (toolName === "TodoWrite") {
               checkAndCompleteIfTodosDone(message.conversationId);
             }
+
+            // If this is a datasource-related tool, reload datasources
+            const isDatasourceTool = toolName === "datasource_add" || toolName === "datasource_remove" || toolName === "datasource_update" ||
+              toolName === "mcp__operation__datasource_add" || toolName === "mcp__operation__datasource_remove" || toolName === "mcp__operation__datasource_update";
+
+            if (isDatasourceTool) {
+              const { datasourcesActions } = await import("@/lib/store/datasources-store");
+              if (snap.project_id) {
+                datasourcesActions.loadDatasources(snap.project_id);
+              }
+
+              // If datasource was removed, close related tabs
+              if ((toolName === "datasource_remove" || toolName === "mcp__operation__datasource_remove") && message.output) {
+                // Extract datasource ID from tool output
+                const datasourceId = message.output.datasource_id || message.output.id;
+                if (datasourceId) {
+                  const tabsToClose = tabsStore.tabs.filter(tab =>
+                    tab.metadata.datasourceId === datasourceId
+                  );
+                  tabsToClose.forEach(tab => tabsActions.removeTab(tab.id));
+                }
+              }
+            }
           }
         } else {
           // Tool wasn't in activeTools (might be from reconnection/refresh)
@@ -364,6 +387,29 @@ export const useChat = () => {
             // If this is a TodoWrite completion, check if all todos are done
             if (message.tool === "TodoWrite") {
               checkAndCompleteIfTodosDone(message.conversationId);
+            }
+
+            // If this is a datasource-related tool, reload datasources
+            const isDatasourceTool2 = message.tool === "datasource_add" || message.tool === "datasource_remove" || message.tool === "datasource_update" ||
+              message.tool === "mcp__operation__datasource_add" || message.tool === "mcp__operation__datasource_remove" || message.tool === "mcp__operation__datasource_update";
+
+            if (isDatasourceTool2) {
+              const { datasourcesActions } = await import("@/lib/store/datasources-store");
+              if (snap.project_id) {
+                datasourcesActions.loadDatasources(snap.project_id);
+              }
+
+              // If datasource was removed, close related tabs
+              if ((message.tool === "datasource_remove" || message.tool === "mcp__operation__datasource_remove") && message.output) {
+                // Extract datasource ID from tool output
+                const datasourceId = message.output.datasource_id || message.output.id;
+                if (datasourceId) {
+                  const tabsToClose = tabsStore.tabs.filter(tab =>
+                    tab.metadata.datasourceId === datasourceId
+                  );
+                  tabsToClose.forEach(tab => tabsActions.removeTab(tab.id));
+                }
+              }
             }
           }
         }

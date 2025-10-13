@@ -56,29 +56,48 @@ pub async fn get_tables(
     let datasource_id = req.param::<String>("datasource_id")
         .ok_or_else(|| AppError::BadRequest("Missing datasource_id".to_string()))?;
 
-    // First check if we have cached table list
-    let table_list_row = sqlx::query("SELECT table_list FROM data_sources WHERE id = $1")
-        .bind(&datasource_id)
-        .fetch_optional(&state.db_pool)
-        .await
-        .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
+    // Check if force_refresh is requested
+    let force_refresh = req.query::<bool>("force_refresh").unwrap_or(false);
 
-    if let Some(row) = table_list_row {
-        let cached_table_list: Option<Value> = row.get("table_list");
-        if let Some(table_list_value) = cached_table_list {
-            if let Ok(tables) = serde_json::from_value::<Vec<String>>(table_list_value) {
-                res.render(Json(tables));
-                return Ok(());
+    // First check if we have cached table list (unless force_refresh is true)
+    if !force_refresh {
+        let table_list_row = sqlx::query("SELECT table_list FROM data_sources WHERE id = $1")
+            .bind(&datasource_id)
+            .fetch_optional(&state.db_pool)
+            .await
+            .map_err(|e| AppError::InternalServerError(format!("Database error: {}", e)))?;
+
+        if let Some(row) = table_list_row {
+            let cached_table_list: Option<Value> = row.get("table_list");
+            if let Some(table_list_value) = cached_table_list {
+                if let Ok(tables) = serde_json::from_value::<Vec<String>>(table_list_value) {
+                    tracing::debug!("📋 Returning cached table list for datasource {}", datasource_id);
+                    res.render(Json(tables));
+                    return Ok(());
+                }
             }
         }
+    } else {
+        tracing::info!("🔄 Force refresh requested for datasource {}", datasource_id);
     }
 
     // Get datasource and verify ownership using cache
     let cached_datasource = get_cached_datasource(&datasource_id, &user_id, is_current_user_root(depot), &state.db_pool).await?;
-    
+
     let source_type = cached_datasource.datasource_type.clone();
     let mut config = cached_datasource.connection_config.clone();
-    
+
+    tracing::info!("📋 Getting tables for datasource {} (type: {})", datasource_id, source_type);
+    tracing::debug!("Config (without sensitive data): {:?}", {
+        let mut safe_config = config.clone();
+        if let Some(obj) = safe_config.as_object_mut() {
+            if obj.contains_key("password") {
+                obj.insert("password".to_string(), serde_json::Value::String("***".to_string()));
+            }
+        }
+        safe_config
+    });
+
     // Add datasource ID to config for the connector
     config.as_object_mut()
         .ok_or_else(|| AppError::InternalServerError("Invalid config format".to_string()))?
@@ -88,7 +107,10 @@ pub async fn get_tables(
     let result = match source_type.as_str() {
         "postgresql" | "mysql" | "sqlite" => {
             list_tables(&datasource_id, &config, &source_type).await
-                .map_err(|e| AppError::InternalServerError(format!("Failed to list tables: {}", e)))?
+                .map_err(|e| {
+                    tracing::error!("❌ Failed to list tables for datasource {}: {}", datasource_id, e);
+                    AppError::InternalServerError(format!("Failed to list tables: {}", e))
+                })?
         },
         "clickhouse" => {
             list_clickhouse_tables(&datasource_id, &config).await
@@ -264,38 +286,69 @@ pub async fn update_schema_info_with_table_structure(
     Ok(())
 }
 
-// Placeholder functions - these will need implementations moved from the original file
 async fn list_tables(
     _datasource_id: &str,
-    _config: &Value,
-    _source_type: &str,
+    config: &Value,
+    source_type: &str,
 ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
-    // TODO: Move implementation from original datasources.rs
-    Ok(vec![])
+    use crate::utils::datasource::create_connector;
+
+    // Create connector using factory
+    let connector = create_connector(source_type, config).await
+        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+            Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+        })?;
+
+    // Get tables using connector's list_tables method
+    connector.list_tables().await
 }
 
 async fn list_clickhouse_tables(
     _datasource_id: &str,
-    _config: &Value,
+    config: &Value,
 ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
-    // TODO: Move implementation from original datasources.rs
-    Ok(vec![])
+    use crate::utils::datasource::create_connector;
+
+    // Create connector using factory
+    let connector = create_connector("clickhouse", config).await
+        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+            Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+        })?;
+
+    // Get tables using connector's list_tables method
+    connector.list_tables().await
 }
 
 async fn list_oracle_tables(
     _datasource_id: &str,
-    _config: &Value,
+    config: &Value,
 ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
-    // TODO: Move implementation from original datasources.rs
-    Ok(vec![])
+    use crate::utils::datasource::create_connector;
+
+    // Create connector using factory
+    let connector = create_connector("oracle", config).await
+        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+            Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+        })?;
+
+    // Get tables using connector's list_tables method
+    connector.list_tables().await
 }
 
 async fn list_sqlserver_tables(
     _datasource_id: &str,
-    _config: &Value,
+    config: &Value,
 ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
-    // TODO: Move implementation from original datasources.rs
-    Ok(vec![])
+    use crate::utils::datasource::create_connector;
+
+    // Create connector using factory
+    let connector = create_connector("sqlserver", config).await
+        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+            Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+        })?;
+
+    // Get tables using connector's list_tables method
+    connector.list_tables().await
 }
 
 async fn get_postgres_table_structure(

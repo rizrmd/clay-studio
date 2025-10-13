@@ -1,7 +1,39 @@
 use salvo::prelude::*;
 use salvo::session::SessionDepotExt;
-use async_session::SessionStore;
+use async_session::{SessionStore, Session};
 use crate::utils::AppState;
+use crate::core::sessions::PostgresSessionStore;
+
+/// Load session with retry logic to handle backend reconnection scenarios
+async fn load_session_with_retry(
+    session_store: &PostgresSessionStore,
+    cookie_value: &str,
+) -> Result<Option<Session>, async_session::Error> {
+    const MAX_RETRIES: u8 = 3;
+    const RETRY_DELAY_MS: u64 = 100;
+
+    let mut last_error = None;
+
+    for attempt in 1..=MAX_RETRIES {
+        match session_store.load_session(cookie_value.to_string()).await {
+            Ok(session) => return Ok(session),
+            Err(e) => {
+                last_error = Some(e);
+                if attempt < MAX_RETRIES {
+                    tracing::warn!(
+                        "Session load attempt {}/{} failed, retrying in {}ms...",
+                        attempt,
+                        MAX_RETRIES,
+                        RETRY_DELAY_MS
+                    );
+                    tokio::time::sleep(tokio::time::Duration::from_millis(RETRY_DELAY_MS)).await;
+                }
+            }
+        }
+    }
+
+    Err(last_error.unwrap())
+}
 
 /// Extract session data for WebSocket authentication
 /// Returns (user_id, client_id, role, is_authenticated)
@@ -28,10 +60,8 @@ pub async fn extract_session_data(
         );
 
         // The session token is the cookie value, load it from the store
-        match state
-            .session_store
-            .load_session(session_token.clone())
-            .await
+        // Retry session loading to handle backend reconnection scenarios
+        match load_session_with_retry(&state.session_store, &session_token).await
         {
             Ok(Some(session)) => {
                 let user_id: Option<String> = session.get("user_id");
@@ -110,9 +140,9 @@ pub async fn extract_session_data(
                     tracing::error!("WebSocket: Failed to extract session ID from cookie value");
                 }
 
-                // Try to load the session directly from the store
+                // Try to load the session directly from the store with retry logic
                 // The cookie value needs to be passed as-is to load_session, which will extract the session ID
-                match state.session_store.load_session(cookie_value.clone()).await {
+                match load_session_with_retry(&state.session_store, &cookie_value).await {
                     Ok(Some(session)) => {
                         let user_id: Option<String> = session.get("user_id");
                         let client_id: Option<String> = session.get("client_id");

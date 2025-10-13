@@ -7,6 +7,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { DatasourceCard } from "./datasource-card";
 import { DatasourceForm } from "./datasource-form";
 import { datasourcesStore, datasourcesActions } from "@/lib/store/datasources-store";
+import { tabsStore, tabsActions } from "@/lib/store/tabs-store";
 
 interface DatasourcesMainProps {
   projectId: string;
@@ -57,6 +58,12 @@ export function DatasourcesMain({ projectId, mode = 'list', datasourceId }: Data
 
     try {
       await datasourcesActions.deleteDatasource(datasourceId);
+
+      // Close all tabs related to this datasource
+      const tabsToClose = tabsStore.tabs.filter(tab =>
+        tab.metadata.datasourceId === datasourceId
+      );
+      tabsToClose.forEach(tab => tabsActions.removeTab(tab.id));
     } catch (error) {
       console.error("Failed to delete datasource:", error);
     }

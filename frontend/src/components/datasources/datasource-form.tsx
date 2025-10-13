@@ -71,6 +71,7 @@ export function DatasourceForm({
     database: "",
     username: "",
     password: "",
+    schema: "public", // PostgreSQL schema (default: public)
   });
 
   // Initialize form with existing datasource data
@@ -96,6 +97,7 @@ export function DatasourceForm({
                 (datasource.config as any)?.username ||
                 "",
               password: (datasource.config as any)?.password || "",
+              schema: (datasource.config as any)?.schema || "public",
             }),
       }));
     }
@@ -116,6 +118,7 @@ export function DatasourceForm({
               database: formData.database,
               user: formData.username,
               password: formData.password,
+              ...(formData.source_type === "postgresql" && formData.schema !== "public" ? { schema: formData.schema } : {}),
             };
 
       const testData = {
@@ -176,6 +179,7 @@ export function DatasourceForm({
               database: formData.database,
               user: formData.username,
               password: formData.password,
+              ...(formData.source_type === "postgresql" && formData.schema !== "public" ? { schema: formData.schema } : {}),
             };
 
       if (datasource) {
@@ -375,6 +379,23 @@ export function DatasourceForm({
               required
             />
           </div>
+
+          {formData.source_type === "postgresql" && (
+            <div>
+              <Label htmlFor="schema">Schema</Label>
+              <Input
+                id="schema"
+                value={formData.schema}
+                onChange={(e) =>
+                  setFormData((prev) => ({ ...prev, schema: e.target.value }))
+                }
+                placeholder="public"
+              />
+              <p className="text-sm text-muted-foreground mt-1">
+                PostgreSQL schema name (default: public)
+              </p>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-4">
             <div>

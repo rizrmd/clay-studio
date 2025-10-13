@@ -4,13 +4,13 @@
 use serde_json::Value;
 use std::error::Error;
 
-/// Extract datasource ID from config
-pub fn extract_datasource_id(config: &Value) -> Result<String, Box<dyn Error + Send + Sync>> {
+/// Extract datasource ID from config (optional - only needed for connection pooling)
+pub fn extract_datasource_id(config: &Value) -> String {
     config
         .get("id")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| "Missing datasource ID in config".into())
-        .map(|s| s.to_string())
+        .unwrap_or("temp-connection-test")
+        .to_string()
 }
 
 /// Extract SSL configuration from config
@@ -140,7 +140,13 @@ mod tests {
         let config = json!({
             "id": "test-id-123"
         });
-        assert_eq!(extract_datasource_id(&config).unwrap(), "test-id-123");
+        assert_eq!(extract_datasource_id(&config), "test-id-123");
+    }
+
+    #[test]
+    fn test_extract_datasource_id_missing() {
+        let config = json!({});
+        assert_eq!(extract_datasource_id(&config), "temp-connection-test");
     }
 
     #[test]

@@ -5,6 +5,7 @@ import {
   Table,
   Database,
   Edit,
+  RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -80,13 +81,13 @@ function DatasourceItem({
     );
   }, [tables, searchQuery]);
 
-  const loadTables = useCallback(async () => {
-    if (tables.length > 0) return; // Already loaded
+  const loadTables = useCallback(async (forceRefresh = false) => {
+    if (tables.length > 0 && !forceRefresh) return; // Already loaded
 
     try {
       datasourceUIActions.setLoadingTables(datasource.id, true);
       datasourceUIActions.setTablesError(datasource.id, null);
-      const tablesData = await datasourcesApi.getTables(datasource.id);
+      const tablesData = await datasourcesApi.getTables(datasource.id, forceRefresh);
       datasourceUIActions.setTables(datasource.id, tablesData);
     } catch (error: any) {
       console.error("Failed to load tables:", error);
@@ -98,6 +99,10 @@ function DatasourceItem({
       datasourceUIActions.setLoadingTables(datasource.id, false);
     }
   }, [datasource.id, tables.length]);
+
+  const refreshTables = useCallback(async () => {
+    await loadTables(true);
+  }, [loadTables]);
 
   // Auto-expand and load tables if this datasource is active (only on initial load or project change)
   useEffect(() => {
@@ -235,13 +240,28 @@ function DatasourceItem({
       {/* Expandable tables list */}
       {isExpanded && (
         <>
-          <input
-            type="search"
-            placeholder="Search tables..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="border-0 p-1 pl-2 border-t text-xs focus:outline-none focus:ring-1 focus:ring-primary/20"
-          />
+          <div className="border-t flex items-center gap-1 px-1">
+            <input
+              type="search"
+              placeholder="Search tables..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="border-0 p-1 flex-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary/20"
+            />
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 w-6 p-0"
+              onClick={(e) => {
+                e.stopPropagation();
+                refreshTables();
+              }}
+              disabled={loadingTables}
+              title="Refresh tables"
+            >
+              <RefreshCw className={cn("h-3 w-3", loadingTables && "animate-spin")} />
+            </Button>
+          </div>
           <div className="space-y-0.5 border-t flex-1 relative overflow-auto">
             <div className="absolute inset-0 flex flex-col">
               {loadingTables && (

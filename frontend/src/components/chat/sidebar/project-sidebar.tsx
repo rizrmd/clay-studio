@@ -7,6 +7,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useCallback, useEffect } from "react";
 import { useSnapshot } from "valtio";
+import { RefreshCw } from "lucide-react";
 import {
   useNavigate,
   useParams,
@@ -489,13 +490,41 @@ export function ProjectSidebar({
                 className="flex flex-col data-[state=open]:flex-1"
               >
                 <AccordionTrigger className="py-2 px-3 hover:no-underline hover:bg-accent/50 flex-shrink-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium">Datasources</span>
-                    <Badge variant="secondary" className="text-xs px-1.5 py-0">
-                      {datasourcesSnapshot.isLoading
-                        ? "..."
-                        : datasourcesSnapshot.datasources?.length || 0}
-                    </Badge>
+                  <div className="flex items-center justify-between w-full">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium">Datasources</span>
+                      <Badge variant="secondary" className="text-xs px-1.5 py-0">
+                        {datasourcesSnapshot.isLoading
+                          ? "..."
+                          : datasourcesSnapshot.datasources?.length || 0}
+                      </Badge>
+                    </div>
+                    <div
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (projectId) {
+                          datasourcesActions.loadDatasources(projectId);
+                        }
+                      }}
+                      className="p-1 hover:bg-accent rounded-sm transition-colors cursor-pointer"
+                      title="Refresh datasources"
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          if (projectId) {
+                            datasourcesActions.loadDatasources(projectId);
+                          }
+                        }
+                      }}
+                    >
+                      <RefreshCw className={cn(
+                        "h-3.5 w-3.5 text-muted-foreground",
+                        datasourcesSnapshot.isLoading && "animate-spin"
+                      )} />
+                    </div>
                   </div>
                 </AccordionTrigger>
                 <AccordionContent className="!p-0 flex flex-col flex-1 min-h-0 h-full">

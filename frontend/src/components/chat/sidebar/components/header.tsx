@@ -10,8 +10,6 @@ import { useSnapshot } from "valtio";
 import { useNavigate } from "react-router-dom";
 import { sidebarActions, sidebarStore } from "@/lib/store/chat/sidebar-store";
 import { tabsActions } from "@/lib/store/tabs-store";
-import { ProjectMembersDialog } from "./project-members-dialog";
-import { useState } from "react";
 
 interface ConversationSidebarHeaderProps {
   onNavigateToProjects: () => void;
@@ -26,11 +24,9 @@ export function ConversationSidebarHeader({
   onBulkDelete,
   onBulkDeleteAnalyses,
   projectId,
-  currentUserId,
 }: ConversationSidebarHeaderProps) {
   const sidebarSnapshot = useSnapshot(sidebarStore);
   const navigate = useNavigate();
-  const [membersDialogOpen, setMembersDialogOpen] = useState(false);
 
   const isInDeleteMode = sidebarSnapshot.isDeleteMode || sidebarSnapshot.isAnalysisDeleteMode;
 
@@ -121,11 +117,12 @@ export function ConversationSidebarHeader({
                   <DropdownMenuContent align="end">
                     <DropdownMenuItem
                       onClick={() => {
-                        setMembersDialogOpen(true);
                         // Open members in a new tab
                         tabsActions.openInNewTab('members', {
                           projectId,
                         }, 'Members');
+                        // Navigate to members route
+                        navigate(`/p/${projectId}/members`);
                       }}
                     >
                       <Users className="h-4 w-4 mr-2" />
@@ -146,14 +143,6 @@ export function ConversationSidebarHeader({
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
-
-                <ProjectMembersDialog
-                  projectId={projectId}
-                  currentUserId={currentUserId}
-                  trigger={null}
-                  open={membersDialogOpen}
-                  onOpenChange={setMembersDialogOpen}
-                />
               </>
             )}
             <Button
