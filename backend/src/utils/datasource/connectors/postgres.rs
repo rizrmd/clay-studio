@@ -62,6 +62,7 @@ impl PostgreSQLConnector {
                 .ok_or("Missing database name")?;
             let username = config
                 .get("username")
+                .or_else(|| config.get("user"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("postgres");
             let password = config
