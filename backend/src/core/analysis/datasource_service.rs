@@ -4,9 +4,6 @@ use sqlx::PgPool;
 use uuid::Uuid;
 use std::collections::HashMap;
 
-use crate::utils::datasource::{get_pool_manager, create_connector};
-use crate::models::data_source::DataSource;
-
 /// Service that provides datasource access for analysis scripts
 /// using the existing connection pooling infrastructure
 #[derive(Clone)]
@@ -27,7 +24,7 @@ impl AnalysisDatasourceService {
             FROM data_sources
             WHERE project_id = $1 AND deleted_at IS NULL
             "#,
-            project_id
+            project_id.to_string()
         )
         .fetch_all(&self.db_pool)
         .await?;
@@ -45,91 +42,10 @@ impl AnalysisDatasourceService {
         Ok(datasources)
     }
 
-    /// Execute a query on a datasource using connection pooling
-    pub async fn execute_datasource_query(
-        &self,
-        datasource_name: &str,
-        project_id: Uuid,
-        query: &str,
-        limit: Option<u32>,
-    ) -> Result<Value> {
-        // Get datasource config
-        let datasource = sqlx::query!(
-            r#"
-            SELECT source_type, connection_config
-            FROM data_sources
-            WHERE project_id = $1 AND name = $2 AND deleted_at IS NULL
-            "#,
-            project_id,
-            datasource_name
-        )
-        .fetch_one(&self.db_pool)
-        .await?;
-
-        // Create connector using factory
-        let connector = create_connector(&datasource.source_type, &datasource.connection_config)
-            .await?;
-
-        // Execute query with limit
-        let limit = limit.unwrap_or(10000);
-        let result = connector.execute_query(query, limit).await?;
-
-        Ok(result)
-    }
-
-    /// Get schema information for a datasource
-    pub async fn get_datasource_schema(
-        &self,
-        datasource_name: &str,
-        project_id: Uuid,
-    ) -> Result<Value> {
-        // Get datasource config
-        let datasource = sqlx::query!(
-            r#"
-            SELECT source_type, connection_config
-            FROM data_sources
-            WHERE project_id = $1 AND name = $2 AND deleted_at IS NULL
-            "#,
-            project_id,
-            datasource_name
-        )
-        .fetch_one(&self.db_pool)
-        .await?;
-
-        // Create connector
-        let connector = create_connector(&datasource.source_type, &datasource.connection_config)
-            .await?;
-
-        // Get schema
-        let schema = connector.get_schema().await?;
-
-        Ok(schema)
-    }
-
-    /// Test a datasource connection
-    pub async fn test_datasource_connection(
-        &self,
-        datasource_name: &str,
-        project_id: Uuid,
-    ) -> Result<bool> {
-        // Get datasource config
-        let datasource = sqlx::query!(
-            r#"
-            SELECT source_type, connection_config
-            FROM data_sources
-            WHERE project_id = $1 AND name = $2 AND deleted_at IS NULL
-            "#,
-            project_id,
-            datasource_name
-        )
-        .fetch_one(&self.db_pool)
-        .await?;
-
-        // Create connector
-        let connector = create_connector(&datasource.source_type, &datasource.connection_config)
-            .await?;
-
-        // Test connection
-        connector.test_connection().await
-    }
+    // Note: With Bun runtime, datasource queries are executed within the JavaScript
+    // environment. The methods below are kept for backwards compatibility but
+    // will need to be reimplemented if direct Rust access is required.
+    //
+    // For now, analysis scripts running in Bun will handle datasource queries
+    // using the ctx.query() API which will be implemented to call back into Rust.
 }

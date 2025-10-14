@@ -217,15 +217,15 @@ impl JobManager {
             id: row.id,
             analysis_id: row.analysis_id,
             status,
-            parameters: row.parameters,
+            parameters: row.parameters.unwrap_or_default(),
             result: row.result,
             error_message: row.error_message,
             logs: row.logs.unwrap_or_default(),
-            started_at: row.started_at,
-            completed_at: row.completed_at,
-            created_at: row.created_at,
+            started_at: row.started_at.map(|dt| chrono::DateTime::<chrono::Utc>::from_timestamp(dt.unix_timestamp(), 0).unwrap_or_else(|| chrono::Utc::now())),
+            completed_at: row.completed_at.map(|dt| chrono::DateTime::<chrono::Utc>::from_timestamp(dt.unix_timestamp(), 0).unwrap_or_else(|| chrono::Utc::now())),
+            created_at: row.created_at.map(|dt| chrono::DateTime::<chrono::Utc>::from_timestamp(dt.unix_timestamp(), 0).unwrap_or_else(|| chrono::Utc::now())).unwrap_or_else(|| chrono::Utc::now()),
             execution_time_ms: row.execution_time_ms,
-            triggered_by: row.triggered_by,
+            triggered_by: row.triggered_by.unwrap_or_else(|| "system".to_string()),
         })
     }
 
@@ -276,12 +276,12 @@ impl JobManager {
             id: row.id,
             title: row.title,
             script_content: row.script_content,
-            project_id: row.project_id,
-            created_at: row.created_at,
-            updated_at: row.updated_at,
-            created_by: row.created_by,
-            version: row.version,
-            is_active: row.is_active,
+            project_id: uuid::Uuid::parse_str(&row.project_id).unwrap_or_default(),
+            created_at: row.created_at.map(|dt| chrono::DateTime::<chrono::Utc>::from_timestamp(dt.unix_timestamp(), 0).unwrap_or_else(|| chrono::Utc::now())).unwrap_or_else(|| chrono::Utc::now()),
+            updated_at: row.updated_at.map(|dt| chrono::DateTime::<chrono::Utc>::from_timestamp(dt.unix_timestamp(), 0).unwrap_or_else(|| chrono::Utc::now())),
+            created_by: uuid::Uuid::parse_str(&row.created_by).unwrap_or_default(),
+            version: row.version.unwrap_or(1),
+            is_active: row.is_active.unwrap_or(true),
             metadata: row.metadata,
         })
     }
@@ -293,7 +293,7 @@ impl JobManager {
             FROM data_sources
             WHERE project_id = $1 AND deleted_at IS NULL
             "#,
-            project_id
+            project_id.to_string()
         )
         .fetch_all(&self.db)
         .await?;
