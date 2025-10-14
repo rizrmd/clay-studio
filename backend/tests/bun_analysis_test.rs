@@ -1,6 +1,5 @@
-use clay_studio_backend::core::analysis::BunRuntime;
+use clay_studio_backend::core::analysis::bun_runtime::BunRuntime;
 use serde_json::json;
-use std::path::PathBuf;
 use tempfile::TempDir;
 use uuid::Uuid;
 
@@ -37,7 +36,7 @@ export default {
     });
 
     let result = runtime
-        .execute_analysis(project_id, job_id, script, parameters.clone(), context, None)
+        .execute_analysis(project_id, job_id, script, parameters.clone(), context, None, None)
         .await
         .unwrap();
 
@@ -76,7 +75,7 @@ export default {
 "#;
 
     let result = runtime
-        .execute_analysis(project_id, job_id, script, json!({}), json!({}), None)
+        .execute_analysis(project_id, job_id, script, json!({}), json!({}), None, None)
         .await
         .unwrap();
 
@@ -117,7 +116,7 @@ export default {
 "#;
 
     let result = runtime
-        .execute_analysis(project_id, job_id, script, json!({}), json!({}), None)
+        .execute_analysis(project_id, job_id, script, json!({}), json!({}), None, None)
         .await
         .unwrap();
 
@@ -188,7 +187,7 @@ export default {
 "#;
 
     let result = runtime
-        .execute_analysis(project_id, job_id, script, json!({}), json!({}), None)
+        .execute_analysis(project_id, job_id, script, json!({}), json!({}), None, None)
         .await
         .unwrap();
 
@@ -216,7 +215,7 @@ export default {
 "#;
 
     let result = runtime
-        .execute_analysis(project_id, job_id, script, json!({}), json!({}), None)
+        .execute_analysis(project_id, job_id, script, json!({}), json!({}), None, None)
         .await;
 
     assert!(result.is_err());
@@ -245,7 +244,7 @@ export default {
 "#;
 
     let result = runtime
-        .execute_analysis(project_id, job_id, script, json!({}), json!({}), None)
+        .execute_analysis(project_id, job_id, script, json!({}), json!({}), None, None)
         .await;
 
     assert!(result.is_err());
