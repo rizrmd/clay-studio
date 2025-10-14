@@ -3,6 +3,7 @@ use chrono::{DateTime, Utc};
 use cron::Schedule;
 use serde_json::Value;
 use sqlx::PgPool;
+use sqlx::types::time::OffsetDateTime;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::time::{interval, Duration};
@@ -74,23 +75,26 @@ impl AnalysisScheduler {
         let now = Utc::now();
 
         // Get all enabled schedules that should run
+        let now_offset = OffsetDateTime::from_unix_timestamp(now.timestamp()).unwrap();
         let schedules = sqlx::query!(
             r#"
             SELECT s.id, s.analysis_id, s.cron_expression, s.timezone, s.last_run_at,
                    a.title, a.script_content
             FROM analysis_schedules s
             JOIN analyses a ON s.analysis_id = a.id
-            WHERE s.enabled = true 
+            WHERE s.enabled = true
               AND a.is_active = true
               AND (s.next_run_at IS NULL OR s.next_run_at <= $1)
             "#,
-            now
+            now_offset
         )
         .fetch_all(db)
         .await?;
 
         for schedule in schedules {
-            match Self::should_run_now(&schedule.cron_expression, &schedule.timezone, schedule.last_run_at) {
+            let timezone_str = schedule.timezone.as_deref().unwrap_or("UTC");
+            let last_run = schedule.last_run_at.map(|dt| chrono::DateTime::<chrono::Utc>::from_timestamp(dt.unix_timestamp(), 0).unwrap_or_else(|| chrono::Utc::now()));
+            match Self::should_run_now(&schedule.cron_expression, timezone_str, last_run) {
                 Ok(should_run) => {
                     if should_run {
                         tracing::info!("Running scheduled analysis: {}", schedule.title);
@@ -108,15 +112,17 @@ impl AnalysisScheduler {
                                 tracing::info!("Started scheduled job {} for analysis {}", job_id, schedule.analysis_id);
                                 
                                 // Update last run time and calculate next run
-                                if let Ok(next_run) = Self::calculate_next_run(&schedule.cron_expression, &schedule.timezone) {
+                                if let Ok(next_run) = Self::calculate_next_run(&schedule.cron_expression, timezone_str) {
+                                    let now_offset = OffsetDateTime::from_unix_timestamp(now.timestamp()).unwrap();
+                                    let next_offset = OffsetDateTime::from_unix_timestamp(next_run.timestamp()).unwrap();
                                     let _ = sqlx::query!(
                                         r#"
-                                        UPDATE analysis_schedules 
+                                        UPDATE analysis_schedules
                                         SET last_run_at = $1, next_run_at = $2
                                         WHERE id = $3
                                         "#,
-                                        now,
-                                        next_run,
+                                        now_offset,
+                                        next_offset,
                                         schedule.id
                                     )
                                     .execute(db)
@@ -204,10 +210,12 @@ impl AnalysisScheduler {
         .await?;
 
         for schedule in schedules {
-            if let Ok(next_run) = Self::calculate_next_run(&schedule.cron_expression, &schedule.timezone) {
+            let timezone_str = schedule.timezone.as_deref().unwrap_or("UTC");
+            if let Ok(next_run) = Self::calculate_next_run(&schedule.cron_expression, timezone_str) {
+                let next_offset = OffsetDateTime::from_unix_timestamp(next_run.timestamp()).unwrap();
                 let _ = sqlx::query!(
                     "UPDATE analysis_schedules SET next_run_at = $1 WHERE id = $2",
-                    next_run,
+                    next_offset,
                     schedule.id
                 )
                 .execute(&self.db)

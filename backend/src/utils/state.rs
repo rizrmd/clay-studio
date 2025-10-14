@@ -95,7 +95,9 @@ impl AppState {
         // Initialize analysis service
         let data_dir = PathBuf::from("./analysis_data");
         tokio::fs::create_dir_all(&data_dir).await?;
-        let analysis_service = AnalysisService::new(db_pool.clone());
+        let clients_dir = PathBuf::from("./.clients");
+        tokio::fs::create_dir_all(&clients_dir).await?;
+        let analysis_service = AnalysisService::new(db_pool.clone(), clients_dir)?;
 
         let state = AppState {
             db: db_arc,

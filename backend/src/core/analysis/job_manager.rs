@@ -278,11 +278,11 @@ impl JobManager {
             script_content: row.script_content,
             project_id: uuid::Uuid::parse_str(&row.project_id).unwrap_or_default(),
             created_at: row.created_at.map(|dt| chrono::DateTime::<chrono::Utc>::from_timestamp(dt.unix_timestamp(), 0).unwrap_or_else(|| chrono::Utc::now())).unwrap_or_else(|| chrono::Utc::now()),
-            updated_at: row.updated_at.map(|dt| chrono::DateTime::<chrono::Utc>::from_timestamp(dt.unix_timestamp(), 0).unwrap_or_else(|| chrono::Utc::now())),
-            created_by: uuid::Uuid::parse_str(&row.created_by).unwrap_or_default(),
+            updated_at: row.updated_at.and_then(|dt| chrono::DateTime::<chrono::Utc>::from_timestamp(dt.unix_timestamp(), 0)).unwrap_or_else(|| chrono::Utc::now()),
+            created_by: row.created_by.or(Some(uuid::Uuid::nil())),
             version: row.version.unwrap_or(1),
             is_active: row.is_active.unwrap_or(true),
-            metadata: row.metadata,
+            metadata: row.metadata.unwrap_or_default(),
         })
     }
 

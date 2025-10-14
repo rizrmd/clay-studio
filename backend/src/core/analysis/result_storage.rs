@@ -100,7 +100,8 @@ impl ResultStorage {
 
     pub async fn cleanup_old_results(&self, older_than_days: i64) -> Result<usize> {
         let cutoff_date = Utc::now() - chrono::Duration::days(older_than_days);
-        
+        let cutoff_offset = sqlx::types::time::OffsetDateTime::from_unix_timestamp(cutoff_date.timestamp()).unwrap();
+
         // Get old result files
         let old_results = sqlx::query!(
             r#"
@@ -109,7 +110,7 @@ impl ResultStorage {
             JOIN analysis_jobs j ON rs.job_id = j.id
             WHERE j.created_at < $1
             "#,
-            cutoff_date
+            cutoff_offset
         )
         .fetch_all(&self.db)
         .await?;
@@ -153,10 +154,10 @@ impl ResultStorage {
 
         Ok(StorageStats {
             total_results: stats.total_results.unwrap_or(0) as u64,
-            total_size_bytes: stats.total_size_bytes.unwrap_or(0) as u64,
-            avg_size_bytes: stats.avg_size_bytes.unwrap_or(0.0) as u64,
-            oldest_result: stats.oldest_result,
-            newest_result: stats.newest_result,
+            total_size_bytes: stats.total_size_bytes.and_then(|bd| bd.to_string().parse::<u64>().ok()).unwrap_or(0),
+            avg_size_bytes: stats.avg_size_bytes.and_then(|bd| bd.to_string().parse::<f64>().ok().map(|f| f as u64)).unwrap_or(0),
+            oldest_result: stats.oldest_result.and_then(|dt| chrono::DateTime::<chrono::Utc>::from_timestamp(dt.unix_timestamp(), 0)),
+            newest_result: stats.newest_result.and_then(|dt| chrono::DateTime::<chrono::Utc>::from_timestamp(dt.unix_timestamp(), 0)),
         })
     }
 
@@ -217,7 +218,7 @@ impl ResultStorage {
             "#,
             Uuid::new_v4(),
             job_id,
-            storage_path.to_string_lossy(),
+            &storage_path.to_string_lossy().to_string(),
             size_bytes,
             checksum
         )
@@ -243,7 +244,7 @@ impl ResultStorage {
             storage_path: row.storage_path,
             size_bytes: row.size_bytes,
             checksum: row.checksum,
-            created_at: row.created_at,
+            created_at: row.created_at.and_then(|dt| chrono::DateTime::<chrono::Utc>::from_timestamp(dt.unix_timestamp(), 0)).unwrap_or_else(|| chrono::Utc::now()),
         })
     }
 }

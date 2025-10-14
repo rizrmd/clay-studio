@@ -80,7 +80,7 @@ impl DatabaseHelper {
 #[macro_export]
 macro_rules! safe_db_operation {
     ($db_helper:expr, $operation:expr) => {{
-        match $db_helper.with_analysis_tables(Box::pin($operation)).await {
+        match $db_helper.with_analysis_tables($operation).await {
             Ok(Some(result)) => Ok(result),
             Ok(None) => Err(anyhow!("Analysis system not initialized. Please run migrations.")),
             Err(e) => Err(e),
@@ -93,7 +93,7 @@ pub async fn safe_list_operation<T, F>(db_helper: &DatabaseHelper, operation: F)
 where
     F: FnOnce(&PgPool) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<T>>> + Send + '_>>,
 {
-    match db_helper.with_analysis_tables(Box::pin(operation)).await {
+    match db_helper.with_analysis_tables(operation).await {
         Ok(Some(result)) => Ok(result),
         Ok(None) => {
             tracing::info!("Analysis tables not available, returning empty list");
