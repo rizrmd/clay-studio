@@ -21,7 +21,6 @@ pub struct ClaudeSDK {
 
 impl ClaudeSDK {
     /// Get all available MCP tools for allowed tools configuration
-
     pub fn new(client_id: Uuid, oauth_token: Option<String>) -> Self {
         let clients_base =
             std::env::var("CLIENTS_DIR").unwrap_or_else(|_| "../.clients".to_string());

@@ -296,7 +296,7 @@ async fn list_tables(
     // Create connector using factory
     let connector = create_connector(source_type, config).await
         .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
-            Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+            Box::new(std::io::Error::other(e.to_string()))
         })?;
 
     // Get tables using connector's list_tables method
@@ -312,7 +312,7 @@ async fn list_clickhouse_tables(
     // Create connector using factory
     let connector = create_connector("clickhouse", config).await
         .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
-            Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+            Box::new(std::io::Error::other(e.to_string()))
         })?;
 
     // Get tables using connector's list_tables method
@@ -328,7 +328,7 @@ async fn list_oracle_tables(
     // Create connector using factory
     let connector = create_connector("oracle", config).await
         .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
-            Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+            Box::new(std::io::Error::other(e.to_string()))
         })?;
 
     // Get tables using connector's list_tables method
@@ -344,7 +344,7 @@ async fn list_sqlserver_tables(
     // Create connector using factory
     let connector = create_connector("sqlserver", config).await
         .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
-            Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+            Box::new(std::io::Error::other(e.to_string()))
         })?;
 
     // Get tables using connector's list_tables method

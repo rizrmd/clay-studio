@@ -9,6 +9,16 @@ use uuid::Uuid;
 
 use super::mcp_bridge;
 
+/// Configuration for analysis execution
+#[derive(Debug, Clone)]
+pub struct AnalysisConfig {
+    pub script_content: String,
+    pub parameters: Value,
+    pub context: Value,
+    pub backend_url: Option<String>,
+    pub auth_token: Option<String>,
+}
+
 /// Bun runtime for executing analysis scripts
 pub struct BunRuntime {
     bun_path: PathBuf,
@@ -109,21 +119,17 @@ impl BunRuntime {
         &self,
         project_id: Uuid,
         job_id: Uuid,
-        script_content: &str,
-        parameters: Value,
-        context: Value,
-        backend_url: Option<String>,
-        auth_token: Option<String>,
+        config: AnalysisConfig,
     ) -> Result<Value> {
         let analysis_dir = self.get_project_analysis_dir(project_id).await?;
         let temp_dir = analysis_dir.join("temp");
 
         // Write the analysis script
         let script_path = temp_dir.join(format!("{}.ts", job_id));
-        fs::write(&script_path, script_content).await?;
+        fs::write(&script_path, &config.script_content).await?;
 
         // Generate or use provided auth token
-        let token = auth_token.unwrap_or_else(|| {
+        let token = config.auth_token.unwrap_or_else(|| {
             // Generate a short-lived token for this job
             format!("job-{}-{}", project_id, job_id)
         });
@@ -133,9 +139,9 @@ impl BunRuntime {
         let context_json = serde_json::json!({
             "projectId": project_id.to_string(),
             "jobId": job_id.to_string(),
-            "parameters": parameters,
-            "context": context,
-            "backendUrl": backend_url.unwrap_or_else(|| "http://localhost:8000".to_string()),
+            "parameters": config.parameters,
+            "context": config.context,
+            "backendUrl": config.backend_url.unwrap_or_else(|| "http://localhost:8000".to_string()),
             "authToken": token
         });
         fs::write(&context_path, serde_json::to_string(&context_json)?).await?;
@@ -316,8 +322,37 @@ const ctx = {{
         return ctx.metadata[key];
     }},
 
+    // Public RPC method - this is what analysis scripts should call
+    rpc: async (request: {{ method: string, params?: any }}) => {{
+        return await ctx._rpc(request.method, request.params || {{}});
+    }},
+
     // MCP RPC call helper
     _rpc: async (method: string, params: any = {{}}) => {{
+        // Enable stdin listener only when RPC is actually used
+        if (!globalThis._stdinListenerEnabled) {{
+            globalThis._stdinListenerEnabled = true;
+            process.stdin.setEncoding('utf-8');
+            process.stdin.on('data', (data) => {{
+                try {{
+                    const response = JSON.parse(data.toString().trim());
+                    if (response.id && globalThis._pendingRpcRequests) {{
+                        const pending = globalThis._pendingRpcRequests.get(response.id);
+                        if (pending) {{
+                            globalThis._pendingRpcRequests.delete(response.id);
+                            if (response.error) {{
+                                pending.reject(new Error(response.error));
+                            }} else {{
+                                pending.resolve(response.result);
+                            }}
+                        }}
+                    }}
+                }} catch (err) {{
+                    console.error('[stdin] Failed to parse RPC response:', err);
+                }}
+            }});
+        }}
+
         const requestId = `req-${{Date.now()}}-${{Math.random().toString(36).substr(2, 9)}}`;
 
         return new Promise((resolve, reject) => {{
@@ -504,27 +539,6 @@ const ctx = {{
     }}
 }};
 
-// Set up stdin listener for RPC responses
-process.stdin.setEncoding('utf-8');
-process.stdin.on('data', (data) => {{
-    try {{
-        const response = JSON.parse(data.toString().trim());
-        if (response.id && globalThis._pendingRpcRequests) {{
-            const pending = globalThis._pendingRpcRequests.get(response.id);
-            if (pending) {{
-                globalThis._pendingRpcRequests.delete(response.id);
-                if (response.error) {{
-                    pending.reject(new Error(response.error));
-                }} else {{
-                    pending.resolve(response.result);
-                }}
-            }}
-        }}
-    }} catch (err) {{
-        console.error('[stdin] Failed to parse RPC response:', err);
-    }}
-}});
-
 // Load and execute the analysis script
 async function main() {{
     try {{
@@ -538,16 +552,20 @@ async function main() {{
         const result = await analysis.run(ctx, contextData.parameters);
 
         // Validate result size (10MB limit)
-        const resultStr = JSON.stringify(result);
+        const resultStr = JSON.stringify(result, (key, value) =>
+            typeof value === 'bigint' ? value.toString() + 'n' : value
+        );
         if (resultStr.length > 10 * 1024 * 1024) {{
             throw new Error('Result exceeds 10MB limit. Use DuckDB for large datasets.');
         }}
 
-        // Output result to stdout
+        // Output result to stdout (handle BigInt serialization)
         console.log(JSON.stringify({{
             success: true,
             result: result
-        }}));
+        }}, (key, value) =>
+            typeof value === 'bigint' ? value.toString() + 'n' : value
+        ));
 
         // Note: Closing DuckDB connections can cause Bun segfault
         // Let the process exit naturally to clean up
@@ -558,7 +576,9 @@ async function main() {{
             success: false,
             error: error instanceof Error ? error.message : String(error),
             stack: error instanceof Error ? error.stack : undefined
-        }}));
+        }}, (key, value) =>
+            typeof value === 'bigint' ? value.toString() + 'n' : value
+        ));
         process.exit(1);
     }}
 }}

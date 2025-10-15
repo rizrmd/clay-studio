@@ -32,7 +32,7 @@ async fn load_session_with_retry(
         }
     }
 
-    Err(last_error.unwrap())
+    Err(last_error.expect("Should have an error after failed validation"))
 }
 
 /// Extract session data for WebSocket authentication

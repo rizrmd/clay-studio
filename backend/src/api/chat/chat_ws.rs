@@ -480,7 +480,7 @@ pub async fn handle_chat_message_ws(
                                 "UPDATE messages SET progress_content = $1 WHERE id = $2"
                             )
                             .bind(&progress_content)
-                            .bind(&message_id.to_string())
+                            .bind(message_id.to_string())
                             .execute(&db_pool)
                             .await {
                                 tracing::error!("Failed to update message progress content: {}", e);
@@ -656,7 +656,7 @@ pub async fn handle_chat_message_ws(
                                  WHERE message_id = $1 AND tool_use_id = $2 
                                  ORDER BY created_at DESC LIMIT 1"
                             )
-                            .bind(&message_id.to_string())
+                            .bind(message_id.to_string())
                             .bind(&tool)
                             .fetch_optional(&db_pool)
                             .await {
@@ -795,7 +795,7 @@ pub async fn handle_chat_message_ws(
                     "UPDATE messages SET progress_content = $1 WHERE id = $2"
                 )
                 .bind(&progress_content)
-                .bind(&message_id.to_string())
+                .bind(message_id.to_string())
                 .execute(&db_pool)
                 .await {
                     tracing::error!("Failed to save final progress content: {}", e);

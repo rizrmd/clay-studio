@@ -95,14 +95,18 @@ impl AnalysisService {
         let auth_token = Some(format!("analysis-job-{}", job_id));
 
         // Execute using Bun runtime
-        match self.bun_runtime.execute_analysis(
-            project_id,
-            job_id,
-            &script_content,
+        let config = crate::core::analysis::bun_runtime::AnalysisConfig {
+            script_content,
             parameters,
             context,
             backend_url,
             auth_token,
+        };
+
+        match self.bun_runtime.execute_analysis(
+            project_id,
+            job_id,
+            config,
         ).await {
             Ok(result) => {
                 // Update job with completed status

@@ -35,8 +35,16 @@ export default {
         "metadata": {}
     });
 
+    let config = clay_studio_backend::core::analysis::bun_runtime::AnalysisConfig {
+        script_content: script.to_string(),
+        parameters: parameters.clone(),
+        context,
+        backend_url: None,
+        auth_token: None,
+    };
+
     let result = runtime
-        .execute_analysis(project_id, job_id, script, parameters.clone(), context, None, None)
+        .execute_analysis(project_id, job_id, config)
         .await
         .unwrap();
 
@@ -74,8 +82,16 @@ export default {
 }
 "#;
 
+    let config = clay_studio_backend::core::analysis::bun_runtime::AnalysisConfig {
+        script_content: script.to_string(),
+        parameters: json!({}),
+        context: json!({}),
+        backend_url: None,
+        auth_token: None,
+    };
+
     let result = runtime
-        .execute_analysis(project_id, job_id, script, json!({}), json!({}), None, None)
+        .execute_analysis(project_id, job_id, config)
         .await
         .unwrap();
 
@@ -115,8 +131,16 @@ export default {
 }
 "#;
 
+    let config = clay_studio_backend::core::analysis::bun_runtime::AnalysisConfig {
+        script_content: script.to_string(),
+        parameters: json!({}),
+        context: json!({}),
+        backend_url: None,
+        auth_token: None,
+    };
+
     let result = runtime
-        .execute_analysis(project_id, job_id, script, json!({}), json!({}), None, None)
+        .execute_analysis(project_id, job_id, config)
         .await
         .unwrap();
 
@@ -186,8 +210,16 @@ export default {
 }
 "#;
 
+    let config = clay_studio_backend::core::analysis::bun_runtime::AnalysisConfig {
+        script_content: script.to_string(),
+        parameters: json!({}),
+        context: json!({}),
+        backend_url: None,
+        auth_token: None,
+    };
+
     let result = runtime
-        .execute_analysis(project_id, job_id, script, json!({}), json!({}), None, None)
+        .execute_analysis(project_id, job_id, config)
         .await
         .unwrap();
 
@@ -214,8 +246,16 @@ export default {
 }
 "#;
 
+    let config = clay_studio_backend::core::analysis::bun_runtime::AnalysisConfig {
+        script_content: script.to_string(),
+        parameters: json!({}),
+        context: json!({}),
+        backend_url: None,
+        auth_token: None,
+    };
+
     let result = runtime
-        .execute_analysis(project_id, job_id, script, json!({}), json!({}), None, None)
+        .execute_analysis(project_id, job_id, config)
         .await;
 
     assert!(result.is_err());
@@ -243,8 +283,16 @@ export default {
 }
 "#;
 
+    let config = clay_studio_backend::core::analysis::bun_runtime::AnalysisConfig {
+        script_content: script.to_string(),
+        parameters: json!({}),
+        context: json!({}),
+        backend_url: None,
+        auth_token: None,
+    };
+
     let result = runtime
-        .execute_analysis(project_id, job_id, script, json!({}), json!({}), None, None)
+        .execute_analysis(project_id, job_id, config)
         .await;
 
     assert!(result.is_err());

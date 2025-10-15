@@ -1209,7 +1209,7 @@ pub async fn generate_claude_md_with_context(
         Ok(context) if !context.is_empty() => {
             base_content.push_str("\n## Project Context\n\n");
             base_content.push_str(&context);
-            base_content.push_str("\n");
+            base_content.push('\n');
         }
         Err(e) => {
             tracing::warn!("Failed to compile context for project {}: {}", project_id, e);

@@ -2,8 +2,8 @@
 #[macro_export]
 macro_rules! handle_mcp_tool {
     ($tool_name:expr, $handlers:expr, $arguments:expr, $handler_method:ident) => {{
-        use crate::core::mcp::handlers::base::McpHandlers;
-        use crate::core::mcp::response::wrap_mcp_response;
+        use $crate::core::mcp::handlers::base::McpHandlers;
+        use $crate::core::mcp::response::wrap_mcp_response;
         
         let empty_map = serde_json::Map::new();
         let args = $arguments.and_then(|v| v.as_object()).unwrap_or(&empty_map);
@@ -27,7 +27,7 @@ macro_rules! handle_mcp_tool {
 #[macro_export]
 macro_rules! handle_mcp_tool_custom {
     ($handlers:expr, $arguments:expr, $handler:expr) => {{
-        use crate::core::mcp::response::wrap_mcp_response;
+        use $crate::core::mcp::response::wrap_mcp_response;
         
         let empty_map = serde_json::Map::new();
         let args = $arguments.and_then(|v| v.as_object()).unwrap_or(&empty_map);

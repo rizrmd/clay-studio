@@ -7,10 +7,14 @@ use salvo::conn::tcp::TcpListener;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use std::env;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
-use tracing::{info, error};
+use tracing::{info, error, warn};
 use uuid::Uuid;
+
+// Import the Bun runtime
+use clay_studio_backend::core::analysis::bun_runtime::BunRuntime;
 
 // Simple error type for this binary
 #[derive(Debug)]
@@ -60,14 +64,24 @@ pub struct AnalysisJobData {
 pub struct AnalysisExecutor {
     db_pool: PgPool,
     jobs_processed: Arc<std::sync::atomic::AtomicU64>,
+    bun_runtime: Arc<BunRuntime>,
 }
 
 impl AnalysisExecutor {
-    pub fn new(db_pool: PgPool) -> Self {
-        Self {
+    pub fn new(db_pool: PgPool) -> Result<Self> {
+        // Get clients directory from environment or use default
+        let clients_dir = env::var("CLIENTS_DIR")
+            .unwrap_or_else(|_| "/Users/riz/Developer/clay-studio/.clients".to_string());
+        let clients_path = PathBuf::from(clients_dir);
+
+        // Create Bun runtime with database pool
+        let bun_runtime = Arc::new(BunRuntime::new(clients_path)?.with_db_pool(db_pool.clone()));
+
+        Ok(Self {
             db_pool,
             jobs_processed: Arc::new(std::sync::atomic::AtomicU64::new(0)),
-        }
+            bun_runtime,
+        })
     }
 
     // Start the job polling loop
@@ -104,6 +118,9 @@ impl AnalysisExecutor {
         }
 
         info!("Found {} pending jobs", jobs.len());
+        for job in &jobs {
+            info!("Job {}: analysis_id={}, project_id={}", job.id, job.analysis_id, job.project_id);
+        }
 
         for job_row in jobs {
             let job_id = job_row.id;
@@ -149,37 +166,47 @@ impl AnalysisExecutor {
     async fn execute_job(&self, job: AnalysisJobData) -> Result<()> {
         info!("Executing job {} for analysis {}", job.id, job.analysis_id);
 
-        // TODO: In a full implementation, this would:
-        // 1. Get datasource connections for the project using the datasource service
-        // 2. Create a QuickJS sandbox with access to those datasources
-        // 3. Execute the JavaScript analysis script
-        // 4. Return structured results
-        
-        // For now, just validate the script format and return mock result
-        let result = if job.script_content.contains("export default") {
-            serde_json::json!({
-                "status": "success",
-                "data": {
-                    "message": "Analysis executed successfully (mock)",
-                    "script_length": job.script_content.len(),
-                    "parameters_count": job.parameters.as_object().map_or(0, |o| o.len()),
-                    "execution_time_ms": 150
-                }
-            })
-        } else {
-            return Err(anyhow::anyhow!("Invalid script format: must export default"));
+        // Validate script format first
+        let validation_errors = self.bun_runtime.validate_script(job.project_id, &job.script_content).await?;
+        if !validation_errors.is_empty() {
+            let error_msg = format!("Script validation failed: {}", validation_errors.join(", "));
+            warn!("Job {} validation failed: {}", job.id, error_msg);
+            return Err(anyhow::anyhow!(error_msg));
+        }
+
+        // Execute the analysis using Bun runtime
+        let config = clay_studio_backend::core::analysis::bun_runtime::AnalysisConfig {
+            script_content: job.script_content,
+            parameters: job.parameters,
+            context: serde_json::json!({}), // Empty context
+            backend_url: None, // No backend URL
+            auth_token: None, // No auth token
         };
 
-        // Mark job as completed
+        let execution_result = match self.bun_runtime.execute_analysis(
+            job.project_id,
+            job.id,
+            config,
+        ).await {
+            Ok(result) => result,
+            Err(e) => {
+                let error_msg = format!("Analysis execution failed: {}", e);
+                error!("Job {} execution failed: {}", job.id, error_msg);
+                return Err(anyhow::anyhow!(error_msg));
+            }
+        };
+
+        // Mark job as completed with real result
         sqlx::query!(
             "UPDATE analysis_jobs SET status = $1, result = $2, completed_at = NOW() WHERE id = $3",
             "completed",
-            result,
+            execution_result,
             job.id
         )
         .execute(&self.db_pool)
         .await?;
 
+        info!("Job {} completed successfully", job.id);
         Ok(())
     }
 
@@ -266,11 +293,12 @@ async fn main() -> Result<()> {
     info!("Database connection successful");
 
     // Create executor
-    let executor = Arc::new(AnalysisExecutor::new(db_pool));
+    let executor = Arc::new(AnalysisExecutor::new(db_pool)?);
 
     // Start job poller
+    info!("Starting job poller...");
     executor.start_job_poller().await;
-    info!("Job poller started");
+    info!("Job poller started successfully");
 
     // Configure HTTP server (simplified without middleware for now)
     let app = Router::new()

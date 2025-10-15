@@ -156,7 +156,7 @@ pub async fn add_project_member(
         project_id: member_row.get("project_id"),
         user_id: member_row.get("user_id"),
         role: ProjectMemberRole::from_str(&member_row.get::<String, _>("role"))
-            .map_err(|e| AppError::InternalServerError(e))?,
+            .map_err(AppError::InternalServerError)?,
         joined_at: member_row.get("joined_at"),
         created_at: member_row.get("created_at"),
     };

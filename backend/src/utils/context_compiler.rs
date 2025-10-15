@@ -48,7 +48,7 @@ impl ContextCompiler {
             let compiled_at_chrono = DateTime::<Utc>::from_timestamp(
                 compiled_at.unix_timestamp(),
                 compiled_at.nanosecond()
-            ).unwrap_or_else(|| Utc::now());
+            ).unwrap_or_else(Utc::now);
             
             let cache_age = Utc::now() - compiled_at_chrono;
             if cache_age < Duration::minutes(5) {
@@ -108,12 +108,13 @@ impl ContextCompiler {
         let mut compiled = content.to_string();
         
         // Find all ```javascript blocks
-        let js_block_regex = Regex::new(r"(?ms)```javascript\n(.*?)\n```").unwrap();
+        let js_block_regex = Regex::new(r"(?ms)```javascript\n(.*?)\n```")
+            .expect("Invalid regex pattern for JavaScript blocks");
         
         let mut replacements = Vec::new();
         
         for cap in js_block_regex.captures_iter(content) {
-            let full_match = cap.get(0).unwrap();
+            let full_match = cap.get(0).expect("Regex capture should have full match");
             let js_code = &cap[1];
             
             // Execute the JavaScript code
@@ -143,7 +144,8 @@ impl ContextCompiler {
         // This parses basic ctx.query() calls and executes them
         
         // Extract SQL query from await ctx.query(`...`)
-        let query_regex = Regex::new(r"(?s)await\s+ctx\.query\s*\(\s*`([^`]+)`\s*\)").unwrap();
+        let query_regex = Regex::new(r"(?s)await\s+ctx\.query\s*\(\s*`([^`]+)`\s*\)")
+            .expect("Invalid regex pattern for query extraction");
         
         if let Some(cap) = query_regex.captures(script) {
             let sql = &cap[1];
@@ -169,7 +171,7 @@ impl ContextCompiler {
             return Ok(cleaned.to_string());
         }
         
-        Ok(format!("<!-- Unable to process script -->\n"))
+        Ok("<!-- Unable to process script -->\n".to_string())
     }
 
     /// Execute SQL query and return results
@@ -230,7 +232,7 @@ impl ContextCompiler {
                 row.try_get::<Option<f64>, _>(index)
                     .ok()
                     .flatten()
-                    .and_then(|v| serde_json::Number::from_f64(v))
+                    .and_then(serde_json::Number::from_f64)
                     .map(JsonValue::Number)
                     .unwrap_or(JsonValue::Null)
             }

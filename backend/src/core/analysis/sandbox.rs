@@ -60,14 +60,18 @@ impl AnalysisSandbox {
         let auth_token = Some(format!("analysis-job-{}", job_id));
 
         // Execute using Bun runtime
-        self.bun_runtime.execute_analysis(
-            analysis.project_id,
-            job_id,
-            &analysis.script_content,
+        let config = crate::core::analysis::bun_runtime::AnalysisConfig {
+            script_content: analysis.script_content.clone(),
             parameters,
             context,
             backend_url,
             auth_token,
+        };
+
+        self.bun_runtime.execute_analysis(
+            analysis.project_id,
+            job_id,
+            config,
         ).await
     }
 

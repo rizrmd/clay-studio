@@ -341,7 +341,7 @@ impl AppState {
                 info!(
                     "  📝 Message {} has progress_content (len: {})",
                     &msg_id[..8],
-                    progress_content.as_ref().unwrap().len()
+                    progress_content.as_ref().map_or(0, |s| s.len())
                 );
             }
 

@@ -48,7 +48,7 @@ pub async fn get_project_context(
                     chrono::DateTime::<chrono::Utc>::from_timestamp(
                         ts.unix_timestamp(),
                         ts.nanosecond()
-                    ).unwrap_or_else(|| chrono::Utc::now())
+                    ).unwrap_or_else(chrono::Utc::now)
                 }),
             }));
             Ok(())
