@@ -10,6 +10,7 @@ import {
   Trash2,
   BarChart,
   Loader2,
+  Edit,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -25,6 +26,7 @@ interface AnalysisListProps {
   analyses: Analysis[];
   onAnalysisClick: (analysisId: string) => void;
   onRunAnalysis: (analysisId: string) => void;
+  onEditAnalysis?: (analysisId: string) => void;
   onAddNew?: () => void;
   activeAnalysisId?: string;
   projectId?: string;
@@ -34,6 +36,7 @@ export function AnalysisList({
   analyses = [],
   onAnalysisClick,
   onRunAnalysis,
+  onEditAnalysis,
   activeAnalysisId,
 }: AnalysisListProps) {
   const sidebarSnapshot = useSnapshot(sidebarStore);
@@ -163,6 +166,17 @@ export function AnalysisList({
                           <Play className="h-4 w-4 mr-2" />
                           Run Analysis
                         </DropdownMenuItem>
+                        {onEditAnalysis && (
+                          <DropdownMenuItem
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onEditAnalysis(analysis.id);
+                            }}
+                          >
+                            <Edit className="h-4 w-4 mr-2" />
+                            Edit Analysis
+                          </DropdownMenuItem>
+                        )}
                         <DropdownMenuItem
                           onClick={(e) => handleDeleteSingle(analysis.id, e)}
                           className="text-red-600 focus:text-red-600"

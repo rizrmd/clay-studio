@@ -31,6 +31,11 @@ const AnalysisEditor = lazy(() =>
     default: m.AnalysisEditor,
   }))
 );
+const AnalysisDashboard = lazy(() =>
+  import("@/components/analysis/analysis-dashboard").then((m) => ({
+    default: m.AnalysisDashboard,
+  }))
+);
 const AnalysisList = lazy(() =>
   import("@/components/analysis/analysis-list").then((m) => ({
     default: m.AnalysisList,
@@ -97,8 +102,10 @@ export function MainApp() {
   const isAnalysisListRoute = location.pathname.endsWith("/analysis");
   // Check if we're on the new analysis route
   const isAnalysisNewRoute = location.pathname.includes("/analysis/new");
-  // Check if we're on the analysis view/edit route
-  const isAnalysisViewRoute = location.pathname.includes("/analysis/") && !isAnalysisNewRoute;
+  // Check if we're on the analysis edit route
+  const isAnalysisEditRoute = location.pathname.includes("/analysis/") && location.pathname.endsWith("/edit");
+  // Check if we're on the analysis view route (not edit or new)
+  const isAnalysisViewRoute = location.pathname.includes("/analysis/") && !isAnalysisNewRoute && !isAnalysisEditRoute;
   // Check if we're on the context route
   const isContextRoute = location.pathname.endsWith("/context");
   // Check if we're on the members route
@@ -139,6 +146,7 @@ export function MainApp() {
       !isDatasourceNewRoute &&
       !isAnalysisListRoute &&
       !isAnalysisNewRoute &&
+      !isAnalysisEditRoute &&
       !isAnalysisViewRoute &&
       !isContextRoute &&
       !isMembersRoute
@@ -165,6 +173,7 @@ export function MainApp() {
     isDatasourceNewRoute,
     isAnalysisListRoute,
     isAnalysisNewRoute,
+    isAnalysisEditRoute,
     isAnalysisViewRoute,
   ]);
 
@@ -445,6 +454,27 @@ export function MainApp() {
         );
         shouldCreateTab = false;
       }
+    } else if (isAnalysisEditRoute && analysisId) {
+      // Look for existing analysis edit tab
+      const existingTab = projectTabs.find(
+        (t) => t.type === "analysis_edit" && t.metadata.analysisId === analysisId
+      );
+
+      if (existingTab) {
+        targetTabId = existingTab.id;
+        shouldCreateTab = false;
+      } else {
+        // Create new analysis edit tab
+        targetTabId = tabsActions.getOrCreateActiveTab(
+          "analysis_edit",
+          {
+            projectId,
+            analysisId,
+          },
+          "Edit Analysis"
+        );
+        shouldCreateTab = false;
+      }
     } else if (isAnalysisNewRoute) {
       // Look for existing new analysis tab
       const existingTab = projectTabs.find((t) => t.type === "analysis");
@@ -614,9 +644,21 @@ export function MainApp() {
           <Suspense
             fallback={<div className="flex-1 animate-pulse bg-gray-50" />}
           >
-            <AnalysisEditor 
+            <AnalysisDashboard
               analysisId={analysisId}
               projectId={projectId!}
+            />
+          </Suspense>
+        );
+      } else if (isAnalysisEditRoute && analysisId) {
+        return (
+          <Suspense
+            fallback={<div className="flex-1 animate-pulse bg-gray-50" />}
+          >
+            <AnalysisEditor
+              analysisId={analysisId}
+              projectId={projectId!}
+              mode="edit"
             />
           </Suspense>
         );
@@ -729,9 +771,21 @@ export function MainApp() {
           <Suspense
             fallback={<div className="flex-1 animate-pulse bg-gray-50" />}
           >
-            <AnalysisEditor 
+            <AnalysisDashboard
               analysisId={activeTab.metadata.analysisId}
               projectId={projectId!}
+            />
+          </Suspense>
+        );
+      case "analysis_edit":
+        return (
+          <Suspense
+            fallback={<div className="flex-1 animate-pulse bg-gray-50" />}
+          >
+            <AnalysisEditor
+              analysisId={activeTab.metadata.analysisId}
+              projectId={projectId!}
+              mode="edit"
             />
           </Suspense>
         );

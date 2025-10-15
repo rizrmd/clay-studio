@@ -143,7 +143,7 @@ export function DynamicFilters({
 
   // Get filters that can be added (not already in use and dependencies satisfied)
   const getAddableFilters = () => {
-    return availableFilters.filter(filter =>
+    return filters.filter((filter: FilterConfig) =>
       !values.hasOwnProperty(filter.name) && areDependenciesSatisfied(filter)
     );
   };
@@ -157,9 +157,9 @@ export function DynamicFilters({
             <span className="text-sm font-medium">Active Filters:</span>
           </div>
 
-          {availableFilters
-            .filter(filter => values.hasOwnProperty(filter.name))
-            .map(filter => (
+          {filters
+            .filter((filter: FilterConfig) => values.hasOwnProperty(filter.name))
+            .map((filter: FilterConfig) => (
               <div key={filter.name} className="flex items-center gap-2">
                 <span className="text-sm font-medium min-w-0 flex-1">{filter.label}:</span>
 

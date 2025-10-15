@@ -215,7 +215,7 @@ export function AnalysisDisplay({
       )}
 
       {/* Dynamic Filters */}
-      {configuredFilters.length > 0 && (
+      {availableFilters.length > 0 && (
         <div className="mb-3">
           <div className="flex items-center gap-2 mb-2">
             <Filter className="h-4 w-4" />
@@ -235,7 +235,7 @@ export function AnalysisDisplay({
           {showFilters && (
             <DynamicFilters
               analysisId={analysisId}
-              filters={configuredFilters}
+              filters={availableFilters}
               values={filterValues}
               onChange={handleFilterChange}
               onAddFilter={handleAddFilter}

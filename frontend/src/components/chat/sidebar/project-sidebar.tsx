@@ -393,25 +393,33 @@ export function ProjectSidebar({
       // Find the analysis to get its details
       const analysis = analysisSnapshot.analyses?.find(a => a.id === analysisId);
       if (!analysis) return;
-      
+
       // Execute the analysis
       analysisActions.setActiveAnalysis(analysisId);
-      
+
       try {
         // Call API to execute the analysis
         const response = await api.post(`/analysis/${analysisId}/execute`, {
           project_id: projectId,
         });
-        
+
         // Update the job status
         analysisActions.updateJob(analysisId, response.data.job);
-        
+
         // Navigate to results view
         navigate(`/p/${projectId}/analysis/${analysisId}/results`);
       } catch (error) {
         console.error('Failed to run analysis:', error);
         analysisActions.setError('Failed to run analysis');
       }
+    }
+  };
+
+  const handleEditAnalysis = (analysisId: string) => {
+    sidebarActions.setMobileMenuOpen(false);
+    if (projectId) {
+      // Navigate to the edit page for this analysis
+      navigate(`/p/${projectId}/analysis/${analysisId}/edit`);
     }
   };
 
@@ -561,6 +569,7 @@ export function ProjectSidebar({
                     analyses={(analysisSnapshot.analyses || []) as Analysis[]}
                     onAnalysisClick={handleAnalysisClick}
                     onRunAnalysis={handleRunAnalysis}
+                    onEditAnalysis={handleEditAnalysis}
                     onAddNew={() => {
                       // Navigate to chat to create a new analysis
                       navigate(`/p/${projectId}/new`);
