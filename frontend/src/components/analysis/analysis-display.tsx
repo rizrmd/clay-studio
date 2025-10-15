@@ -2,10 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Play,
   Square,
@@ -13,10 +10,7 @@ import {
   Clock,
   CheckCircle,
   XCircle,
-  Eye,
-  Download,
-  Maximize2,
-  Minimize2
+  Download
 } from "lucide-react";
 import { mcpAnalysisApi, type McpAnalysisJob } from "@/lib/api/analysis";
 
@@ -28,54 +22,12 @@ interface AnalysisDisplayProps {
 }
 
 const statusConfig = {
-  pending: {
-    icon: Clock,
-    label: "Pending",
-    color: "bg-yellow-100 text-yellow-800 border-yellow-200",
-    variant: "outline" as const,
-  },
-  running: {
-    icon: RefreshCw,
-    label: "Running",
-    color: "bg-blue-100 text-blue-800 border-blue-200",
-    variant: "outline" as const,
-  },
-  completed: {
-    icon: CheckCircle,
-    label: "Completed",
-    color: "bg-green-100 text-green-800 border-green-200",
-    variant: "default" as const,
-  },
-  failed: {
-    icon: XCircle,
-    label: "Failed",
-    color: "bg-red-100 text-red-800 border-red-200",
-    variant: "destructive" as const,
-  },
-  cancelled: {
-    icon: Square,
-    label: "Cancelled",
-    color: "bg-gray-100 text-gray-800 border-gray-200",
-    variant: "outline" as const,
-  },
+  pending: { icon: Clock, color: "bg-yellow-100 text-yellow-800" },
+  running: { icon: RefreshCw, color: "bg-blue-100 text-blue-800" },
+  completed: { icon: CheckCircle, color: "bg-green-100 text-green-800" },
+  failed: { icon: XCircle, color: "bg-red-100 text-red-800" },
+  cancelled: { icon: Square, color: "bg-gray-100 text-gray-800" },
 };
-
-function formatDuration(startTime?: string, endTime?: string): string {
-  if (!startTime) return "—";
-
-  const start = new Date(startTime);
-  const end = endTime ? new Date(endTime) : new Date();
-  const durationMs = end.getTime() - start.getTime();
-
-  if (durationMs < 1000) return `${durationMs}ms`;
-  if (durationMs < 60000) return `${(durationMs / 1000).toFixed(1)}s`;
-  return `${(durationMs / 60000).toFixed(1)}m`;
-}
-
-function formatTimestamp(timestamp?: string): string {
-  if (!timestamp) return "—";
-  return new Date(timestamp).toLocaleString();
-}
 
 export function AnalysisDisplay({
   analysisId,
@@ -84,7 +36,6 @@ export function AnalysisDisplay({
   parameters,
 }: AnalysisDisplayProps) {
   const [currentJob, setCurrentJob] = useState<McpAnalysisJob | null>(null);
-  const [isMaximized, setIsMaximized] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -98,11 +49,10 @@ export function AnalysisDisplay({
         setCurrentJob(updatedJob);
 
         // Stop polling if job is completed, failed, or cancelled
-        if (updatedJob.status === 'completed' || updatedJob.status === 'failed' || updatedJob.status === 'cancelled') {
+        if (['completed', 'failed', 'cancelled'].includes(updatedJob.status)) {
           clearInterval(pollInterval);
         }
       } catch (err) {
-        console.error("Failed to poll job status:", err);
         clearInterval(pollInterval);
       }
     }, 2000);
@@ -115,23 +65,19 @@ export function AnalysisDisplay({
     setError(null);
 
     try {
-      const response = await mcpAnalysisApi.runAnalysis({
+      await mcpAnalysisApi.runAnalysis({
         analysis_id: analysisId,
         parameters: parameters || {},
       });
 
-      if (response.success) {
-        // The job was submitted successfully, we need to get the job ID
-        // This might require an additional API call or be returned in the response
-        // For now, we'll fetch the latest jobs to find our new job
-        const jobsResponse = await mcpAnalysisApi.listJobs({
-          analysis_id: analysisId,
-          limit: 1
-        });
+      // Get the latest job
+      const jobsResponse = await mcpAnalysisApi.listJobs({
+        analysis_id: analysisId,
+        limit: 1
+      });
 
-        if (jobsResponse.jobs.length > 0) {
-          setCurrentJob(jobsResponse.jobs[0]);
-        }
+      if (jobsResponse.jobs.length > 0) {
+        setCurrentJob(jobsResponse.jobs[0]);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to run analysis");
@@ -145,7 +91,6 @@ export function AnalysisDisplay({
 
     try {
       await mcpAnalysisApi.cancelJob(currentJob.job_id);
-      // Update the local state to reflect cancellation
       setCurrentJob(prev => prev ? {
         ...prev,
         status: 'cancelled',
@@ -166,196 +111,111 @@ export function AnalysisDisplay({
     const link = document.createElement('a');
     link.href = url;
     link.download = `analysis-${currentJob.job_id}.json`;
-    document.body.appendChild(link);
     link.click();
-    document.body.removeChild(link);
     URL.revokeObjectURL(url);
   };
 
   const StatusIcon = currentJob ? statusConfig[currentJob.status].icon : Clock;
-  const statusConfigData = currentJob ? statusConfig[currentJob.status] : statusConfig.pending;
+  const statusColor = currentJob ? statusConfig[currentJob.status].color : statusConfig.pending.color;
+  const statusLabel = currentJob ? currentJob.status.charAt(0).toUpperCase() + currentJob.status.slice(1) : "Pending";
 
-  const content = (
-    <Card className="w-full">
-      <CardHeader className="pb-3">
-        <div className="flex items-center justify-between">
-          <div className="space-y-1">
-            <CardTitle className="text-lg flex items-center gap-2">
-              <StatusIcon className="h-5 w-5" />
-              {title || "Analysis"}
-            </CardTitle>
-            {description && (
-              <CardDescription>{description}</CardDescription>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <Badge variant={statusConfigData.variant} className={statusConfigData.color}>
-              {statusConfigData.label}
-            </Badge>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              onClick={() => setIsMaximized(!isMaximized)}
-              title={isMaximized ? "Minimize" : "Maximize"}
-            >
-              {isMaximized ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-            </Button>
-          </div>
-        </div>
-      </CardHeader>
-
-      <CardContent className="space-y-4">
-        {/* Action Buttons */}
+  return (
+    <div className="border rounded-lg p-4 bg-white">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          {!currentJob || currentJob.status === 'completed' || currentJob.status === 'failed' || currentJob.status === 'cancelled' ? (
-            <Button
-              onClick={runAnalysis}
-              disabled={isLoading}
-              className="flex items-center gap-2"
-            >
-              {isLoading ? (
-                <RefreshCw className="h-4 w-4 animate-spin" />
-              ) : (
-                <Play className="h-4 w-4" />
-              )}
-              {currentJob ? "Run Again" : "Run Analysis"}
-            </Button>
-          ) : (
-            <Button
-              onClick={cancelAnalysis}
-              variant="destructive"
-              className="flex items-center gap-2"
-            >
-              <Square className="h-4 w-4" />
-              Cancel
-            </Button>
-          )}
-
-          {currentJob?.result && (
-            <Button
-              variant="outline"
-              onClick={downloadResults}
-              className="flex items-center gap-2"
-            >
-              <Download className="h-4 w-4" />
-              Download
-            </Button>
-          )}
+          <StatusIcon className="h-4 w-4" />
+          <span className="font-medium">{title || "Analysis"}</span>
         </div>
-
-        {error && (
-          <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-md">
-            <XCircle className="h-4 w-4 text-red-600" />
-            <span className="text-sm text-red-700">{error}</span>
-          </div>
-        )}
-
-        {currentJob && (
-          <Tabs defaultValue="status" className="w-full">
-            <TabsList className="grid w-full grid-cols-3">
-              <TabsTrigger value="status">Status</TabsTrigger>
-              <TabsTrigger value="details">Details</TabsTrigger>
-              <TabsTrigger value="results">Results</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="status" className="space-y-4">
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <span className="font-medium">Created:</span>
-                  <div className="text-muted-foreground">{formatTimestamp(currentJob.created_at)}</div>
-                </div>
-                <div>
-                  <span className="font-medium">Started:</span>
-                  <div className="text-muted-foreground">{formatTimestamp(currentJob.started_at)}</div>
-                </div>
-                <div>
-                  <span className="font-medium">Duration:</span>
-                  <div className="text-muted-foreground">
-                    {formatDuration(currentJob.started_at, currentJob.completed_at)}
-                  </div>
-                </div>
-                <div>
-                  <span className="font-medium">Job ID:</span>
-                  <div className="text-muted-foreground font-mono text-xs">{currentJob.job_id}</div>
-                </div>
-              </div>
-
-              {currentJob.status === 'running' && (
-                <div className="flex items-center gap-2 text-blue-600">
-                  <RefreshCw className="h-4 w-4 animate-spin" />
-                  <span className="text-sm">Analysis is running...</span>
-                </div>
-              )}
-            </TabsContent>
-
-            <TabsContent value="details" className="space-y-4">
-              <div className="space-y-2">
-                <div className="text-sm">
-                  <span className="font-medium">Analysis ID:</span>
-                  <div className="text-muted-foreground font-mono text-xs">{currentJob.analysis_id}</div>
-                </div>
-
-                {parameters && Object.keys(parameters).length > 0 && (
-                  <div className="text-sm">
-                    <span className="font-medium">Parameters:</span>
-                    <ScrollArea className="mt-1 h-24 rounded-md border p-2">
-                      <pre className="text-xs text-muted-foreground">
-                        {JSON.stringify(parameters, null, 2)}
-                      </pre>
-                    </ScrollArea>
-                  </div>
-                )}
-
-                {currentJob.error_message && (
-                  <div className="text-sm">
-                    <span className="font-medium text-red-600">Error:</span>
-                    <div className="text-red-600 text-xs mt-1 p-2 bg-red-50 rounded border">
-                      {currentJob.error_message}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </TabsContent>
-
-            <TabsContent value="results" className="space-y-4">
-              {currentJob.result ? (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle className="h-4 w-4 text-green-600" />
-                    <span className="text-sm font-medium">Analysis completed successfully</span>
-                  </div>
-
-                  <ScrollArea className="h-64 rounded-md border p-3">
-                    <pre className="text-xs text-muted-foreground">
-                      {JSON.stringify(currentJob.result, null, 2)}
-                    </pre>
-                  </ScrollArea>
-                </div>
-              ) : (
-                <div className="flex items-center justify-center h-32 text-muted-foreground">
-                  <div className="text-center">
-                    <Eye className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                    <p className="text-sm">No results available yet</p>
-                  </div>
-                </div>
-              )}
-            </TabsContent>
-          </Tabs>
-        )}
-      </CardContent>
-    </Card>
-  );
-
-  if (isMaximized) {
-    return (
-      <div className="fixed inset-0 z-[100] flex flex-col bg-background p-4">
-        <div className="flex-1">
-          {content}
-        </div>
+        <Badge className={statusColor}>
+          {statusLabel}
+        </Badge>
       </div>
-    );
-  }
 
-  return content;
+      {description && (
+        <p className="text-sm text-gray-600 mb-3">{description}</p>
+      )}
+
+      {/* Action Buttons */}
+      <div className="flex items-center gap-2 mb-3">
+        {!currentJob || ['completed', 'failed', 'cancelled'].includes(currentJob.status) ? (
+          <Button
+            onClick={runAnalysis}
+            disabled={isLoading}
+            size="sm"
+            className="flex items-center gap-2"
+          >
+            {isLoading ? (
+              <RefreshCw className="h-3 w-3 animate-spin" />
+            ) : (
+              <Play className="h-3 w-3" />
+            )}
+            {currentJob ? "Run Again" : "Run"}
+          </Button>
+        ) : (
+          <Button
+            onClick={cancelAnalysis}
+            variant="destructive"
+            size="sm"
+            className="flex items-center gap-2"
+          >
+            <Square className="h-3 w-3" />
+            Cancel
+          </Button>
+        )}
+
+        {currentJob?.result && (
+          <Button
+            variant="outline"
+            onClick={downloadResults}
+            size="sm"
+            className="flex items-center gap-2"
+          >
+            <Download className="h-3 w-3" />
+            Download
+          </Button>
+        )}
+      </div>
+
+      {/* Error Display */}
+      {error && (
+        <div className="flex items-center gap-2 p-2 bg-red-50 border border-red-200 rounded text-sm text-red-700 mb-3">
+          <XCircle className="h-3 w-3" />
+          {error}
+        </div>
+      )}
+
+      {/* Analysis Parameters/Filters */}
+      {(parameters && Object.keys(parameters).length > 0) && (
+        <div className="text-xs text-gray-500 space-y-1 mb-3">
+          <div className="font-medium text-gray-700">Parameters:</div>
+          {Object.entries(parameters).map(([key, value]) => (
+            <div key={key} className="flex gap-2">
+              <span className="font-medium">{key}:</span>
+              <span>{typeof value === 'object' ? JSON.stringify(value) : String(value)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Job Status */}
+      {currentJob && (
+        <div className="text-xs text-gray-500 space-y-1">
+          <div>Job ID: {currentJob.job_id}</div>
+          {currentJob.status === 'running' && (
+            <div className="flex items-center gap-1 text-blue-600">
+              <RefreshCw className="h-3 w-3 animate-spin" />
+              Running...
+            </div>
+          )}
+          {currentJob.status === 'completed' && currentJob.result && (
+            <div className="text-green-600">✓ Analysis completed</div>
+          )}
+          {currentJob.status === 'failed' && currentJob.error_message && (
+            <div className="text-red-600">✗ {currentJob.error_message}</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
