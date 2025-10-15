@@ -25,6 +25,7 @@
     "typescript": "^5"
   },
   "dependencies": {
+    "duckdb": "^1.4.1",
     "playwright": "^1.55.0"
   }
 }
