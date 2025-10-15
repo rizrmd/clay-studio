@@ -1,11 +1,62 @@
 import { api } from '@/lib/utils/api';
-import { 
-  Analysis, 
-  AnalysisConfig, 
-  AnalysisJob, 
-  AnalysisResult, 
-  AnalysisSchedule 
+import {
+  Analysis,
+  AnalysisConfig,
+  AnalysisJob,
+  AnalysisResult,
+  AnalysisSchedule
 } from '../store/analysis-store';
+
+// MCP Analysis Tools API
+export interface McpAnalysisJob {
+  job_id: string;
+  analysis_id: string;
+  analysis_title: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  parameters?: any;
+  result?: any;
+  error_message?: string;
+  created_at: string;
+  started_at?: string;
+  completed_at?: string;
+}
+
+export interface McpAnalysis {
+  analysis_id: string;
+  title: string;
+  description?: string;
+  script_content?: string;
+  is_active: boolean;
+  version: number;
+  created_at: string;
+  updated_at: string;
+  metadata?: any;
+}
+
+export interface McpAnalysisCreateRequest {
+  title: string;
+  script_content: string;
+  description?: string;
+  parameters?: any;
+}
+
+export interface McpAnalysisRunRequest {
+  analysis_id: string;
+  parameters?: any;
+  datasources?: any;
+}
+
+export interface McpAnalysisListResponse {
+  analyses: McpAnalysis[];
+  count: number;
+  project_id: string;
+}
+
+export interface McpJobListResponse {
+  jobs: McpAnalysisJob[];
+  count: number;
+  project_id: string;
+}
 
 export interface CreateAnalysisRequest {
   name: string;
@@ -37,6 +88,147 @@ export interface ExecuteAnalysisResponse {
   status: string;
   message: string;
 }
+
+// MCP Analysis Tools API
+export const mcpAnalysisApi = {
+  /**
+   * Create a new analysis via MCP
+   */
+  createAnalysis: async (data: McpAnalysisCreateRequest): Promise<{ analysis_id: string; status: string; message: string }> => {
+    return await api.post('/api/analysis/create', data);
+  },
+
+  /**
+   * List all analyses via MCP
+   */
+  listAnalyses: async (options?: {
+    active_only?: boolean;
+    limit?: number;
+  }): Promise<McpAnalysisListResponse> => {
+    const params = new URLSearchParams();
+    if (options?.active_only !== undefined) {
+      params.append('active_only', String(options.active_only));
+    }
+    if (options?.limit) {
+      params.append('limit', String(options.limit));
+    }
+
+    const url = `/api/analysis/list${params.toString() ? `?${params.toString()}` : ''}`;
+    return await api.get<McpAnalysisListResponse>(url);
+  },
+
+  /**
+   * Get detailed information about a specific analysis via MCP
+   */
+  getAnalysis: async (analysisId: string): Promise<{ status: string; analysis: McpAnalysis }> => {
+    return await api.get<{ status: string; analysis: McpAnalysis }>(`/api/analysis/get?analysis_id=${analysisId}`);
+  },
+
+  /**
+   * Update an existing analysis via MCP
+   */
+  updateAnalysis: async (analysisId: string, data: {
+    title?: string;
+    script_content?: string;
+    description?: string;
+  }): Promise<{ status: string; analysis: McpAnalysis }> => {
+    return await api.post('/api/analysis/update', {
+      analysis_id: analysisId,
+      ...data
+    });
+  },
+
+  /**
+   * Delete (deactivate) an analysis via MCP
+   */
+  deleteAnalysis: async (analysisId: string): Promise<{ status: string; message: string; analysis: { id: string; title: string } }> => {
+    return await api.post('/api/analysis/delete', {
+      analysis_id: analysisId
+    });
+  },
+
+  /**
+   * Run an analysis via MCP
+   */
+  runAnalysis: async (data: McpAnalysisRunRequest): Promise<{ success: boolean; message: string; analysis_id: string; status: string }> => {
+    return await api.post('/api/analysis/run', data);
+  },
+
+  /**
+   * Validate an analysis script via MCP
+   */
+  validateAnalysis: async (analysisId: string, scriptContent?: string): Promise<{
+    status: string;
+    valid: boolean;
+    analysis_id: string;
+    validation: {
+      errors: string[];
+      warnings: string[];
+      script_length: number;
+      line_count: number;
+    };
+    message: string;
+  }> => {
+    const params = new URLSearchParams({ analysis_id: analysisId });
+    if (scriptContent) {
+      params.append('script_content', scriptContent);
+    }
+
+    return await api.post(`/api/analysis/validate?${params.toString()}`);
+  },
+
+  /**
+   * List analysis execution jobs via MCP
+   */
+  listJobs: async (options?: {
+    analysis_id?: string;
+    status?: string;
+    limit?: number;
+  }): Promise<McpJobListResponse> => {
+    const params = new URLSearchParams();
+    if (options?.analysis_id) {
+      params.append('analysis_id', options.analysis_id);
+    }
+    if (options?.status) {
+      params.append('status', options.status);
+    }
+    if (options?.limit) {
+      params.append('limit', String(options.limit));
+    }
+
+    const url = `/api/analysis/job_list${params.toString() ? `?${params.toString()}` : ''}`;
+    return await api.get<McpJobListResponse>(url);
+  },
+
+  /**
+   * Get detailed information about a specific job via MCP
+   */
+  getJob: async (jobId: string): Promise<McpAnalysisJob> => {
+    return await api.get<McpAnalysisJob>(`/api/analysis/job_get?job_id=${jobId}`);
+  },
+
+  /**
+   * Cancel a running analysis job via MCP
+   */
+  cancelJob: async (jobId: string): Promise<{ success: boolean; job_id: string; status: string; message: string }> => {
+    return await api.post('/api/analysis/job_cancel', {
+      job_id: jobId
+    });
+  },
+
+  /**
+   * Get the result of a completed analysis job via MCP
+   */
+  getJobResult: async (jobId: string): Promise<{
+    job_id: string;
+    status: string;
+    result?: any;
+    error?: string;
+    message?: string;
+  }> => {
+    return await api.get(`/api/analysis/job_result?job_id=${jobId}`);
+  }
+};
 
 // Analysis CRUD operations
 export const analysisApi = {
