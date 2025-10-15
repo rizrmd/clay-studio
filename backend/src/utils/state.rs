@@ -551,17 +551,7 @@ impl AppState {
                     }
                 }
 
-                // Log pool stats periodically
-                if consecutive_failures == 0 {
-                    let stats = pool.size();
-                    let idle = pool.num_idle() as u32;
-                    info!(
-                        "📊 Pool Health - Total: {}, Idle: {}, Active: {}",
-                        stats,
-                        idle,
-                        stats.saturating_sub(idle)
-                    );
-                }
+
             }
         });
     }

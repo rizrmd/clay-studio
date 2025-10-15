@@ -10,15 +10,18 @@ import {
   Clock,
   CheckCircle,
   XCircle,
-  Download
+  Download,
+  Filter
 } from "lucide-react";
 import { mcpAnalysisApi, type McpAnalysisJob } from "@/lib/api/analysis";
+import { DynamicFilters, type FilterConfig } from "./dynamic-filters";
 
 interface AnalysisDisplayProps {
   analysisId: string;
   title?: string;
   description?: string;
   parameters?: any;
+  availableFilters?: FilterConfig[];
 }
 
 const statusConfig = {
@@ -34,10 +37,13 @@ export function AnalysisDisplay({
   title,
   description,
   parameters,
+  availableFilters = [],
 }: AnalysisDisplayProps) {
   const [currentJob, setCurrentJob] = useState<McpAnalysisJob | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [filterValues, setFilterValues] = useState<Record<string, any>>(parameters || {});
+  const [showFilters, setShowFilters] = useState(false);
 
   // Poll for job status updates
   useEffect(() => {
@@ -67,7 +73,7 @@ export function AnalysisDisplay({
     try {
       await mcpAnalysisApi.runAnalysis({
         analysis_id: analysisId,
-        parameters: parameters || {},
+        parameters: filterValues || {},
       });
 
       // Get the latest job
@@ -113,6 +119,29 @@ export function AnalysisDisplay({
     link.download = `analysis-${currentJob.job_id}.json`;
     link.click();
     URL.revokeObjectURL(url);
+  };
+
+  const handleFilterChange = (name: string, value: any) => {
+    setFilterValues(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
+  const handleAddFilter = (filterName: string) => {
+    // Add filter to active filters
+    setFilterValues(prev => ({
+      ...prev,
+      [filterName]: ""
+    }));
+  };
+
+  const handleRemoveFilter = (filterName: string) => {
+    setFilterValues(prev => {
+      const newValues = { ...prev };
+      delete newValues[filterName];
+      return newValues;
+    });
   };
 
   const StatusIcon = currentJob ? statusConfig[currentJob.status].icon : Clock;
@@ -185,8 +214,40 @@ export function AnalysisDisplay({
         </div>
       )}
 
-      {/* Analysis Parameters/Filters */}
-      {(parameters && Object.keys(parameters).length > 0) && (
+      {/* Dynamic Filters */}
+      {configuredFilters.length > 0 && (
+        <div className="mb-3">
+          <div className="flex items-center gap-2 mb-2">
+            <Filter className="h-4 w-4" />
+            <button
+              onClick={() => setShowFilters(!showFilters)}
+              className="text-sm font-medium text-gray-700 hover:text-gray-900"
+            >
+              {showFilters ? "Hide" : "Show"} Filters
+            </button>
+            {Object.keys(filterValues).length > 0 && (
+              <Badge variant="secondary" className="text-xs">
+                {Object.keys(filterValues).length} active
+              </Badge>
+            )}
+          </div>
+
+          {showFilters && (
+            <DynamicFilters
+              analysisId={analysisId}
+              filters={configuredFilters}
+              values={filterValues}
+              onChange={handleFilterChange}
+              onAddFilter={handleAddFilter}
+              onRemoveFilter={handleRemoveFilter}
+              className="border-l-2 border-blue-200 pl-3"
+            />
+          )}
+        </div>
+      )}
+
+      {/* Legacy Parameters Display (for backward compatibility) */}
+      {(parameters && Object.keys(parameters).length > 0 && Object.keys(filterValues).length === 0) && (
         <div className="text-xs text-gray-500 space-y-1 mb-3">
           <div className="font-medium text-gray-700">Parameters:</div>
           {Object.entries(parameters).map(([key, value]) => (
