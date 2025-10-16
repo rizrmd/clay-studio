@@ -17,16 +17,13 @@ import {
   Loader2,
   Download,
   MessageSquare,
-  Edit,
-  Trash2,
-  Save
+  Edit
 } from 'lucide-react';
-import { analysisApi } from '@/lib/api/analysis';
+import { analysisApi, mcpAnalysisApi, type McpAnalysisJob } from '@/lib/api/analysis';
 import { Analysis, AnalysisParameter, analysisActions } from '@/lib/store/analysis-store';
 import { DynamicFilters, type FilterConfig } from './dynamic-filters';
 import { AnalysisSchedulesDialog } from './analysis-schedules-dialog';
 import { createChatForAnalysisError } from '@/lib/utils/chat-helpers';
-import { tabsStore, tabsActions } from '@/lib/store/tabs-store';
 
 interface AnalysisDashboardProps {
   analysisId?: string;
@@ -34,15 +31,6 @@ interface AnalysisDashboardProps {
   mode?: string;
 }
 
-interface JobExecution {
-  id: string;
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
-  created_at: string;
-  completed_at?: string;
-  result?: any;
-  error?: string;
-  parameters?: Record<string, any>;
-}
 
 export function AnalysisDashboard({ analysisId, projectId, mode }: AnalysisDashboardProps) {
   const navigate = useNavigate();
@@ -52,10 +40,9 @@ export function AnalysisDashboard({ analysisId, projectId, mode }: AnalysisDashb
   const [isExecuting, setIsExecuting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showSchedules, setShowSchedules] = useState(false);
-  const [currentJob, setCurrentJob] = useState<JobExecution | null>(null);
-  const [executionHistory, setExecutionHistory] = useState<JobExecution[]>([]);
+  const [currentJob, setCurrentJob] = useState<McpAnalysisJob | null>(null);
+  const [executionHistory, setExecutionHistory] = useState<McpAnalysisJob[]>([]);
   const [filterValues, setFilterValues] = useState<Record<string, any>>({});
-  const [showFilters, setShowFilters] = useState(false);
 
   // Load analysis data
   useEffect(() => {
@@ -88,7 +75,17 @@ export function AnalysisDashboard({ analysisId, projectId, mode }: AnalysisDashb
 
       // Check if there's a running job
       if (data.last_job && (data.last_job.status === 'pending' || data.last_job.status === 'running')) {
-        setCurrentJob(data.last_job);
+        const mcpJob: McpAnalysisJob = {
+          job_id: data.last_job.id,
+          analysis_id: analysisId,
+          analysis_title: data.name || 'Analysis',
+          status: data.last_job.status,
+          created_at: data.last_job.started_at || new Date().toISOString(),
+          started_at: data.last_job.started_at,
+          completed_at: data.last_job.completed_at,
+          parameters: {} // No parameters in AnalysisJob type
+        };
+        setCurrentJob(mcpJob);
         setIsExecuting(true);
         pollJobStatus(data.last_job.id);
       }
@@ -103,7 +100,7 @@ export function AnalysisDashboard({ analysisId, projectId, mode }: AnalysisDashb
     if (!analysisId) return;
 
     try {
-      const jobs = await analysisApi.listJobs({ analysis_id: analysisId, limit: 10 });
+      const jobs = await mcpAnalysisApi.listJobs({ analysis_id: analysisId, limit: 10 });
       setExecutionHistory(jobs.jobs || []);
     } catch (err) {
       console.error('Failed to load execution history:', err);
@@ -121,16 +118,18 @@ export function AnalysisDashboard({ analysisId, projectId, mode }: AnalysisDashb
     analysisActions.updateAnalysis(analysisId, { status: 'running' });
 
     try {
-      const response = await analysisApi.executeAnalysis(analysisId, {
+      const response = await mcpAnalysisApi.runAnalysis({
         analysis_id: analysisId,
         parameters: filterValues,
       });
 
-      const newJob: JobExecution = {
-        id: response.job_id,
-        status: 'pending',
-        created_at: new Date().toISOString(),
-        parameters: { ...filterValues }
+      const newJob: McpAnalysisJob = {
+        job_id: response.analysis_id, // Use analysis_id as job_id for now
+        analysis_id: analysisId,
+        analysis_title: analysis?.name || 'Analysis',
+        status: response.status as 'pending' | 'running' | 'completed' | 'failed' | 'cancelled',
+        parameters: { ...filterValues },
+        created_at: new Date().toISOString()
       };
 
       setCurrentJob(newJob);
@@ -138,7 +137,7 @@ export function AnalysisDashboard({ analysisId, projectId, mode }: AnalysisDashb
       setActiveTab('results');
 
       // Start polling for job status
-      pollJobStatus(response.job_id);
+      pollJobStatus(response.analysis_id);
     } catch (err: any) {
       setError(err.message || 'Failed to execute analysis');
       setIsExecuting(false);
@@ -150,13 +149,13 @@ export function AnalysisDashboard({ analysisId, projectId, mode }: AnalysisDashb
     if (!analysisId) return;
 
     try {
-      const job = await analysisApi.getJob(jobId);
+      const job = await mcpAnalysisApi.getJob(jobId);
 
       setCurrentJob(prev => prev ? { ...prev, ...job } : null);
 
       // Update execution history
       setExecutionHistory(prev =>
-        prev.map(exec => exec.id === jobId ? { ...exec, ...job } : exec)
+        prev.map(exec => exec.job_id === jobId ? { ...exec, ...job } : exec)
       );
 
       if (job.status === 'completed') {
@@ -537,9 +536,9 @@ export function AnalysisDashboard({ analysisId, projectId, mode }: AnalysisDashb
                         </div>
                       )}
 
-                      {currentJob.status === 'failed' && currentJob.error && (
+                      {currentJob.status === 'failed' && currentJob.error_message && (
                         <div className="text-red-600">
-                          ✗ Analysis failed: {currentJob.error}
+                          ✗ Analysis failed: {currentJob.error_message}
                         </div>
                       )}
                     </CardContent>
@@ -564,7 +563,7 @@ export function AnalysisDashboard({ analysisId, projectId, mode }: AnalysisDashb
                     ) : (
                       <div className="space-y-3">
                         {executionHistory.map((job) => (
-                          <div key={job.id} className="flex items-center justify-between p-3 border rounded-lg">
+                          <div key={job.job_id} className="flex items-center justify-between p-3 border rounded-lg">
                             <div className="flex items-center gap-3">
                               {getStatusIcon(job.status)}
                               <div>
@@ -616,7 +615,7 @@ export function AnalysisDashboard({ analysisId, projectId, mode }: AnalysisDashb
                     </div>
 
                     <DynamicFilters
-                      analysisId={analysisId}
+                      analysisId={analysisId || ''}
                       filters={convertParametersToFilters(analysis.parameters)}
                       values={filterValues}
                       onChange={handleFilterChange}
@@ -650,7 +649,7 @@ export function AnalysisDashboard({ analysisId, projectId, mode }: AnalysisDashb
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => navigate(`/p/${projectId}/analysis/${analysisId}/edit`)}
+                      onClick={() => analysisId && navigate(`/p/${projectId}/analysis/${analysisId}/edit`)}
                     >
                       <Edit className="h-4 w-4 mr-2" />
                       Edit Code

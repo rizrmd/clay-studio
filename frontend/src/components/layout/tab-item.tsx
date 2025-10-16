@@ -24,6 +24,7 @@ const TAB_ICONS: Record<TabType, typeof MessageSquare> = {
   'datasource_new': Plus,
   'datasource_list': Database,
   'analysis': BarChart3,
+  'analysis_edit': Edit,
   'context': Code,
   'members': Users,
 };

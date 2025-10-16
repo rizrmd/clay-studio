@@ -11,6 +11,7 @@ export type TabType =
   | 'datasource_new'
   | 'datasource_list'
   | 'analysis'
+  | 'analysis_edit'
   | 'context'
   | 'members';
 
