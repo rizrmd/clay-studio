@@ -43,6 +43,8 @@ const DATABASE_TYPES = [
   { value: "sqlserver", label: "SQL Server" },
 ] as const;
 
+
+
 export function DatasourceForm({
   projectId,
   datasource,
@@ -72,6 +74,17 @@ export function DatasourceForm({
     username: "",
     password: "",
     schema: "public", // PostgreSQL schema (default: public)
+    // File upload format
+    file: null as File | null,
+    // CSV options
+    delimiter: ",",
+    has_header: true,
+    // Excel options
+    sheet_name: "",
+    header_row: "",
+    // JSON options
+    root_path: "",
+    array_path: "",
   });
 
   // Initialize form with existing datasource data

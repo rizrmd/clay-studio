@@ -34,6 +34,9 @@ const DATABASE_LABELS = {
   sqlite: "SQLite",
   oracle: "Oracle",
   sqlserver: "SQL Server",
+  csv: "CSV",
+  excel: "Excel",
+  json: "JSON",
 } as const;
 
 const DATABASE_COLORS = {
@@ -43,6 +46,9 @@ const DATABASE_COLORS = {
   sqlite: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300",
   oracle: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300",
   sqlserver: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300",
+  csv: "bg-cyan-100 text-cyan-800 dark:bg-cyan-900 dark:text-cyan-300",
+  excel: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-300",
+  json: "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-300",
 } as const;
 
 export function DatasourceCard({

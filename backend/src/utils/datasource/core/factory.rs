@@ -1,5 +1,8 @@
 use super::base::DataSourceConnector;
 use super::super::connectors::clickhouse::ClickHouseConnector;
+use super::super::connectors::csv::CsvConnector;
+use super::super::connectors::excel::ExcelConnector;
+use super::super::connectors::json::JsonConnector;
 use super::super::connectors::mysql::MySQLConnector;
 use super::super::connectors::oracle::OracleConnector;
 use super::super::connectors::postgres::PostgreSQLConnector;
@@ -24,6 +27,8 @@ pub enum DataSourceType {
     SqlServer,
     Oracle,
     Csv,
+    Excel,
+    Json,
 }
 
 impl From<&str> for DataSourceType {
@@ -35,7 +40,9 @@ impl From<&str> for DataSourceType {
             "clickhouse" | "ch" => DataSourceType::ClickHouse,
             "sqlserver" | "mssql" | "sql_server" => DataSourceType::SqlServer,
             "oracle" => DataSourceType::Oracle,
-            "csv" => DataSourceType::Csv,
+            "csv" | "tsv" => DataSourceType::Csv,
+            "excel" | "xlsx" | "xls" | "xlsm" => DataSourceType::Excel,
+            "json" | "jsonl" => DataSourceType::Json,
             _ => DataSourceType::PostgreSQL, // default
         }
     }
@@ -71,8 +78,16 @@ pub async fn create_connector(
             Ok(Box::new(connector))
         },
         DataSourceType::Csv => {
-            // CSV connector can be added later if needed
-            Err("CSV connector not yet implemented in new structure".into())
+            let connector = CsvConnector::new(config).map_err(convert_error)?;
+            Ok(Box::new(connector))
+        },
+        DataSourceType::Excel => {
+            let connector = ExcelConnector::new(config).map_err(convert_error)?;
+            Ok(Box::new(connector))
+        },
+        DataSourceType::Json => {
+            let connector = JsonConnector::new(config).map_err(convert_error)?;
+            Ok(Box::new(connector))
         }
     }
 }
@@ -129,7 +144,16 @@ pub async fn create_connector_with_pooling(
             Ok(Box::new(connector))
         },
         DataSourceType::Csv => {
-            Err("CSV connector not yet implemented in new structure".into())
+            let connector = CsvConnector::new(config).map_err(convert_error)?;
+            Ok(Box::new(connector))
+        },
+        DataSourceType::Excel => {
+            let connector = ExcelConnector::new(config).map_err(convert_error)?;
+            Ok(Box::new(connector))
+        },
+        DataSourceType::Json => {
+            let connector = JsonConnector::new(config).map_err(convert_error)?;
+            Ok(Box::new(connector))
         }
     }
 }

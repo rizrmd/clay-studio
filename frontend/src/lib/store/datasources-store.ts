@@ -4,13 +4,13 @@ import { api } from "@/lib/utils/api";
 export interface Datasource {
   id: string;
   name: string;
-  source_type: "postgresql" | "mysql" | "clickhouse" | "sqlite" | "oracle" | "sqlserver";
+  source_type: "postgresql" | "mysql" | "clickhouse" | "sqlite" | "oracle" | "sqlserver" | "csv" | "excel" | "json";
   config: string | object;
   created_at: string;
   updated_at: string;
   project_id: string;
   schema_info?: string;
-  connection_status?: "connected" | "error" | "testing" | "unknown";
+  connection_status?: "connected" | "error" | "testing" | "unknown" | "uploaded";
   connection_error?: string;
 }
 
@@ -222,6 +222,55 @@ export const datasourcesActions = {
       return await api.post(`/test-connection`, testData);
     } catch (error: any) {
       console.error('Failed to test connection with config:', error);
+      throw error;
+    }
+  },
+
+  async uploadFileDatasource(projectId: string, formData: FormData) {
+    try {
+      datasourcesStore.isLoading = true;
+      datasourcesStore.error = null;
+
+      const newDatasource = await api.post(`/projects/${projectId}/datasources/upload`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      datasourcesActions.addDatasource(newDatasource);
+      return newDatasource;
+    } catch (error: any) {
+      console.error('Failed to upload file datasource:', error);
+      const errorMessage = error?.response?.data?.error || 'Failed to upload file datasource';
+      datasourcesStore.error = errorMessage;
+      throw error;
+    } finally {
+      datasourcesStore.isLoading = false;
+    }
+  },
+
+  async previewFile(file: File, sourceType: Datasource["source_type"], options?: any) {
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('source_type', sourceType);
+
+      // Add file-specific options
+      if (options) {
+        Object.entries(options).forEach(([key, value]) => {
+          if (value !== null && value !== undefined && value !== '') {
+            formData.append(key, String(value));
+          }
+        });
+      }
+
+      return await api.post(`/projects/preview/datasource`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+    } catch (error: any) {
+      console.error('Failed to preview file:', error);
       throw error;
     }
   },

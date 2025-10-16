@@ -124,6 +124,11 @@ pub async fn get_tables(
             list_sqlserver_tables(&datasource_id, &config).await
                 .map_err(|e| AppError::InternalServerError(format!("Failed to list tables: {}", e)))?
         },
+        "csv" | "excel" | "json" => {
+            // For file datasources, use the connector factory directly
+            list_file_tables(&datasource_id, &config, &source_type).await
+                .map_err(|e| AppError::InternalServerError(format!("Failed to list tables: {}", e)))?
+        },
         _ => {
             return Err(AppError::BadRequest(format!("Unsupported datasource type: {}", source_type)));
         }
@@ -232,6 +237,11 @@ pub async fn get_table_structure(
         },
         "sqlserver" => {
             get_sqlserver_table_structure(&datasource_id, &config, &table_name).await
+                .map_err(|e| AppError::InternalServerError(format!("Failed to get table structure: {}", e)))?
+        },
+        "csv" | "excel" | "json" => {
+            // For file datasources, use the connector factory directly
+            get_file_table_structure(&datasource_id, &config, &source_type, &table_name).await
                 .map_err(|e| AppError::InternalServerError(format!("Failed to get table structure: {}", e)))?
         },
         _ => {
@@ -343,6 +353,23 @@ async fn list_sqlserver_tables(
 
     // Create connector using factory
     let connector = create_connector("sqlserver", config).await
+        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+            Box::new(std::io::Error::other(e.to_string()))
+        })?;
+
+    // Get tables using connector's list_tables method
+    connector.list_tables().await
+}
+
+async fn list_file_tables(
+    _datasource_id: &str,
+    config: &Value,
+    source_type: &str,
+) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+    use crate::utils::datasource::create_connector;
+
+    // Create connector using factory
+    let connector = create_connector(source_type, config).await
         .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
             Box::new(std::io::Error::other(e.to_string()))
         })?;
@@ -602,4 +629,71 @@ async fn get_sqlserver_table_structure(
         foreign_keys: vec![],
         indexes: vec![],
     })
+}
+
+async fn get_file_table_structure(
+    _datasource_id: &str,
+    config: &Value,
+    source_type: &str,
+    table_name: &str,
+) -> Result<TableStructure, Box<dyn std::error::Error + Send + Sync>> {
+    use super::types::TableColumn;
+    use crate::utils::datasource::create_connector;
+
+    // Create connector using factory
+    let connector = create_connector(source_type, config).await
+        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+            Box::new(std::io::Error::other(e.to_string()))
+        })?;
+
+    // Get schema from connector
+    let schema = connector.fetch_schema().await
+        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+            Box::new(std::io::Error::other(e.to_string()))
+        })?;
+
+    // Extract table structure from schema
+    if let Some(tables) = schema.get("tables") {
+        if let Some(table_data) = tables.get(table_name) {
+            // Extract columns from the table data
+            let columns_array = table_data.get("columns")
+                .and_then(|c| c.as_array())
+                .unwrap_or(&serde_json::json!([]));
+
+            let mut columns = Vec::new();
+            for col_data in columns_array {
+                if let Some(col_obj) = col_data.as_object() {
+                    columns.push(TableColumn {
+                        name: col_obj.get("column_name")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or("unknown").to_string(),
+                        data_type: col_obj.get("data_type")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or("text").to_string(),
+                        is_nullable: col_obj.get("is_nullable")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or("YES") == "YES",
+                        column_default: None,
+                        is_primary_key: false, // File datasources don't have primary keys
+                        is_foreign_key: false, // File datasources don't have foreign keys
+                        character_maximum_length: None,
+                        numeric_precision: None,
+                        numeric_scale: None,
+                    });
+                }
+            }
+
+            Ok(TableStructure {
+                table_name: table_name.to_string(),
+                columns,
+                primary_keys: vec![],
+                foreign_keys: vec![],
+                indexes: vec![],
+            })
+        } else {
+            Err(format!("Table '{}' not found in schema", table_name).into())
+        }
+    } else {
+        Err("No tables found in schema".into())
+    }
 }

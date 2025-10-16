@@ -135,9 +135,9 @@ pub async fn create_datasource(
     // Normalize and validate source_type
     let normalized_source_type = normalize_database_type(&request_data.source_type);
     
-    let valid_types = ["postgresql", "mysql", "clickhouse", "sqlite", "oracle", "sqlserver"];
+    let valid_types = ["postgresql", "mysql", "clickhouse", "sqlite", "oracle", "sqlserver", "csv", "excel", "json"];
     if !valid_types.contains(&normalized_source_type.as_str()) {
-        return Err(AppError::BadRequest(format!("Invalid source_type '{}'. Must be one of: {}. Common variations are automatically normalized (e.g., 'postgres' → 'postgresql', 'MSSQL' → 'sqlserver')", request_data.source_type, valid_types.join(", "))));
+        return Err(AppError::BadRequest(format!("Invalid source_type '{}'. Must be one of: {}. Common variations are automatically normalized (e.g., 'postgres' → 'postgresql', 'MSSQL' → 'sqlserver', 'TSV' → 'csv')", request_data.source_type, valid_types.join(", "))));
     }
 
     let datasource_id = Uuid::new_v4().to_string();
@@ -464,7 +464,16 @@ pub fn normalize_database_type(input: &str) -> String {
         
         // SQL Server variations
         "sqlserver" | "mssql" | "microsoftsqlserver" | "microsoft" | "tsql" | "mssqlserver" => "sqlserver".to_string(),
-        
+
+        // CSV variations
+        "csv" | "tsv" | "txt" | "delimited" => "csv".to_string(),
+
+        // Excel variations
+        "excel" | "xlsx" | "xls" | "xlsm" | "spreadsheet" => "excel".to_string(),
+
+        // JSON variations
+        "json" | "jsonl" | "ndjson" => "json".to_string(),
+
         // Return as-is if no match (will be caught by validation)
         _ => normalized,
     }
