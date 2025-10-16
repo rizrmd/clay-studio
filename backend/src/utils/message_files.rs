@@ -156,9 +156,9 @@ pub fn format_files_for_prompt(files: Vec<FileUpload>) -> String {
         } else {
             formatted.push_str(&format!("- **File Path**: {}\n", file.file_path));
             if file.mime_type.as_ref().map(|mt| mt.starts_with("image/")).unwrap_or(false) {
-                formatted.push_str("- **Note**: This is an image file. Use the file_read tool with the file_id to access and analyze the image content. The image will be provided as base64 data that Claude can analyze.\n");
+                formatted.push_str("- **Note**: This is an image file. Use the view tool with the file path to access and analyze the image content.\n");
             } else {
-                formatted.push_str("- **Note**: This is a binary file. Use file_read tool to access if needed.\n");
+                formatted.push_str("- **Note**: This is a binary file. Use view tool to access if needed.\n");
             }
         }
         

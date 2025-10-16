@@ -194,22 +194,7 @@ pub fn get_interaction_tools() -> Vec<Tool> {
                 "additionalProperties": false
             }),
         },
-        Tool {
-            name: "file_read".to_string(),
-            description: "Read the content of an uploaded file by its ID".to_string(),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "file_id": {
-                        "type": "string",
-                        "description": "ID of the file to read"
-                    }
-                },
-                "required": ["file_id"],
-                "additionalProperties": false
-            }),
-        },
-        Tool {
+          Tool {
             name: "file_search".to_string(),
             description: "Search for files by name or description (metadata only) in the project".to_string(),
             input_schema: json!({
@@ -478,7 +463,7 @@ pub fn get_interaction_tools() -> Vec<Tool> {
 
 /// Check if a tool name is an interaction tool
 pub fn is_interaction_tool(tool_name: &str) -> bool {
-    matches!(tool_name, "ask_user" | "export_excel" | "show_table" | "show_chart" | "file_list" | "file_read" | "file_search" | "file_metadata" | "file_peek" | "file_search_content" | "file_range" | "file_download_url" | "analysis_show")
+    matches!(tool_name, "ask_user" | "export_excel" | "show_table" | "show_chart" | "file_list" | "file_search" | "file_metadata" | "file_peek" | "file_search_content" | "file_range" | "file_download_url" | "analysis_show")
 }
 
 /// Handle interaction tool calls
@@ -529,18 +514,7 @@ pub async fn handle_tool_call(
             })?;
             Ok(parsed_result)
         },
-        "file_read" => {
-            let empty_map = serde_json::Map::new();
-            let args = arguments.and_then(|v| v.as_object()).unwrap_or(&empty_map);
-            let result = handlers.handle_file_read(args).await?;
-            let parsed_result: serde_json::Value = serde_json::from_str(&result).map_err(|e| JsonRpcError {
-                code: INTERNAL_ERROR,
-                message: format!("Failed to parse file_read response: {}", e),
-                data: None,
-            })?;
-            Ok(parsed_result)
-        },
-        "file_search" => {
+                "file_search" => {
             let empty_map = serde_json::Map::new();
             let args = arguments.and_then(|v| v.as_object()).unwrap_or(&empty_map);
             let result = handlers.handle_file_search(args).await?;

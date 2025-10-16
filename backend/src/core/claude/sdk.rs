@@ -289,11 +289,12 @@ impl ClaudeSDK {
                 .arg("-") // Read from stdin
                 .arg("--verbose");
 
-            // Add allowed tools - dynamically get all MCP tools plus WebSearch and WebFetch
+            // Add allowed tools - dynamically get all MCP tools plus native tools
             let mut allowed_mcp_tools = get_all_available_mcp_tools();
-            // Add WebSearch and WebFetch to allowed tools
+            // Add native tools to allowed tools
             allowed_mcp_tools.push("WebSearch".to_string());
             allowed_mcp_tools.push("WebFetch".to_string());
+            allowed_mcp_tools.push("view".to_string());
             
             if !allowed_mcp_tools.is_empty() {
                 let allowed_tools_list = allowed_mcp_tools.join(",");
@@ -301,7 +302,7 @@ impl ClaudeSDK {
                     .arg(allowed_tools_list);
             }
 
-            // Add disallowed tools
+            // Add disallowed tools (note: view is now allowed as native tool)
             cmd_builder.arg("--disallowedTools")
                 .arg("Bash,Glob,LS,Read,Edit,MultiEdit,Grep,NotebookEdit,ExitPlanMode,BashOutput,KillBash");
 
