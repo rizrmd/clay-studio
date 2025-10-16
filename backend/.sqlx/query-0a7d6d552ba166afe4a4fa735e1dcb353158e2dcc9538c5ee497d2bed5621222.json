@@ -1,0 +1,44 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT \n                COUNT(*) as total_results,\n                SUM(size_bytes) as total_size_bytes,\n                AVG(size_bytes) as avg_size_bytes,\n                MIN(created_at) as oldest_result,\n                MAX(created_at) as newest_result\n            FROM analysis_result_storage\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "total_results",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "total_size_bytes",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 2,
+        "name": "avg_size_bytes",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 3,
+        "name": "oldest_result",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "newest_result",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "0a7d6d552ba166afe4a4fa735e1dcb353158e2dcc9538c5ee497d2bed5621222"
+}

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM analysis_dependencies WHERE analysis_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "04386fb15cab4a5c8acec4311716f30b2bb4f6c385793b681be897e6dfc6bf44"
+}

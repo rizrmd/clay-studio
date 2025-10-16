@@ -349,6 +349,27 @@ pub async fn handle_get_conversation_messages(
 ) -> Result<Vec<crate::models::Message>, crate::utils::AppError> {
     let client_id = uuid::Uuid::parse_str(client_id_str)
         .map_err(|_| crate::utils::AppError::BadRequest("Invalid client ID".to_string()))?;
+
+    // First check if the conversation exists and the user has access to it
+    let conversation_exists = sqlx::query(
+        "SELECT c.id
+         FROM conversations c
+         JOIN projects p ON c.project_id = p.id
+         WHERE c.id = $1 AND p.client_id = $2"
+    )
+    .bind(conversation_id)
+    .bind(client_id)
+    .fetch_optional(&state.db_pool)
+    .await
+    .map_err(|e| crate::utils::AppError::InternalServerError(format!("Database error: {}", e)))?;
+
+    if conversation_exists.is_none() {
+        return Err(crate::utils::AppError::NotFound(format!(
+            "Conversation {} not found or access denied",
+            conversation_id
+        )));
+    }
+
     // Try to get from cache first
     match state.get_conversation_messages(conversation_id).await {
         Ok(messages) => {
@@ -376,10 +397,10 @@ pub async fn handle_get_conversation_messages(
         Err(_) => {
             // Fall back to direct database query with authorization check
             let message_rows = sqlx::query(
-                "SELECT 
-                    m.id, 
-                    m.content, 
-                    m.role, 
+                "SELECT
+                    m.id,
+                    m.content,
+                    m.role,
                     m.processing_time_ms,
                     m.created_at,
                     m.file_attachments,

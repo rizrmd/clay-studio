@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE analysis_jobs \n            SET status = $1, started_at = NOW()\n            WHERE id = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3b0b7b5068015eb8bfa3065441e590d81fda4082a2bb0aeaba2e14ab51bf22f9"
+}

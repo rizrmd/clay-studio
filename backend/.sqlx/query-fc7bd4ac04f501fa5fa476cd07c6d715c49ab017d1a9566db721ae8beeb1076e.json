@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                CREATE TABLE IF NOT EXISTS analyses (\n                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n                    title VARCHAR NOT NULL,\n                    script_content TEXT NOT NULL,\n                    project_id UUID NOT NULL,\n                    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),\n                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),\n                    created_by UUID,\n                    version INTEGER DEFAULT 1,\n                    is_active BOOLEAN DEFAULT TRUE,\n                    metadata JSONB DEFAULT '{}'\n                );\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "fc7bd4ac04f501fa5fa476cd07c6d715c49ab017d1a9566db721ae8beeb1076e"
+}

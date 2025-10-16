@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT name, source_type, connection_config as config\n            FROM data_sources\n            WHERE project_id = $1 AND deleted_at IS NULL\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "source_type",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "config",
+        "type_info": "Json"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "730d9345285ef7ea49cf744faf0502e10d92336de95293df72a63fa3ba1cf6ca"
+}

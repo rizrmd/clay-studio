@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT dependency_type, dependency_name\n            FROM analysis_dependencies\n            WHERE analysis_id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "dependency_type",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "dependency_name",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "1f291df726e489caac18d04e68cf6e1f6a53d118b9895fae5413f6238a795512"
+}

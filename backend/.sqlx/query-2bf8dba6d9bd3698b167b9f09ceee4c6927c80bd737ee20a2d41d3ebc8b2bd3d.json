@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT EXISTS (\n                SELECT FROM information_schema.tables \n                WHERE table_schema = 'public' \n                AND table_name = 'analyses'\n            ) as table_exists\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "table_exists",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "2bf8dba6d9bd3698b167b9f09ceee4c6927c80bd737ee20a2d41d3ebc8b2bd3d"
+}

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE analysis_jobs \n            SET status = $1, completed_at = NOW()\n            WHERE id = $2 AND status IN ('pending', 'running')\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "428954bb1513399c84866f6fd98d6006ede51f3b4a60dd43b4f524ec68d02913"
+}

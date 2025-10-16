@@ -1,0 +1,65 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id, analysis_id, version_number, script_content, change_description,\n                   created_at, created_by, metadata\n            FROM analysis_versions\n            WHERE analysis_id = $1 AND version_number = $2\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "analysis_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "version_number",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "script_content",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "change_description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_by",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "metadata",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "d598d5a43d9b64d6657cee9ddc35eda874b4f4bdb386ce73c042e08a9686e225"
+}
