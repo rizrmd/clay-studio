@@ -76,14 +76,14 @@ export function ChatInput({
 }: ChatInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const inputSnapshot = useSnapshot(inputStore, { sync: true });
-  const chatSnapshot = useSnapshot(chatStore, { sync: true });
+  const inputSnapshot = useSnapshot(inputStore);
+  const chatSnapshot = useSnapshot(chatStore);
   
   // State for message history navigation
   const [messageHistoryIndex, setMessageHistoryIndex] = useState(-1);
   const [originalInput, setOriginalInput] = useState("");
 
-  const activeConversationId = chatStore.conversation_id || "new";
+  const activeConversationId = chatSnapshot.conversation_id || "new";
   const { uploadFiles, cancelUpload, generatePreview } = useFileUpload(
     activeConversationId,
     projectId

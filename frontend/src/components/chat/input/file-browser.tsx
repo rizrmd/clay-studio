@@ -10,7 +10,7 @@ import {
   Edit2,
   Trash2,
 } from "lucide-react";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -320,6 +320,9 @@ export function FileBrowser({
         className="min-w-[95vw] sm:min-w-[90vw] max-w-[1400px] h-[85vh] sm:h-[90vh] flex flex-col p-0 gap-0"
         showCloseButton={false}
       >
+        <DialogHeader className="sr-only">
+          <DialogTitle>File Browser</DialogTitle>
+        </DialogHeader>
         <div className="flex-1 flex overflow-hidden">
           <div className="flex flex-col items-stretch flex-1">
             <div className="flex flex-row p-2 border-b gap-2">

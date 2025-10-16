@@ -70,34 +70,37 @@ interface MultimodalState {
 // Multimodal store
 export const multimodalStore = proxy<MultimodalState>({});
 
+// Helper function to ensure conversation state is initialized
+const ensureConversationState = (conversationId: string) => {
+  if (!multimodalStore[conversationId]) {
+    multimodalStore[conversationId] = {
+      localInput: "",
+      filePreviews: {},
+      fileDescriptions: {},
+      editingDescriptions: {},
+      uploadCancelled: false,
+    };
+  }
+  return multimodalStore[conversationId];
+};
+
 // Multimodal actions
 export const multimodalInputActions = {
   setLocalInput: (conversationId: string, input: string) => {
-    if (!multimodalStore[conversationId]) {
-      multimodalStore[conversationId] = {
-        localInput: "",
-        filePreviews: {},
-        fileDescriptions: {},
-        editingDescriptions: {},
-        uploadCancelled: false,
-      };
-    }
-    multimodalStore[conversationId].localInput = input;
+    const state = ensureConversationState(conversationId);
+    state.localInput = input;
   },
   getFilePreview: (conversationId: string, filename: string) => {
-    return multimodalStore[conversationId]?.filePreviews[filename] || "";
+    try {
+      return multimodalStore[conversationId]?.filePreviews?.[filename] || "";
+    } catch (error) {
+      console.warn('Error accessing file preview:', error);
+      return "";
+    }
   },
   setFilePreview: (conversationId: string, filename: string, preview: string) => {
-    if (!multimodalStore[conversationId]) {
-      multimodalStore[conversationId] = {
-        localInput: "",
-        filePreviews: {},
-        fileDescriptions: {},
-        editingDescriptions: {},
-        uploadCancelled: false,
-      };
-    }
-    multimodalStore[conversationId].filePreviews[filename] = preview;
+    const state = ensureConversationState(conversationId);
+    state.filePreviews[filename] = preview;
   },
   clearFilePreview: (conversationId: string, filename: string) => {
     if (multimodalStore[conversationId]?.filePreviews) {
@@ -105,19 +108,16 @@ export const multimodalInputActions = {
     }
   },
   getFileDescription: (conversationId: string, filename: string) => {
-    return multimodalStore[conversationId]?.fileDescriptions[filename] || "";
+    try {
+      return multimodalStore[conversationId]?.fileDescriptions?.[filename] || "";
+    } catch (error) {
+      console.warn('Error accessing file description:', error);
+      return "";
+    }
   },
   setFileDescription: (conversationId: string, filename: string, description: string) => {
-    if (!multimodalStore[conversationId]) {
-      multimodalStore[conversationId] = {
-        localInput: "",
-        filePreviews: {},
-        fileDescriptions: {},
-        editingDescriptions: {},
-        uploadCancelled: false,
-      };
-    }
-    multimodalStore[conversationId].fileDescriptions[filename] = description;
+    const state = ensureConversationState(conversationId);
+    state.fileDescriptions[filename] = description;
   },
   clearFileDescription: (conversationId: string, filename: string) => {
     if (multimodalStore[conversationId]?.fileDescriptions) {
@@ -125,33 +125,27 @@ export const multimodalInputActions = {
     }
   },
   getEditingDescription: (conversationId: string, filename: string) => {
-    return multimodalStore[conversationId]?.editingDescriptions[filename] || false;
+    try {
+      return multimodalStore[conversationId]?.editingDescriptions?.[filename] || false;
+    } catch (error) {
+      console.warn('Error accessing editing description:', error);
+      return false;
+    }
   },
   setEditingDescription: (conversationId: string, filename: string, editing: boolean) => {
-    if (!multimodalStore[conversationId]) {
-      multimodalStore[conversationId] = {
-        localInput: "",
-        filePreviews: {},
-        fileDescriptions: {},
-        editingDescriptions: {},
-        uploadCancelled: false,
-      };
-    }
-    multimodalStore[conversationId].editingDescriptions[filename] = editing;
+    const state = ensureConversationState(conversationId);
+    state.editingDescriptions[filename] = editing;
   },
   setUploadCancelled: (conversationId: string, cancelled: boolean) => {
-    if (!multimodalStore[conversationId]) {
-      multimodalStore[conversationId] = {
-        localInput: "",
-        filePreviews: {},
-        fileDescriptions: {},
-        editingDescriptions: {},
-        uploadCancelled: false,
-      };
-    }
-    multimodalStore[conversationId].uploadCancelled = cancelled;
+    const state = ensureConversationState(conversationId);
+    state.uploadCancelled = cancelled;
   },
   isUploadCancelled: (conversationId: string) => {
-    return multimodalStore[conversationId]?.uploadCancelled || false;
+    try {
+      return multimodalStore[conversationId]?.uploadCancelled || false;
+    } catch (error) {
+      console.warn('Error accessing upload cancelled status:', error);
+      return false;
+    }
   },
 };
