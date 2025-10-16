@@ -134,6 +134,7 @@ pub fn format_files_for_prompt(files: Vec<FileUpload>) -> String {
     
     for (i, file) in files.iter().enumerate() {
         formatted.push_str(&format!("## File {}: {}\n", i + 1, file.original_name));
+        formatted.push_str(&format!("- **File ID**: {}\n", file.id));
         formatted.push_str(&format!("- **Type**: {}\n", file.mime_type.as_deref().unwrap_or("unknown")));
         formatted.push_str(&format!("- **Size**: {} bytes\n", file.file_size));
         
@@ -154,7 +155,11 @@ pub fn format_files_for_prompt(files: Vec<FileUpload>) -> String {
             formatted.push_str(&format!("- **Content Preview**:\n```\n{}\n```\n", preview));
         } else {
             formatted.push_str(&format!("- **File Path**: {}\n", file.file_path));
-            formatted.push_str("- **Note**: This is a binary file. Use file_read tool to access if needed.\n");
+            if file.mime_type.as_ref().map(|mt| mt.starts_with("image/")).unwrap_or(false) {
+                formatted.push_str("- **Note**: This is an image file. Use the file_read tool with the file_id to access and analyze the image content. The image will be provided as base64 data that Claude can analyze.\n");
+            } else {
+                formatted.push_str("- **Note**: This is a binary file. Use file_read tool to access if needed.\n");
+            }
         }
         
         formatted.push('\n');

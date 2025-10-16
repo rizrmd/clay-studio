@@ -181,39 +181,84 @@ impl McpHandlers {
                 })
             } else {
                 // Safe to read small file from filesystem
-                match fs::read_to_string(&file.file_path) {
-                    Ok(content) => json!({
-                        "status": "success",
-                        "message": "File content retrieved from filesystem",
-                        "file": {
-                            "id": file.id.to_string(),
-                            "name": file.file_name,
-                            "original_name": file.original_name,
-                            "mime_type": file.mime_type,
-                            "size": file.file_size,
-                            "content": content,
-                            "description": file.description,
-                            "auto_description": file.auto_description,
-                            "created_at": file.created_at
-                        }
-                    }),
-                    Err(_) => json!({
-                        "status": "error",
-                        "message": "File is binary or cannot be read as text",
-                        "file": {
-                            "id": file.id.to_string(),
-                            "name": file.file_name,
-                            "original_name": file.original_name,
-                            "mime_type": file.mime_type,
-                            "size": file.file_size,
-                            "content": null,
-                            "description": file.description,
-                            "auto_description": file.auto_description,
-                            "created_at": file.created_at,
-                            "file_path": file.file_path
+                // Check if it's an image file
+                let is_image = file.mime_type.as_ref()
+                    .map(|mt| mt.starts_with("image/"))
+                    .unwrap_or(false);
+
+                if is_image {
+                    // For image files, read as binary and encode as base64
+                    match fs::read(&file.file_path) {
+                        Ok(binary_data) => {
+                            use base64::{Engine as _, engine::general_purpose};
+                            let base64_content = general_purpose::STANDARD.encode(&binary_data);
+                            json!({
+                                "status": "success",
+                                "message": "Image file retrieved and encoded as base64",
+                                "file": {
+                                    "id": file.id.to_string(),
+                                    "name": file.file_name,
+                                    "original_name": file.original_name,
+                                    "mime_type": file.mime_type,
+                                    "size": file.file_size,
+                                    "content": base64_content,
+                                    "encoding": "base64",
+                                    "description": file.description,
+                                    "auto_description": file.auto_description,
+                                    "created_at": file.created_at,
+                                    "note": "This image file has been encoded as base64. Claude can analyze this base64 content to understand the image."
+                                }
+                            })
                         },
-                        "note": "Use file_peek or file_range to access this file's content"
-                    })
+                        Err(e) => json!({
+                            "status": "error",
+                            "message": format!("Failed to read image file: {}", e),
+                            "file": {
+                                "id": file.id.to_string(),
+                                "name": file.file_name,
+                                "original_name": file.original_name,
+                                "mime_type": file.mime_type,
+                                "size": file.file_size,
+                                "error": "File read error"
+                            }
+                        }),
+                    }
+                } else {
+                    // For text files, read as string
+                    match fs::read_to_string(&file.file_path) {
+                        Ok(content) => json!({
+                            "status": "success",
+                            "message": "File content retrieved from filesystem",
+                            "file": {
+                                "id": file.id.to_string(),
+                                "name": file.file_name,
+                                "original_name": file.original_name,
+                                "mime_type": file.mime_type,
+                                "size": file.file_size,
+                                "content": content,
+                                "description": file.description,
+                                "auto_description": file.auto_description,
+                                "created_at": file.created_at
+                            }
+                        }),
+                        Err(_) => json!({
+                            "status": "error",
+                            "message": "File is binary or cannot be read as text",
+                            "file": {
+                                "id": file.id.to_string(),
+                                "name": file.file_name,
+                                "original_name": file.original_name,
+                                "mime_type": file.mime_type,
+                                "size": file.file_size,
+                                "content": null,
+                                "description": file.description,
+                                "auto_description": file.auto_description,
+                                "created_at": file.created_at,
+                                "file_path": file.file_path
+                            },
+                            "note": "Use file_peek or file_range to access this file's content"
+                        })
+                    }
                 }
             }
         };
