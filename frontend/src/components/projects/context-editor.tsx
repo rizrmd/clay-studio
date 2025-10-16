@@ -1,10 +1,10 @@
-import { useEffect } from 'react';
+import { useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Textarea } from '@/components/ui/textarea';
 import { api } from '@/lib/utils/api';
 import { proxy, useSnapshot } from 'valtio';
-import { Loader2, Save, Play, RefreshCw, HelpCircle } from 'lucide-react';
+import { Loader2, Save, Play, RefreshCw, HelpCircle, RotateCcw } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -26,9 +26,52 @@ const contextEditorState = proxy({
   isCompiling: false,
   error: null as string | null,
   isDirty: false,
+  hasUnsavedLocalChanges: false,
   lastSaved: null as Date | null,
   lastCompiled: null as Date | null,
+  originalContent: '',
 });
+
+// LocalStorage keys
+const getContextLocalStorageKey = (projectId: string) => `context-editor-unsaved-${projectId}`;
+const getContextTimestampKey = (projectId: string) => `context-editor-timestamp-${projectId}`;
+
+// Save to localStorage utility
+const saveToLocalStorage = (projectId: string, content: string) => {
+  try {
+    localStorage.setItem(getContextLocalStorageKey(projectId), content);
+    localStorage.setItem(getContextTimestampKey(projectId), new Date().toISOString());
+  } catch (error) {
+    console.warn('Failed to save to localStorage:', error);
+  }
+};
+
+// Load from localStorage utility
+const loadFromLocalStorage = (projectId: string) => {
+  try {
+    const content = localStorage.getItem(getContextLocalStorageKey(projectId));
+    const timestamp = localStorage.getItem(getContextTimestampKey(projectId));
+    if (content && timestamp) {
+      return {
+        content,
+        timestamp: new Date(timestamp)
+      };
+    }
+  } catch (error) {
+    console.warn('Failed to load from localStorage:', error);
+  }
+  return null;
+};
+
+// Clear localStorage utility
+const clearLocalStorage = (projectId: string) => {
+  try {
+    localStorage.removeItem(getContextLocalStorageKey(projectId));
+    localStorage.removeItem(getContextTimestampKey(projectId));
+  } catch (error) {
+    console.warn('Failed to clear localStorage:', error);
+  }
+};
 
 export function ContextEditor({ projectId }: ContextEditorProps) {
   const state = useSnapshot(contextEditorState);
@@ -51,18 +94,59 @@ export function ContextEditor({ projectId }: ContextEditorProps) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [projectId]);
 
+  // Auto-save to localStorage when content changes and is dirty
+  useEffect(() => {
+    if (contextEditorState.isDirty && contextEditorState.sourceContent !== contextEditorState.originalContent) {
+      const timeoutId = setTimeout(() => {
+        saveToLocalStorage(projectId, contextEditorState.sourceContent);
+      }, 1000); // Debounce for 1 second
+
+      return () => clearTimeout(timeoutId);
+    }
+  }, [contextEditorState.sourceContent, contextEditorState.isDirty, contextEditorState.originalContent, projectId]);
+
+  // Update hasUnsavedLocalChanges based on localStorage state
+  useEffect(() => {
+    const checkUnsavedLocalChanges = () => {
+      const localData = loadFromLocalStorage(projectId);
+      if (localData && localData.content !== contextEditorState.originalContent) {
+        contextEditorState.hasUnsavedLocalChanges = true;
+      } else {
+        contextEditorState.hasUnsavedLocalChanges = false;
+      }
+    };
+
+    checkUnsavedLocalChanges();
+  }, [contextEditorState.originalContent, projectId]);
+
   const loadContext = async () => {
     contextEditorState.isLoading = true;
     contextEditorState.error = null;
-    
+
     try {
       const response = await api.get(`/projects/${projectId}/context`);
-      contextEditorState.sourceContent = response.context || '';
+      const serverContent = response.context || '';
+      contextEditorState.originalContent = serverContent;
       contextEditorState.compiledContent = response.context_compiled || '';
-      contextEditorState.lastCompiled = response.context_compiled_at 
-        ? new Date(response.context_compiled_at) 
+      contextEditorState.lastCompiled = response.context_compiled_at
+        ? new Date(response.context_compiled_at)
         : null;
-      contextEditorState.isDirty = false;
+
+      // Check if there's unsaved content in localStorage
+      const localData = loadFromLocalStorage(projectId);
+      if (localData && localData.content !== serverContent) {
+        // Use the unsaved local content
+        contextEditorState.sourceContent = localData.content;
+        contextEditorState.isDirty = true;
+        contextEditorState.hasUnsavedLocalChanges = true;
+      } else {
+        // Use the server content
+        contextEditorState.sourceContent = serverContent;
+        contextEditorState.isDirty = false;
+        contextEditorState.hasUnsavedLocalChanges = false;
+        // Clear localStorage since it matches server
+        clearLocalStorage(projectId);
+      }
     } catch (error: any) {
       contextEditorState.error = error.response?.data?.message || 'Failed to load context';
     } finally {
@@ -73,15 +157,22 @@ export function ContextEditor({ projectId }: ContextEditorProps) {
   const saveContext = async () => {
     contextEditorState.isSaving = true;
     contextEditorState.error = null;
-    
+
     try {
       // First save the context
       await api.put(`/projects/${projectId}/context`, {
         context: contextEditorState.sourceContent,
       });
+
+      // Update state after successful save
+      contextEditorState.originalContent = contextEditorState.sourceContent;
       contextEditorState.isDirty = false;
+      contextEditorState.hasUnsavedLocalChanges = false;
       contextEditorState.lastSaved = new Date();
-      
+
+      // Clear localStorage since content is now saved on server
+      clearLocalStorage(projectId);
+
       // Then compile it automatically
       const response = await api.post(`/projects/${projectId}/context/compile`);
       contextEditorState.compiledContent = response.compiled || '';
@@ -128,9 +219,18 @@ export function ContextEditor({ projectId }: ContextEditorProps) {
   const handleEditorChange = (value: string | undefined) => {
     if (value !== undefined) {
       contextEditorState.sourceContent = value;
-      contextEditorState.isDirty = true;
+      contextEditorState.isDirty = value !== contextEditorState.originalContent;
     }
   };
+
+  const resetToOriginal = useCallback(() => {
+    if (contextEditorState.hasUnsavedLocalChanges) {
+      contextEditorState.sourceContent = contextEditorState.originalContent;
+      contextEditorState.isDirty = false;
+      contextEditorState.hasUnsavedLocalChanges = false;
+      clearLocalStorage(projectId);
+    }
+  }, [projectId]);
 
   if (state.isLoading) {
     return (
@@ -151,8 +251,25 @@ export function ContextEditor({ projectId }: ContextEditorProps) {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            {state.isDirty && (
+            {state.hasUnsavedLocalChanges && (
+              <div className="flex items-center gap-1 text-sm text-amber-600 bg-amber-50 px-2 py-1 rounded border border-amber-200">
+                <span className="w-2 h-2 bg-amber-500 rounded-full"></span>
+                <span>Unsaved changes (auto-saved locally)</span>
+              </div>
+            )}
+            {state.isDirty && !state.hasUnsavedLocalChanges && (
               <span className="text-sm text-muted-foreground">Unsaved changes</span>
+            )}
+            {state.hasUnsavedLocalChanges && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={resetToOriginal}
+                className="text-amber-700 border-amber-300 hover:bg-amber-100"
+              >
+                <RotateCcw className="h-4 w-4 mr-1" />
+                Reset
+              </Button>
             )}
             <Dialog>
               <DialogTrigger asChild>
@@ -252,6 +369,14 @@ return \`Messages in last 24h: \${recent[0].count}\`;
       {state.error && (
         <Alert variant="destructive" className="mx-4 mt-4">
           <AlertDescription>{state.error}</AlertDescription>
+        </Alert>
+      )}
+      {state.hasUnsavedLocalChanges && (
+        <Alert className="mx-4 mt-4 border-amber-200 bg-amber-50">
+          <AlertDescription className="text-amber-800">
+            <strong>Content restored from auto-save:</strong> Your latest changes have been recovered from browser storage.
+            You can continue editing or click "Reset" to discard these changes and return to the last saved version.
+          </AlertDescription>
         </Alert>
       )}
       

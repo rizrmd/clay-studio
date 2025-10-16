@@ -80,6 +80,18 @@ export const useChat = () => {
     // Handle errors
     const handleError = (message: ServerMessage & { type: "error" }) => {
       console.error("Chat error:", message.error);
+
+      // Check if this is a "conversation not found" error and redirect appropriately
+      if (message.error.includes("not found") && message.conversation_id) {
+        // Clear the loading state for this conversation
+        chatStore.loadingMessages[message.conversation_id] = false;
+
+        // If we're currently viewing this non-existent conversation, redirect to /new
+        if (chatStore.conversation_id === message.conversation_id) {
+          chatStore.conversation_id = "";
+          navigate(`/p/${chatStore.project_id}/new`);
+        }
+      }
       // Could add error state to store if needed
     };
 
