@@ -35,6 +35,9 @@ export function LoginForm({ onSwitchToRegister }: LoginFormProps) {
     
     try {
       await login(data.username, data.password)
+      // Force page reload to ensure session state is properly loaded
+      // and navigation redirects to the correct page
+      window.location.href = '/projects'
     } catch (err: any) {
       setError(err.message || 'Login failed')
     } finally {

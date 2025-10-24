@@ -44,6 +44,9 @@ export function RegisterForm({ onSwitchToLogin }: RegisterFormProps) {
     
     try {
       await register(data.username, data.password, data.inviteCode)
+      // Force page reload to ensure session state is properly loaded
+      // and navigation redirects to the correct page (projects or chat)
+      window.location.href = '/projects'
     } catch (err: any) {
       setError(err.message || 'Registration failed')
     } finally {
