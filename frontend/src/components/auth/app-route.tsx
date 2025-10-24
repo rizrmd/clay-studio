@@ -50,6 +50,11 @@ export function AppRoute({ children, fallback }: AppRouteProps) {
       if (isChatRoute) {
         return <>{children}</>
       }
+      // Allow access to project routes (user might have just created their first project)
+      const isProjectRoute = location.pathname.startsWith('/p/')
+      if (isProjectRoute) {
+        return <>{children}</>
+      }
       // For root path, redirect to projects
       if (location.pathname === '/') {
         return <Navigate to="/projects" replace />

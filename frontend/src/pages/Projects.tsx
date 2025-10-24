@@ -14,6 +14,7 @@ import {
 import { api } from "@/lib/utils/api";
 import { useAuth } from "@/hooks/use-auth";
 import { projectsStore, projectsActions } from "@/lib/store/projects-store";
+import { checkAuthStatus } from "@/lib/store/auth-store";
 import { AppLayout } from "@/components/layout/app-layout";
 import { ProjectsSkeleton } from "@/components/projects/projects-skeleton";
 import {
@@ -78,6 +79,9 @@ export function ProjectsPage() {
 
       projectsActions.addProject(newProject);
       projectsActions.clearNewProjectForm();
+
+      // Refresh auth status to update isSetupComplete flag
+      await checkAuthStatus();
 
       // Navigate to chat with the new project
       navigate(`/p/${newProject.id}/new`);
