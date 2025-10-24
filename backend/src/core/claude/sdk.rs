@@ -294,17 +294,17 @@ impl ClaudeSDK {
             // Add native tools to allowed tools
             allowed_mcp_tools.push("WebSearch".to_string());
             allowed_mcp_tools.push("WebFetch".to_string());
-            allowed_mcp_tools.push("view".to_string());
-            
+            allowed_mcp_tools.push("Read".to_string());
+
             if !allowed_mcp_tools.is_empty() {
                 let allowed_tools_list = allowed_mcp_tools.join(",");
                 cmd_builder.arg("--allowedTools")
                     .arg(allowed_tools_list);
             }
 
-            // Add disallowed tools (note: view is now allowed as native tool)
+            // Add disallowed tools (note: Read is now allowed as native tool for viewing images)
             cmd_builder.arg("--disallowedTools")
-                .arg("Bash,Glob,LS,Read,Edit,MultiEdit,Grep,NotebookEdit,ExitPlanMode,BashOutput,KillBash");
+                .arg("Bash,Glob,LS,Edit,MultiEdit,Grep,NotebookEdit,ExitPlanMode,BashOutput,KillBash");
 
             cmd_builder.arg("--output-format")
                 .arg("stream-json")

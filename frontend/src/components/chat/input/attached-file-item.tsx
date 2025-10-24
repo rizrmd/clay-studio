@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 interface AttachedFileItemProps {
-  file: File;
+  file: File | null | undefined;
   description: string;
   preview?: string;
   isEditingDescription: boolean;
@@ -23,7 +23,13 @@ export function AttachedFileItem({
   onToggleEdit,
   onUpdateDescription,
 }: AttachedFileItemProps) {
-  const isImage = file.type.startsWith("image/");
+  // Ensure file exists and has required properties
+  if (!file) {
+    console.error("AttachedFileItem: file prop is undefined");
+    return null;
+  }
+
+  const isImage = file.type?.startsWith("image/") || false;
 
   return (
     <div className="border rounded-lg p-2 space-y-2">
@@ -45,7 +51,7 @@ export function AttachedFileItem({
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between">
             <span className="text-sm font-medium truncate">
-              {file?.name}
+              {file?.name || "Unknown file"}
             </span>
             <button
               type="button"
@@ -90,7 +96,7 @@ export function AttachedFileItem({
                 <div className="text-xs text-muted-foreground">
                   <div>{description || "No description"}</div>
                   <div className="opacity-70 mt-1">
-                    {Math.round(file.size / 1024)} KB •{" "}
+                    {file.size ? `${Math.round(file.size / 1024)} KB` : "Unknown size"} •{" "}
                     {file.type || "Unknown type"}
                   </div>
                 </div>

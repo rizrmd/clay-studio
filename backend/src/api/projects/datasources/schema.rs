@@ -656,9 +656,10 @@ async fn get_file_table_structure(
     if let Some(tables) = schema.get("tables") {
         if let Some(table_data) = tables.get(table_name) {
             // Extract columns from the table data
+            let empty_vec = vec![];
             let columns_array = table_data.get("columns")
                 .and_then(|c| c.as_array())
-                .unwrap_or(&serde_json::json!([]));
+                .unwrap_or(&empty_vec);
 
             let mut columns = Vec::new();
             for col_data in columns_array {

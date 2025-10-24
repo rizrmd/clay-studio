@@ -12,18 +12,30 @@ pub async fn associate_files_with_message(
     file_ids: Vec<Uuid>,
 ) -> Result<(), AppError> {
     for file_id in file_ids {
-        sqlx::query(
-            "INSERT INTO message_files (id, message_id, file_id, created_at) 
-             VALUES ($1, $2, $3, $4)
-             ON CONFLICT (message_id, file_id) DO NOTHING"
+        // Check if the association already exists to avoid duplicates
+        let existing = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM message_files WHERE message_id = $1 AND file_id = $2"
         )
-        .bind(Uuid::new_v4())
         .bind(message_id)
         .bind(file_id)
-        .bind(Utc::now())
-        .execute(pool)
+        .fetch_one(pool)
         .await
-        .map_err(|e| AppError::InternalServerError(format!("Failed to associate file with message: {}", e)))?;
+        .map_err(|e| AppError::InternalServerError(format!("Failed to check existing association: {}", e)))?;
+
+        if existing == 0 {
+            // Only insert if it doesn't already exist
+            sqlx::query(
+                "INSERT INTO message_files (id, message_id, file_id, created_at)
+                 VALUES ($1, $2, $3, $4)"
+            )
+            .bind(Uuid::new_v4())
+            .bind(message_id)
+            .bind(file_id)
+            .bind(Utc::now())
+            .execute(pool)
+            .await
+            .map_err(|e| AppError::InternalServerError(format!("Failed to associate file with message: {}", e)))?;
+        }
     }
     Ok(())
 }
@@ -131,21 +143,27 @@ pub fn format_files_for_prompt(files: Vec<FileUpload>) -> String {
     }
 
     let mut formatted = String::from("\n# Attached Files:\n\n");
-    
+
+    // Get the current working directory to convert relative paths to absolute
+    let current_dir = std::env::current_dir()
+        .ok()
+        .and_then(|p| p.to_str().map(|s| s.to_string()))
+        .unwrap_or_else(|| "/Users/riz/Developer/clay-studio".to_string());
+
     for (i, file) in files.iter().enumerate() {
         formatted.push_str(&format!("## File {}: {}\n", i + 1, file.original_name));
         formatted.push_str(&format!("- **File ID**: {}\n", file.id));
         formatted.push_str(&format!("- **Type**: {}\n", file.mime_type.as_deref().unwrap_or("unknown")));
         formatted.push_str(&format!("- **Size**: {} bytes\n", file.file_size));
-        
+
         if let Some(description) = &file.description {
             formatted.push_str(&format!("- **Description**: {}\n", description));
         }
-        
+
         if let Some(auto_desc) = &file.auto_description {
             formatted.push_str(&format!("- **Auto Description**: {}\n", auto_desc));
         }
-        
+
         if let Some(content) = &file.file_content {
             let preview = if content.len() > 1000 {
                 format!("{}... (truncated)", &content[..1000])
@@ -153,18 +171,33 @@ pub fn format_files_for_prompt(files: Vec<FileUpload>) -> String {
                 content.clone()
             };
             formatted.push_str(&format!("- **Content Preview**:\n```\n{}\n```\n", preview));
-        } else {
-            formatted.push_str(&format!("- **File Path**: {}\n", file.file_path));
-            if file.mime_type.as_ref().map(|mt| mt.starts_with("image/")).unwrap_or(false) {
-                formatted.push_str("- **Note**: This is an image file. Use the view tool with the file path to access and analyze the image content.\n");
-            } else {
-                formatted.push_str("- **Note**: This is a binary file. Use view tool to access if needed.\n");
-            }
         }
-        
+
+        // Always include file path for images
+        if file.mime_type.as_ref().map(|mt| mt.starts_with("image/")).unwrap_or(false) {
+            // Convert relative path to absolute path
+            let absolute_path = if file.file_path.starts_with('/') {
+                file.file_path.clone()
+            } else {
+                format!("{}/{}", current_dir, file.file_path)
+            };
+
+            formatted.push_str(&format!("- **Image File Path**: {}\n", absolute_path));
+            formatted.push_str("- **Note**: This is an image file. Use the Read tool with the file path to access and analyze the image content.\n");
+        } else if file.file_content.is_none() {
+            // Convert relative path to absolute path for non-image files too
+            let absolute_path = if file.file_path.starts_with('/') {
+                file.file_path.clone()
+            } else {
+                format!("{}/{}", current_dir, file.file_path)
+            };
+            formatted.push_str(&format!("- **File Path**: {}\n", absolute_path));
+            formatted.push_str("- **Note**: This is a binary file. Use Read tool to access if needed.\n");
+        }
+
         formatted.push('\n');
     }
-    
+
     formatted
 }
 

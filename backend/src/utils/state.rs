@@ -320,6 +320,29 @@ impl AppState {
                 None
             };
 
+            // Fetch file attachments if it's a user message
+            let file_attachments = if role == crate::models::MessageRole::User {
+                match crate::utils::message_files::get_message_files(&self.db_pool, &msg_id).await {
+                    Ok(files) => {
+                        if !files.is_empty() {
+                            let file_attachments: Vec<crate::models::file_upload::FileUploadResponse> = files
+                                .into_iter()
+                                .map(|f| f.to_response())
+                                .collect();
+                            Some(file_attachments)
+                        } else {
+                            None
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to load file attachments for message {}: {}", msg_id, e);
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+
             let progress_content: Option<String> = row.get("progress_content");
 
             let message = Message {
@@ -331,7 +354,7 @@ impl AppState {
                     .get::<DateTime<Utc>, _>("created_at")
                     .to_rfc3339()
                     .into(),
-                file_attachments: None,
+                file_attachments,
                 tool_usages,
                 progress_content: progress_content.clone(),
             };

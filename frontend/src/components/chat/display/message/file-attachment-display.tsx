@@ -48,75 +48,95 @@ export function FileAttachmentDisplay({ attachment }: FileAttachmentDisplayProps
     document.body.removeChild(link);
   };
 
+  const isImage = attachment.contentType.startsWith("image/");
   const canPreview = attachment.isTextFile && attachment.preview;
 
   return (
-    <div className="flex items-start gap-2 p-3 border rounded-lg bg-muted/50 max-w-sm">
-      <FileIcon className="h-4 w-4 mt-0.5 text-muted-foreground flex-shrink-0" />
-      
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 mb-1">
-          <span className="text-sm font-medium truncate" title={attachment.name}>
-            {attachment.name}
-          </span>
-          {canPreview && (
-            <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
-              <DialogTrigger asChild>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-6 w-6 p-0"
-                  title="Preview file"
-                >
-                  <Eye className="h-3 w-3" />
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-4xl max-h-[80vh]">
-                <DialogHeader>
-                  <DialogTitle className="flex items-center justify-between">
-                    <span>{attachment.name}</span>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={handleDownload}
-                      className="ml-2"
-                    >
-                      <Download className="h-4 w-4 mr-2" />
-                      Download
-                    </Button>
-                  </DialogTitle>
-                </DialogHeader>
-                <ScrollArea className="max-h-[60vh] w-full">
-                  <pre className="text-xs whitespace-pre-wrap break-words p-4 bg-muted rounded">
-                    {attachment.preview}
-                  </pre>
-                </ScrollArea>
-              </DialogContent>
-            </Dialog>
+    <div className="flex flex-col gap-2 p-3 border rounded-lg bg-muted/50 max-w-sm">
+      {/* Image preview */}
+      {isImage && (
+        <div className="relative w-full aspect-video rounded overflow-hidden bg-secondary">
+          <img
+            src={attachment.url}
+            alt={attachment.name}
+            className="w-full h-full object-contain cursor-pointer"
+            onClick={() => window.open(attachment.url, '_blank')}
+            onError={(e) => {
+              // If image fails to load, hide it and show icon instead
+              e.currentTarget.style.display = 'none';
+            }}
+          />
+        </div>
+      )}
+
+      {/* File info */}
+      <div className="flex items-start gap-2">
+        {!isImage && <FileIcon className="h-4 w-4 mt-0.5 text-muted-foreground flex-shrink-0" />}
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-sm font-medium truncate" title={attachment.name}>
+              {attachment.name}
+            </span>
+            {canPreview && (
+              <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+                <DialogTrigger asChild>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 w-6 p-0"
+                    title="Preview file"
+                  >
+                    <Eye className="h-3 w-3" />
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-4xl max-h-[80vh]">
+                  <DialogHeader>
+                    <DialogTitle className="flex items-center justify-between">
+                      <span>{attachment.name}</span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleDownload}
+                        className="ml-2"
+                      >
+                        <Download className="h-4 w-4 mr-2" />
+                        Download
+                      </Button>
+                    </DialogTitle>
+                  </DialogHeader>
+                  <ScrollArea className="max-h-[60vh] w-full">
+                    <pre className="text-xs whitespace-pre-wrap break-words p-4 bg-muted rounded">
+                      {attachment.preview}
+                    </pre>
+                  </ScrollArea>
+                </DialogContent>
+              </Dialog>
+            )}
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={handleDownload}
+              className="h-6 w-6 p-0"
+              title="Download file"
+            >
+              <Download className="h-3 w-3" />
+            </Button>
+          </div>
+
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <span>{formatFileSize(attachment.size)}</span>
+            <Badge variant="secondary" className="text-xs">
+              {attachment.contentType.split("/")[1]?.toUpperCase() || "FILE"}
+            </Badge>
+          </div>
+
+          {(attachment.description || attachment.autoDescription) && (
+            <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+              {attachment.description || attachment.autoDescription}
+            </p>
           )}
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={handleDownload}
-            className="h-6 w-6 p-0"
-            title="Download file"
-          >
-            <Download className="h-3 w-3" />
-          </Button>
         </div>
-        
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span>{formatFileSize(attachment.size)}</span>
-          <Badge variant="secondary" className="text-xs">
-            {attachment.contentType.split("/")[1]?.toUpperCase() || "FILE"}
-          </Badge>
-        </div>
-        
-        {(attachment.description || attachment.autoDescription) && (
-          <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
-            {attachment.description || attachment.autoDescription}
-          </p>
-        )}
       </div>
     </div>
   );

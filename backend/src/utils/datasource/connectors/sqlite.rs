@@ -736,31 +736,40 @@ impl DataSourceConnector for SQLiteConnector {
     }
 
     async fn get_table_data_with_pagination(
-        &self, 
-        table_name: &str, 
-        page: i32, 
-        limit: i32, 
-        sort_column: Option<&str>, 
+        &self,
+        table_name: &str,
+        page: i32,
+        limit: i32,
+        sort_column: Option<&str>,
         sort_direction: Option<&str>
     ) -> Result<Value, Box<dyn Error + Send + Sync>> {
-        // TODO: Implement proper pagination with total count for SQLite
         let offset = (page - 1) * limit;
+
+        // Get total count first
+        let count_query = format!("SELECT COUNT(*) as total FROM {}", table_name);
+        let count_result = self.execute_query(&count_query, 1).await?;
+        let total_rows = count_result["rows"][0][0].as_i64().unwrap_or(0);
+
+        // Build main query with sorting and pagination
         let mut query = format!("SELECT * FROM {}", table_name);
-        
+
         if let Some(sort_col) = sort_column {
             let direction = sort_direction.unwrap_or("ASC");
-            query.push_str(&format!(" ORDER BY {} {}", sort_col, direction));
+            // Sanitize column name to prevent SQL injection
+            let sanitized_col = sort_col.replace([';','"', '\''], "");
+            query.push_str(&format!(" ORDER BY {} {}", sanitized_col, direction));
         }
-        
+
         query.push_str(&format!(" LIMIT {} OFFSET {}", limit, offset));
-        
+
         let mut result = self.execute_query(&query, limit).await?;
-        
-        // Add pagination metadata (temporary - needs proper total count)
-        result["total_rows"] = json!(result["row_count"]);
+
+        // Add proper pagination metadata
+        result["total_rows"] = json!(total_rows);
         result["page"] = json!(page);
         result["page_size"] = json!(limit);
-        
+        result["total_pages"] = json!((total_rows as f64 / limit as f64).ceil() as i32);
+
         Ok(result)
     }
 }

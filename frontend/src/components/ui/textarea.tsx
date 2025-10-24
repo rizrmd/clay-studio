@@ -80,7 +80,7 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
     const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       setHasContent(!!e.target.value);
       isUserTyping.current = true;
-      
+
       // Store cursor position before change
       if (textareaRef.current) {
         cursorPositionRef.current = {
@@ -88,9 +88,23 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
           end: textareaRef.current.selectionEnd
         };
       }
-      
+
       props.onChange?.(e);
     };
+
+    // Update hasContent when value prop changes and restore cursor position if user was typing
+    React.useEffect(() => {
+      if (props.value !== undefined) {
+        setHasContent(!!props.value);
+
+        // Restore cursor position if user was typing
+        if (isUserTyping.current && cursorPositionRef.current && textareaRef.current) {
+          const { start, end } = cursorPositionRef.current;
+          textareaRef.current.setSelectionRange(start, end);
+          isUserTyping.current = false;
+        }
+      }
+    }, [props.value]);
 
     const main = (
       <textarea
@@ -109,20 +123,6 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
     if (!placeholderSecondary) {
       return main;
     }
-
-    // Update hasContent when value prop changes and restore cursor position if user was typing
-    React.useEffect(() => {
-      if (props.value !== undefined) {
-        setHasContent(!!props.value);
-        
-        // Restore cursor position if user was typing
-        if (isUserTyping.current && cursorPositionRef.current && textareaRef.current) {
-          const { start, end } = cursorPositionRef.current;
-          textareaRef.current.setSelectionRange(start, end);
-          isUserTyping.current = false;
-        }
-      }
-    }, [props.value]);
 
     return (
       <div className="relative">

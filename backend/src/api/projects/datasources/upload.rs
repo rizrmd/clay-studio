@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::utils::middleware::{get_current_user_id, is_current_user_root};
 use crate::utils::{get_app_state, AppError};
 
-use super::types::{CreateDatasourceRequest, DatasourceResponse};
+use super::types::DatasourceResponse;
 
 /// Upload a file and create a datasource
 #[handler]
@@ -52,14 +52,12 @@ pub async fn upload_file_datasource(
 
     // Extract fields from form
     let name = form_data.fields.get("name")
-        .and_then(|v| v.first())
-        .and_then(|s| s.as_str())
-        .ok_or_else(|| AppError::BadRequest("Missing name field"))?;
+        .map(|v| v.as_str())
+        .ok_or_else(|| AppError::BadRequest("Missing name field".to_string()))?;
 
     let source_type = form_data.fields.get("source_type")
-        .and_then(|v| v.first())
-        .and_then(|s| s.as_str())
-        .ok_or_else(|| AppError::BadRequest("Missing source_type field"))?;
+        .map(|v| v.as_str())
+        .ok_or_else(|| AppError::BadRequest("Missing source_type field".to_string()))?;
 
     // Validate source type
     let valid_types = ["csv", "excel", "json"];
@@ -69,12 +67,12 @@ pub async fn upload_file_datasource(
 
     // Get file from form
     let file = form_data.files.get("file")
-        .and_then(|files| files.first())
-        .ok_or_else(|| AppError::BadRequest("Missing file field"))?;
+        
+        .ok_or_else(|| AppError::BadRequest("Missing file field".to_string()))?;
 
     // Validate file
-    let file_extension = Path::new(&file.name)
-        .extension()
+    let file_extension = file.name()
+        .and_then(|name| Path::new(name).extension())
         .and_then(|s| s.to_str())
         .map(|s| s.to_lowercase())
         .unwrap_or_default();
@@ -107,8 +105,16 @@ pub async fn upload_file_datasource(
     let file_name = format!("{}{}", datasource_id, file_extension_with_dot);
     let file_path = format!("{}/{}", upload_dir, file_name);
 
-    // Save file
-    fs::write(&file_path, &file.data)
+    // Save file - try to get file data from the uploaded file
+    let file_data = if !file.path().as_os_str().is_empty() {
+        let path = file.path();
+        fs::read(path)
+            .map_err(|e| AppError::InternalServerError(format!("Failed to read file from path: {}", e)))?
+    } else {
+        return Err(AppError::BadRequest("Unable to access file data from uploaded file".to_string()));
+    };
+
+    fs::write(&file_path, file_data)
         .map_err(|e| AppError::InternalServerError(format!("Failed to save file: {}", e)))?;
 
     // Get file metadata
@@ -121,13 +127,13 @@ pub async fn upload_file_datasource(
         "csv" => {
             // Extract parsing options from form
             let delimiter = form_data.fields.get("delimiter")
-                .and_then(|v| v.first())
-                .and_then(|s| s.as_str())
+                .map(|v| v.as_str())
+                
                 .unwrap_or(",");
 
             let has_header = form_data.fields.get("has_header")
-                .and_then(|v| v.first())
-                .and_then(|s| s.as_str())
+                .map(|v| v.as_str())
+                
                 .unwrap_or("true") == "true";
 
             json!({
@@ -142,12 +148,12 @@ pub async fn upload_file_datasource(
         },
         "excel" => {
             let sheet_name = form_data.fields.get("sheet_name")
-                .and_then(|v| v.first())
-                .and_then(|s| s.as_str());
+                .map(|v| v.as_str())
+                ;
 
             let header_row = form_data.fields.get("header_row")
-                .and_then(|v| v.first())
-                .and_then(|s| s.as_str())
+                .map(|v| v.as_str())
+                
                 .and_then(|s| s.parse::<u64>().ok());
 
             let mut config = json!({
@@ -167,12 +173,12 @@ pub async fn upload_file_datasource(
         },
         "json" => {
             let root_path = form_data.fields.get("root_path")
-                .and_then(|v| v.first())
-                .and_then(|s| s.as_str());
+                .map(|v| v.as_str())
+                ;
 
             let array_path = form_data.fields.get("array_path")
-                .and_then(|v| v.first())
-                .and_then(|s| s.as_str());
+                .map(|v| v.as_str())
+                ;
 
             let mut config = json!({
                 "file_path": file_path
@@ -208,9 +214,9 @@ pub async fn upload_file_datasource(
     .bind(file_size as i64)
     .bind(&file_extension)
     .bind(json!({
-        "original_name": file.name,
+        "original_name": file.name().unwrap_or("unknown"),
         "uploaded_at": now.to_rfc3339(),
-        "mime_type": file.mime_type
+        "mime_type": file.content_type().map(|ct| ct.to_string()).unwrap_or_else(|| "application/octet-stream".to_string())
     }))
     .bind(now)
     .bind(now)
@@ -244,8 +250,8 @@ pub async fn preview_file(
     res: &mut Response,
     depot: &mut Depot,
 ) -> Result<(), AppError> {
-    let state = get_app_state(depot)?;
-    let user_id = get_current_user_id(depot)?;
+    let _state = get_app_state(depot)?;
+    let _user_id = get_current_user_id(depot)?;
 
     // Get form data
     let form_data = req.form_data().await
@@ -253,9 +259,9 @@ pub async fn preview_file(
 
     // Get source type from form
     let source_type = form_data.fields.get("source_type")
-        .and_then(|v| v.first())
-        .and_then(|s| s.as_str())
-        .ok_or_else(|| AppError::BadRequest("Missing source_type field"))?;
+        .map(|v| v.as_str())
+        
+        .ok_or_else(|| AppError::BadRequest("Missing source_type field".to_string()))?;
 
     // Validate source type
     let valid_types = ["csv", "excel", "json"];
@@ -265,32 +271,40 @@ pub async fn preview_file(
 
     // Get file from form
     let file = form_data.files.get("file")
-        .and_then(|files| files.first())
-        .ok_or_else(|| AppError::BadRequest("Missing file field"))?;
+        
+        .ok_or_else(|| AppError::BadRequest("Missing file field".to_string()))?;
 
     // Create temporary file for preview
     let temp_dir = "temp/previews";
     fs::create_dir_all(temp_dir)
         .map_err(|e| AppError::InternalServerError(format!("Failed to create temp directory: {}", e)))?;
 
-    let temp_filename = format!("preview_{}_{}", Uuid::new_v4(), file.name);
+    let temp_filename = format!("preview_{}_{}", Uuid::new_v4(), file.name().unwrap_or("temp"));
     let temp_path = format!("{}/{}", temp_dir, temp_filename);
 
-    // Save temporary file
-    fs::write(&temp_path, &file.data)
+    // Save temporary file - try to get file data from the uploaded file
+    let temp_file_data = if !file.path().as_os_str().is_empty() {
+        let path = file.path();
+        fs::read(&path)
+            .map_err(|e| AppError::InternalServerError(format!("Failed to read temp file from path: {}", e)))?
+    } else {
+        return Err(AppError::BadRequest("Unable to access temp file data from uploaded file".to_string()));
+    };
+
+    fs::write(&temp_path, temp_file_data)
         .map_err(|e| AppError::InternalServerError(format!("Failed to save temp file: {}", e)))?;
 
     // Create a temporary connector to preview the data
     let preview_result = match source_type {
         "csv" => {
             let delimiter = form_data.fields.get("delimiter")
-                .and_then(|v| v.first())
-                .and_then(|s| s.as_str())
+                .map(|v| v.as_str())
+                
                 .unwrap_or(",");
 
             let has_header = form_data.fields.get("has_header")
-                .and_then(|v| v.first())
-                .and_then(|s| s.as_str())
+                .map(|v| v.as_str())
+                
                 .unwrap_or("true") == "true";
 
             let config = json!({
@@ -307,12 +321,12 @@ pub async fn preview_file(
         },
         "excel" => {
             let sheet_name = form_data.fields.get("sheet_name")
-                .and_then(|v| v.first())
-                .and_then(|s| s.as_str());
+                .map(|v| v.as_str())
+                ;
 
             let header_row = form_data.fields.get("header_row")
-                .and_then(|v| v.first())
-                .and_then(|s| s.as_str())
+                .map(|v| v.as_str())
+                
                 .and_then(|s| s.parse::<usize>().ok());
 
             let mut config = json!({
@@ -333,12 +347,12 @@ pub async fn preview_file(
         },
         "json" => {
             let root_path = form_data.fields.get("root_path")
-                .and_then(|v| v.first())
-                .and_then(|s| s.as_str());
+                .map(|v| v.as_str())
+                ;
 
             let array_path = form_data.fields.get("array_path")
-                .and_then(|v| v.first())
-                .and_then(|s| s.as_str());
+                .map(|v| v.as_str())
+                ;
 
             let mut config = json!({
                 "file_path": temp_path
@@ -362,7 +376,7 @@ pub async fn preview_file(
 
     match preview_result {
         Ok(preview) => {
-            res.render(json!(preview));
+            res.render(Text::Json(serde_json::to_string(&preview).unwrap()));
             Ok(())
         },
         Err(e) => Err(e),

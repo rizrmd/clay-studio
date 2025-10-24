@@ -95,6 +95,29 @@ pub async fn get_conversation_messages(
             None
         };
 
+        // Fetch file attachments if it's a user message
+        let file_attachments = if msg_role == "user" {
+            match crate::utils::message_files::get_message_files(&state.db_pool, &msg_id).await {
+                Ok(files) => {
+                    if !files.is_empty() {
+                        let file_attachments: Vec<crate::models::file_upload::FileUploadResponse> = files
+                            .into_iter()
+                            .map(|f| f.to_response())
+                            .collect();
+                        Some(file_attachments)
+                    } else {
+                        None
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("Failed to load file attachments for message {}: {}", msg_id, e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         let msg_created_at = row
             .try_get::<chrono::DateTime<Utc>, _>("created_at")
             .map_err(|e| {
@@ -116,6 +139,7 @@ pub async fn get_conversation_messages(
             role: msg_role,
             created_at: msg_created_at.to_rfc3339(),
             processing_time_ms: row.try_get("processing_time_ms").ok(),
+            file_attachments,
             tool_usages,
             progress_content: row.try_get("progress_content").ok(),
         });

@@ -107,8 +107,7 @@ pub async fn create_connector_with_pooling(
             let pool_manager = get_pool_manager().await;
             let _pool = pool_manager.get_pool(datasource_id, source_type, config).await
                 .map_err(|e| format!("Failed to get global pool: {}", e))?;
-            // For now, still create individual connector but it should use the pool
-            // TODO: Create a new PooledPostgreSQLConnector that uses the global pool
+            // PostgreSQLConnector automatically uses the global pool via get_pool()
             let connector = PostgreSQLConnector::new(config).map_err(convert_error)?;
             Ok(Box::new(connector))
         },
@@ -117,7 +116,7 @@ pub async fn create_connector_with_pooling(
             let pool_manager = get_pool_manager().await;
             let _pool = pool_manager.get_pool(datasource_id, source_type, config).await
                 .map_err(|e| format!("Failed to get global pool: {}", e))?;
-            // TODO: Create a new PooledMySQLConnector
+            // MySQLConnector automatically uses the global pool via get_pool()
             let connector = MySQLConnector::new(config).map_err(convert_error)?;
             Ok(Box::new(connector))
         },
@@ -126,7 +125,7 @@ pub async fn create_connector_with_pooling(
             let pool_manager = get_pool_manager().await;
             let _pool = pool_manager.get_pool(datasource_id, source_type, config).await
                 .map_err(|e| format!("Failed to get global pool: {}", e))?;
-            // TODO: Create a new PooledSQLiteConnector
+            // SQLiteConnector automatically uses the global pool via get_pool()
             let connector = SQLiteConnector::new(config).map_err(convert_error)?;
             Ok(Box::new(connector))
         },

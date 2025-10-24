@@ -132,6 +132,12 @@ export function FileBrowser({
 
       if (response.ok) {
         const data = await response.json();
+        console.log('[FileBrowser] Loaded files:', data.map((f: any) => ({
+          id: f.id,
+          name: f.original_name,
+          mime_type: f.mime_type,
+          size: f.file_size
+        })));
         setFiles(data);
       }
     } catch (error) {

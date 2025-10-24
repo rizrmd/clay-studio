@@ -1,10 +1,10 @@
-use super::super::core::base::{format_bytes, DataSourceConnector};
-use super::duckdb_wrapper::{create_duckdb_wrapper, DuckDBWrapper};
+use crate::utils::datasource::core::base::{format_bytes, DataSourceConnector};
+// use crate::utils::datasource::duckdb_wrapper::DuckDBWrapper;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::error::Error;
 use std::fs::File;
-use std::io::{BufReader, BufRead, Read};
+use std::io::{BufReader, BufRead};
 use std::path::Path;
 use std::time::Instant;
 use tracing::{debug, error, info};
@@ -20,8 +20,8 @@ pub struct CsvConnector {
     flexible: bool,
     schema_cache: Option<Value>,
     file_metadata: FileMetadata,
-    duckdb_wrapper: Option<DuckDBWrapper>,
-    use_duckdb: bool,
+    // duckdb_wrapper: Option<DuckDBWrapper>,
+    // use_duckdb: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -98,13 +98,15 @@ impl CsvConnector {
                 column_count: 0,
                 estimated_row_count: None,
             },
+            // duckdb_wrapper: None,
+            // use_duckdb: false,
         };
 
         // Load file metadata
         connector.load_file_metadata()?;
 
         // Initialize DuckDB wrapper for full SQL support
-        connector.init_duckdb()?;
+        // connector.init_duckdb()?;
 
         Ok(connector)
     }
@@ -181,7 +183,7 @@ impl CsvConnector {
 
         // Skip rows if configured
         for _ in 0..self.skip_rows {
-            if !reader.records().next().is_some() {
+            if reader.records().next().is_none() {
                 break;
             }
         }
@@ -198,7 +200,7 @@ impl CsvConnector {
         let mut float_count = 0;
         let mut bool_count = 0;
         let mut date_count = 0;
-        let null_count = 0;
+        let _null_count = 0;
         let total_non_null = values.iter().filter(|v| !v.is_empty() && *v != "NULL" && *v != "null").count();
 
         for value in values {
@@ -290,6 +292,7 @@ impl CsvConnector {
         Ok((headers, rows))
     }
 
+    /*
     /// Initialize DuckDB wrapper for SQL support
     fn init_duckdb(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
         // Try to initialize DuckDB wrapper
@@ -325,6 +328,7 @@ impl CsvConnector {
             }
         }
     }
+    */
 }
 
 #[async_trait]
@@ -333,6 +337,7 @@ impl DataSourceConnector for CsvConnector {
         info!("Testing CSV file connection: {}", self.file_path);
 
         // First try DuckDB if available
+        /*
         if self.use_duckdb {
             if let Some(ref mut wrapper) = self.duckdb_wrapper {
                 match wrapper.test_connection().await {
@@ -351,6 +356,7 @@ impl DataSourceConnector for CsvConnector {
                 }
             }
         }
+        */
 
         // Fallback to basic CSV testing
         match self.create_reader() {
@@ -380,8 +386,9 @@ impl DataSourceConnector for CsvConnector {
 
     async fn execute_query(&self, query: &str, limit: i32) -> Result<Value, Box<dyn Error + Send + Sync>> {
         // Use DuckDB for full SQL support if available
+        /*
         if self.use_duckdb {
-            if let Some(ref mut wrapper) = self.duckdb_wrapper {
+            if let Some(ref wrapper) = self.duckdb_wrapper {
                 debug!("Executing CSV query with DuckDB: {}", query);
                 match wrapper.execute_query(query, limit).await {
                     Ok(result) => {
@@ -395,6 +402,7 @@ impl DataSourceConnector for CsvConnector {
                 }
             }
         }
+        */
 
         // Fallback to basic CSV functionality (limited SELECT * queries)
         let filename = Path::new(&self.file_path)
@@ -505,13 +513,14 @@ impl DataSourceConnector for CsvConnector {
             return Ok(cached_schema.clone());
         }
 
-        // Use DuckDB for better schema analysis if available
+        // DuckDB integration temporarily disabled due to thread safety issues
+        // TODO: Re-enable when proper thread-safe DuckDB integration is implemented
+        /*
         if self.use_duckdb {
             if let Some(ref wrapper) = self.duckdb_wrapper {
                 match wrapper.fetch_schema().await {
                     Ok(schema) => {
                         info!("DuckDB CSV schema fetched successfully");
-                        self.schema_cache = Some(schema.clone());
                         return Ok(schema);
                     },
                     Err(e) => {
@@ -521,6 +530,7 @@ impl DataSourceConnector for CsvConnector {
                 }
             }
         }
+        */
 
         // Fallback to basic CSV schema
         let start = Instant::now();
@@ -566,7 +576,7 @@ impl DataSourceConnector for CsvConnector {
             },
             "refreshed_at": chrono::Utc::now().to_rfc3339(),
             "generation_time_ms": start.elapsed().as_millis(),
-            "sql_support": if self.use_duckdb { "full" } else { "basic" }
+            "sql_support": "basic" // DuckDB integration temporarily disabled
         });
 
         Ok(schema)
@@ -587,7 +597,7 @@ impl DataSourceConnector for CsvConnector {
             .and_then(|s| s.to_str())
             .unwrap_or("data");
 
-        let schema = self.fetch_schema().await?;
+        let _schema = self.fetch_schema().await?;
 
         Ok(json!({
             "database_schema": "file",
@@ -635,7 +645,7 @@ impl DataSourceConnector for CsvConnector {
                         "primary_keys": [],
                         "foreign_keys": [],
                         "row_count": self.file_metadata.estimated_row_count.unwrap_or(0),
-                        "sample_data": sample_rows.iter().enumerate().map(|(i, row)| {
+                        "sample_data": sample_rows.iter().map(|row| {
                             let mut row_obj = json!({});
                             for (j, val) in row.iter().enumerate() {
                                 if let Some(col_name) = headers.get(j) {

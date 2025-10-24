@@ -41,15 +41,20 @@ export function MessageItem({
   // Convert file attachments to the expected format with proper download URLs
   const experimental_attachments = message.file_attachments?.map(
     (attachment) => {
-      // Extract client_id and project_id from file_path
-      // file_path format: .clients/{client_id}/{project_id}/uploads/{file_name}
-      const pathParts = attachment.file_path.split('/');
-      const clientId = pathParts[1]; // clients/{client_id}
-      const projectId = pathParts[2]; // {project_id}
-      const fileName = pathParts[pathParts.length - 1]; // {file_name}
-      
-      const downloadUrl = `/api/uploads/${clientId}/${projectId}/${fileName}`;
-      
+      let downloadUrl = "";
+
+      // Only parse file_path if it's not empty (optimistic messages have empty file_path)
+      if (attachment.file_path) {
+        // Extract client_id and project_id from file_path
+        // file_path format: .clients/{client_id}/{project_id}/uploads/{file_name}
+        const pathParts = attachment.file_path.split('/');
+        const clientId = pathParts[1]; // clients/{client_id}
+        const projectId = pathParts[2]; // {project_id}
+        const fileName = pathParts[pathParts.length - 1]; // {file_name}
+
+        downloadUrl = `/api/uploads/${clientId}/${projectId}/${fileName}`;
+      }
+
       return {
         id: attachment.id,
         name: attachment.original_name,
@@ -131,17 +136,19 @@ export function MessageItem({
       {fileAttachments && fileAttachments.length > 0 ? (
         <div className="mb-2 flex flex-wrap gap-2">
           {fileAttachments.map((attachment, index) => (
-            <FileAttachmentDisplay 
-              key={attachment.id || index} 
+            <FileAttachmentDisplay
+              key={attachment.id || index}
               attachment={attachment}
             />
           ))}
         </div>
       ) : null}
 
-      <div className={className}>
-        <MarkdownRenderer>{message.content}</MarkdownRenderer>
-      </div>
+      {message.content && (
+        <div className={className}>
+          <MarkdownRenderer>{message.content}</MarkdownRenderer>
+        </div>
+      )}
 
       {showTimeStamp && createdAt && isUser ? (
         <Timestamp

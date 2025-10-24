@@ -1,5 +1,5 @@
 //! ClickHouse Client Pool Manager
-//! 
+//!
 //! ClickHouse uses HTTP connections, so we pool the ClickHouse client instances
 //! which internally handle HTTP connection pooling through the underlying HTTP client
 
@@ -128,12 +128,12 @@ impl ClickHouseClientPool {
         };
 
         debug!("Creating ClickHouse client with URL: {}", Self::mask_url(&url));
-        
-        // Create client with optimized HTTP client settings for connection pooling
+
+        // Create client with URL and default settings
+        // Note: Current version of clickhouse crate doesn't support custom HTTP clients
+        // Future versions may allow for custom HTTP client injection
         let client = Client::default()
             .with_url(url);
-            // TODO: Add custom HTTP client with better pooling settings
-            // .with_http_client(custom_http_client)
         
         Ok(client)
     }

@@ -1,8 +1,11 @@
 // Core abstractions and interfaces
 pub mod core;
 
-// Database-specific connector implementations  
+// Database-specific connector implementations
 pub mod connectors;
+
+// DuckDB wrapper for file datasources
+pub mod duckdb_wrapper;
 
 // Connection pooling logic
 pub mod pooling;

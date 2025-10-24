@@ -1,12 +1,14 @@
-use super::super::core::base::{format_bytes, DataSourceConnector};
-use super::duckdb_wrapper::{DuckDBWrapper, create_duckdb_wrapper};
+use crate::utils::datasource::core::base::{format_bytes, DataSourceConnector};
+// use crate::utils::datasource::duckdb_wrapper::{DuckDBWrapper, create_duckdb_wrapper};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::error::Error;
 use std::path::Path;
 use std::time::Instant;
 use tracing::{debug, error, info, warn};
-use calamine::{open_workbook, Reader, DataType, Xlsx};
+use calamine::{open_workbook, Reader, Xlsx, DataType as DataTypeTrait};
+
+type SheetDataResult = Result<(Vec<String>, Vec<Vec<String>>), Box<dyn Error + Send + Sync>>;
 
 pub struct ExcelConnector {
     file_path: String,
@@ -16,7 +18,7 @@ pub struct ExcelConnector {
     schema_cache: Option<Value>,
     file_metadata: ExcelFileMetadata,
     // DuckDB integration for full SQL support
-    duckdb_wrapper: Option<DuckDBWrapper>,
+    // duckdb_wrapper: Option<DuckDBWrapper>,
     use_duckdb: bool,
 }
 
@@ -90,7 +92,7 @@ impl ExcelConnector {
                 sheet_names: Vec::new(),
                 total_sheets: 0,
             },
-            duckdb_wrapper: None,
+            // duckdb_wrapper: None,
             use_duckdb: false,
         };
 
@@ -100,6 +102,7 @@ impl ExcelConnector {
         // Initialize DuckDB wrapper for SQL support
         let use_duckdb = config.get("use_duckdb").and_then(|v| v.as_bool()).unwrap_or(true);
         if use_duckdb {
+            /*
             match create_duckdb_wrapper(&json!({
                 "file_path": file_path,
                 "file_type": "excel",
@@ -116,6 +119,7 @@ impl ExcelConnector {
                     connector.use_duckdb = false;
                 }
             }
+            */
         }
 
         Ok(connector)
@@ -129,7 +133,7 @@ impl ExcelConnector {
         self.file_metadata.last_modified = metadata.modified()?.into();
 
         // Get sheet names
-        let mut excel: Xlsx<_> = open_workbook(&self.file_path)?;
+        let excel: Xlsx<_> = open_workbook(&self.file_path)?;
         self.file_metadata.sheet_names = excel.sheet_names().to_vec();
         self.file_metadata.total_sheets = self.file_metadata.sheet_names.len();
 
@@ -143,15 +147,15 @@ impl ExcelConnector {
     fn get_sheet_info(&self, sheet_name: &str) -> Result<SheetInfo, Box<dyn Error + Send + Sync>> {
         let mut excel: Xlsx<_> = open_workbook(&self.file_path)?;
 
-        if let Some(range) = excel.worksheet_range(sheet_name) {
-            let range = range?;
-            Ok(SheetInfo {
-                name: sheet_name.to_string(),
-                row_count: range.height(),
-                column_count: range.width(),
-            })
-        } else {
-            Err(format!("Sheet '{}' not found", sheet_name).into())
+        match excel.worksheet_range(sheet_name) {
+            Ok(range) => {
+                Ok(SheetInfo {
+                    name: sheet_name.to_string(),
+                    row_count: range.height(),
+                    column_count: range.width(),
+                })
+            },
+            Err(_) => Err(format!("Sheet '{}' not found", sheet_name).into())
         }
     }
 
@@ -159,11 +163,11 @@ impl ExcelConnector {
         Ok(self.file_metadata.sheet_names.clone())
     }
 
-    fn read_sheet_data(&self, sheet_name: &str, limit: Option<usize>) -> Result<(Vec<String>, Vec<Vec<String>>), Box<dyn Error + Send + Sync>> {
+    fn read_sheet_data(&self, sheet_name: &str, limit: Option<usize>) -> SheetDataResult {
         let mut excel: Xlsx<_> = open_workbook(&self.file_path)?;
 
-        if let Some(range) = excel.worksheet_range(sheet_name) {
-            let range = range?;
+        match excel.worksheet_range(sheet_name) {
+            Ok(range) => {
 
             let mut headers = Vec::new();
             let mut rows = Vec::new();
@@ -189,13 +193,21 @@ impl ExcelConnector {
                 }
 
                 let row_data: Vec<String> = row.iter()
-                    .map(|cell| match cell {
-                        DataType::Empty => String::new(),
-                        DataType::String(s) => s.clone(),
-                        DataType::Float(f) => f.to_string(),
-                        DataType::Int(i) => i.to_string(),
-                        DataType::Bool(b) => b.to_string(),
-                        DataType::Error(e) => format!("ERROR: {:?}", e),
+                    .map(|cell| {
+                        // Use is_string() etc. methods to avoid DataType enum conflicts
+                        if cell.is_string() {
+                            cell.get_string().unwrap_or("").to_string()
+                        } else if cell.is_float() {
+                            cell.get_float().unwrap_or(0.0).to_string()
+                        } else if cell.is_int() {
+                            cell.get_int().unwrap_or(0).to_string()
+                        } else if cell.is_bool() {
+                            cell.get_bool().unwrap_or(false).to_string()
+                        } else if cell.is_error() {
+                            format!("ERROR: {:?}", cell)
+                        } else {
+                            String::new()
+                        }
                     })
                     .collect();
 
@@ -214,10 +226,9 @@ impl ExcelConnector {
                     headers.push(format!("column_{}", i + 1));
                 }
             }
-
-            Ok((headers, rows))
-        } else {
-            Err(format!("Sheet '{}' not found", sheet_name).into())
+                Ok((headers, rows))
+            },
+            Err(_) => Err(format!("Sheet '{}' not found", sheet_name).into())
         }
     }
 
@@ -230,12 +241,12 @@ impl ExcelConnector {
         let mut float_count = 0;
         let mut bool_count = 0;
         let mut date_count = 0;
-        let mut null_count = 0;
-        let total_non_null = values.iter().filter(|v| !v.is_empty() && v != "NULL" && v != "null").count();
+        let _null_count = 0;
+        let total_non_null = values.iter().filter(|v| !v.is_empty() && *v != "NULL" && *v != "null").count();
 
         for value in values {
             if value.is_empty() || value == "NULL" || value == "null" {
-                null_count += 1;
+                // _null_count += 1;
                 continue;
             }
 
@@ -336,6 +347,7 @@ impl DataSourceConnector for ExcelConnector {
     async fn execute_query(&self, query: &str, limit: i32) -> Result<Value, Box<dyn Error + Send + Sync>> {
         // Use DuckDB for full SQL support if available
         if self.use_duckdb {
+            /*
             if let Some(duckdb) = &self.duckdb_wrapper {
                 match duckdb.execute_query(query, limit).await {
                     Ok(result) => {
@@ -348,10 +360,11 @@ impl DataSourceConnector for ExcelConnector {
                     }
                 }
             }
+            */
         }
 
         // Fallback to basic Excel operations for simple SELECT * queries
-        let default_sheet_name = self.get_active_sheet_name()?;
+        let _default_sheet_name = self.get_active_sheet_name()?;
         let sheet_names = self.get_all_sheet_names()?;
 
         // For Excel, we only support basic SELECT * FROM [table] queries
@@ -413,8 +426,9 @@ impl DataSourceConnector for ExcelConnector {
             if let Some(col_index) = headers.iter().position(|h| h == sort_col) {
                 let direction = sort_direction.unwrap_or("ASC");
                 rows.sort_by(|a, b| {
-                    let a_val = a.get(col_index).unwrap_or(&"".to_string());
-                    let b_val = b.get(col_index).unwrap_or(&"".to_string());
+                    let default_val = String::new();
+                    let a_val = a.get(col_index).unwrap_or(&default_val);
+                    let b_val = b.get(col_index).unwrap_or(&default_val);
 
                     if direction == "DESC" {
                         b_val.cmp(a_val)
@@ -459,6 +473,7 @@ impl DataSourceConnector for ExcelConnector {
 
         // Use DuckDB for schema if available
         if self.use_duckdb {
+            /*
             if let Some(duckdb) = &self.duckdb_wrapper {
                 match duckdb.fetch_schema().await {
                     Ok(mut duckdb_schema) => {
@@ -495,6 +510,7 @@ impl DataSourceConnector for ExcelConnector {
                     }
                 }
             }
+            */
         }
 
         // Fallback to basic Excel operations
@@ -517,7 +533,7 @@ impl DataSourceConnector for ExcelConnector {
                         }
 
                         let data_type = Self::infer_data_type(&values);
-                        let nullable = values.iter().filter(|v| v.is_empty() || v == "NULL" || v == "null").count() > 0;
+                        let nullable = values.iter().filter(|v| v.is_empty() || *v == "NULL" || *v == "null").count() > 0;
 
                         columns.push(json!({
                             "column_name": col_name,
@@ -662,7 +678,7 @@ impl DataSourceConnector for ExcelConnector {
                             "total_columns": sheet_info.column_count,
                             "is_configured_sheet": self.sheet_name.as_ref().map_or(false, |s| s == table_name)
                         },
-                        "sample_data": sample_rows.iter().enumerate().map(|(_i, row)| {
+                        "sample_data": sample_rows.iter().map(|row| {
                             let mut row_obj = json!({});
                             for (j, val) in row.iter().enumerate() {
                                 if let Some(col_name) = headers.get(j) {

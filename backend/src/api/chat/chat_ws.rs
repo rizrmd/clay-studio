@@ -166,7 +166,7 @@ pub async fn handle_chat_message_ws(
         role: MessageRole::User,
         created_at: Some(Utc::now().to_rfc3339()),
         processing_time_ms: None,
-        file_attachments: None, // WebSocket doesn't handle file attachments in this way
+        file_attachments: None, // Will be populated after file association
         tool_usages: None,
         progress_content: None,
     };
@@ -199,9 +199,41 @@ pub async fn handle_chat_message_ws(
         }
     }
 
-    // Update the conversation cache with the new user message
+    // Fetch files associated with the user message and update it with file attachments
+    let user_message_with_attachments = if !file_ids.is_empty() {
+        tracing::info!("Fetching file attachments for user message");
+        match get_message_files(&db_pool, &user_message.id).await {
+            Ok(files) => {
+                if !files.is_empty() {
+                    let file_attachments: Vec<crate::models::file_upload::FileUploadResponse> = files
+                        .into_iter()
+                        .map(|f| f.to_response())
+                        .collect();
+
+                    tracing::info!("Fetched {} file attachments for user message", file_attachments.len());
+
+                    // Create a new user message with file attachments
+                    Message {
+                        file_attachments: Some(file_attachments),
+                        ..user_message.clone()
+                    }
+                } else {
+                    tracing::info!("No file attachments found for user message");
+                    user_message.clone()
+                }
+            }
+            Err(e) => {
+                tracing::error!("Failed to fetch message files for user message: {}", e);
+                user_message.clone()
+            }
+        }
+    } else {
+        user_message.clone()
+    };
+
+    // Update the conversation cache with the new user message (with attachments)
     state
-        .update_conversation_cache(&actual_conversation_id, user_message.clone())
+        .update_conversation_cache(&actual_conversation_id, user_message_with_attachments.clone())
         .await;
     tracing::info!("Conversation cache updated");
 

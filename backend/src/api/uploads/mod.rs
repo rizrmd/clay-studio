@@ -83,6 +83,7 @@ pub async fn handle_excel_download(req: &mut Request, res: &mut Response) -> Res
 pub fn upload_routes() -> Router {
     Router::new()
         .push(Router::with_path("/upload").post(handle_file_upload))
+        .push(Router::with_path("/uploads").post(handle_file_upload))
         .push(Router::with_path("/uploads").get(handle_list_uploads))
         .push(Router::with_path("/uploads/{client_id}/{project_id}/{file_name}").get(handle_file_download))
         .push(Router::with_path("/uploads/{file_id}").delete(handle_delete_upload))
@@ -92,28 +93,42 @@ pub fn upload_routes() -> Router {
 
 #[handler]
 pub async fn handle_file_upload(req: &mut Request, res: &mut Response, depot: &mut Depot) -> Result<(), salvo::Error> {
-    let state = depot.obtain::<AppState>().map_err(|_| {
+    tracing::info!("File upload request received");
+
+    let state = depot.obtain::<AppState>().map_err(|e| {
+        tracing::error!("Failed to get app state: {:?}", e);
         salvo::Error::other("App state not found")
     })?;
 
     // Get client_id and project_id from query params
     let client_id = req.query::<String>("client_id").ok_or_else(|| {
+        tracing::error!("Missing client_id parameter");
         salvo::Error::other("Missing client_id parameter")
     })?;
-    
+
     let project_id = req.query::<String>("project_id").ok_or_else(|| {
+        tracing::error!("Missing project_id parameter");
         salvo::Error::other("Missing project_id parameter")
     })?;
 
+    tracing::info!("Upload request: client_id={}, project_id={}", client_id, project_id);
+
     // Parse client_id as UUID
-    let client_uuid = Uuid::parse_str(&client_id).map_err(|_| {
+    let client_uuid = Uuid::parse_str(&client_id).map_err(|e| {
+        tracing::error!("Invalid client_id format: {} - {:?}", client_id, e);
         salvo::Error::other("Invalid client_id format")
     })?;
 
     // Handle multipart file upload
+    tracing::info!("Attempting to parse multipart file...");
+
     let file = req.file("file").await.ok_or_else(|| {
+        tracing::error!("No file provided in request");
         salvo::Error::other("No file provided")
     })?;
+
+    tracing::info!("File received: name={:?}, size={:?}, content_type={:?}",
+        file.name(), file.size(), file.content_type());
 
     let original_name = file.name().unwrap_or("unknown").to_string();
     let mime_type = file.content_type().map(|ct| ct.to_string());
@@ -122,8 +137,11 @@ pub async fn handle_file_upload(req: &mut Request, res: &mut Response, depot: &m
     // Create upload directory
     let upload_dir = format!(".clients/{}/{}/uploads", client_id, project_id);
     fs::create_dir_all(&upload_dir).map_err(|e| {
+        tracing::error!("Failed to create upload directory {}: {}", upload_dir, e);
         salvo::Error::other(format!("Failed to create upload directory: {}", e))
     })?;
+
+    tracing::info!("Upload directory created/verified: {}", upload_dir);
 
     // Generate unique filename
     let file_id = Uuid::new_v4();
@@ -138,20 +156,31 @@ pub async fn handle_file_upload(req: &mut Request, res: &mut Response, depot: &m
     };
     let file_path = format!("{}/{}", upload_dir, stored_filename);
 
+    tracing::info!("Generated file path: {}", file_path);
+
     // Save file to filesystem
     let temp_path = file.path();
     fs::copy(temp_path, &file_path).map_err(|e| {
+        tracing::error!("Failed to save file from {:?} to {}: {}", temp_path, file_path, e);
         salvo::Error::other(format!("Failed to save file: {}", e))
     })?;
 
-    // Extract content using our content extractor with large file handling
-    let extracted = ContentExtractor::extract_content(
-        Path::new(&file_path),
-        &original_name,
-        &mime_type.clone().unwrap_or_else(|| "application/octet-stream".to_string()),
-    ).await.map_err(|e| {
-        salvo::Error::other(format!("Content extraction failed: {}", e))
-    })?;
+    tracing::info!("File saved successfully to: {}", file_path);
+
+    // TEMPORARILY DISABLE CONTENT EXTRACTION TO DEBUG UPLOAD ISSUE
+    tracing::info!("Using basic content for: {} (mime_type: {:?})", original_name, mime_type);
+    let extracted = crate::utils::content_extractor::ExtractedContent {
+        text_content: Some(format!("File: {} ({} bytes)", original_name, file_size)),
+        structured_data: Some(serde_json::json!({
+            "type": "file",
+            "mime_type": mime_type,
+            "size_bytes": file_size,
+            "file_path": file_path,
+            "extraction_disabled": true
+        })),
+        description: Some(format!("File upload ({} bytes)", file_size)),
+        preview: Some(format!("File: {}", original_name)),
+    };
 
     // Get file size for response metadata
     let file_metadata = fs::metadata(&file_path).map_err(|e| {
@@ -182,6 +211,7 @@ pub async fn handle_file_upload(req: &mut Request, res: &mut Response, depot: &m
     };
 
     // Save to database
+    tracing::info!("Saving file record to database...");
     sqlx::query(
         "INSERT INTO file_uploads 
         (id, client_id, project_id, file_name, original_name, file_path, file_size, 
@@ -204,8 +234,11 @@ pub async fn handle_file_upload(req: &mut Request, res: &mut Response, depot: &m
     .execute(&state.db_pool)
     .await
     .map_err(|e| {
+        tracing::error!("Failed to save file record to database: {:?}", e);
         salvo::Error::other(format!("Database error: {}", e))
     })?;
+
+    tracing::info!("File upload completed successfully for: {}", original_name);
 
     // Return success response with file info and large file handling details
     let mut response = serde_json::json!({

@@ -84,6 +84,61 @@ export function ChatInput({
   const [originalInput, setOriginalInput] = useState("");
 
   const activeConversationId = chatSnapshot.conversation_id || "new";
+
+  // Helper function to safely unproxy Valtio objects
+  const unproxyObject = (obj: any): any => {
+    try {
+      // If it's a File object, extract its properties directly (Files can't be JSON serialized)
+      if (obj instanceof File || obj.constructor?.name === 'File') {
+        return {
+          name: obj.name,
+          type: obj.type,
+          size: obj.size,
+          lastModified: obj.lastModified,
+          // Include any custom properties we added
+          description: (obj as any).description,
+          autoDescription: (obj as any).autoDescription,
+          backendId: (obj as any).backendId,
+          filePath: (obj as any).filePath,
+          fileId: (obj as any).fileId,
+          isExisting: (obj as any).isExisting,
+        };
+      }
+
+      // If it's already a plain object, return as-is
+      if (obj.constructor === Object || !obj.constructor) {
+        return obj;
+      }
+
+      // Try to stringify and parse to remove proxy wrapper
+      return JSON.parse(JSON.stringify(obj));
+    } catch {
+      // If that fails, return a basic object with fallback values
+      return {
+        name: `file_${Date.now()}`,
+        type: 'application/octet-stream',
+        size: 0
+      };
+    }
+  };
+
+  // Helper function to safely extract file properties
+  const getSafeFileProps = (fileObj: any): { name: string; type: string; size: number } => {
+    try {
+      const unproxied = unproxyObject(fileObj);
+      return {
+        name: unproxied.name || unproxied.originalName || `file_${Date.now()}`,
+        type: unproxied.type || 'application/octet-stream',
+        size: unproxied.size || 0
+      };
+    } catch {
+      return {
+        name: `file_${Date.now()}`,
+        type: 'application/octet-stream',
+        size: 0
+      };
+    }
+  };
   const { uploadFiles, cancelUpload, generatePreview } = useFileUpload(
     activeConversationId,
     projectId
@@ -241,9 +296,9 @@ export function ChatInput({
     handleSubmit(e, input.trim(), allFiles);
 
     multimodalInputActions.setLocalInput(activeConversationId, "");
-    inputActions.clearSelectedFiles();
+    // Note: Don't clear selected files here - let the parent component handle it after upload completes
     onExternalFilesChange?.([]);
-    
+
     // Reset message history navigation
     setMessageHistoryIndex(-1);
     setOriginalInput("");
@@ -345,70 +400,104 @@ export function ChatInput({
         externalFiles.length > 0 ||
         uploadedFiles.length > 0) && (
         <div className="mb-2 space-y-2">
-          {(inputSnapshot.selectedFiles.length > 0 ||
-            externalFiles.length > 0) && (
-            <>
-              <div className="text-xs text-muted-foreground">
-                Attached files:
-              </div>
-              <div className="space-y-2">
-                {inputSnapshot.selectedFiles.map((fileData: any, index: number) => {
+          <div className="text-xs text-muted-foreground">
+            Attached files:
+          </div>
+          <div className="space-y-2">
+            {inputSnapshot.selectedFiles.map((fileData: any, index: number) => {
                   const file = fileData.file;
+
+                  // Skip if file is undefined or null
+                  if (!file) {
+                    console.warn("Skipping undefined file in selectedFiles:", fileData);
+                    return null;
+                  }
+
+                  const fileProps = getSafeFileProps(file);
+                  const fileName = fileProps.name;
+
                   const preview = multimodalInputActions.getFilePreview(
                     activeConversationId,
-                    file.name
+                    fileName
                   );
                   const isEditingDesc =
                     multimodalInputActions.getEditingDescription(
                       activeConversationId,
-                      file.name
+                      fileName
                     );
                   const description =
                     multimodalInputActions.getFileDescription(
                       activeConversationId,
-                      file.name
+                      fileName
                     ) ||
                     fileData.description ||
                     "";
 
+                  // Create a safe file object for AttachedFileItem
+                  const safeFile = {
+                    name: fileName,
+                    type: fileProps.type,
+                    size: fileProps.size,
+                    // Copy any other properties that might exist
+                    ...(typeof file === 'object' ? file : {})
+                  };
+
                   return (
                     <AttachedFileItem
                       key={`selected-${index}`}
-                      file={file}
+                      file={safeFile as File}
                       description={description}
                       preview={preview}
                       isEditingDescription={isEditingDesc}
                       isUploading={inputSnapshot.isUploading}
                       onRemove={() => removeFile(index)}
-                      onToggleEdit={() => toggleEditDescription(file.name)}
+                      onToggleEdit={() => toggleEditDescription(fileName)}
                       onUpdateDescription={(desc) =>
-                        updateFileDescription(file.name, desc)
+                        updateFileDescription(fileName, desc)
                       }
                     />
                   );
-                })}
+                }).filter(Boolean)}
                 {externalFiles.map((file: any, index: number) => {
+                  // Skip if file is undefined or null
+                  if (!file) {
+                    console.warn("Skipping undefined file in externalFiles:", file);
+                    return null;
+                  }
+
+                  const fileProps = getSafeFileProps(file);
+                  const fileName = fileProps.name;
+
                   const preview = multimodalInputActions.getFilePreview(
                     activeConversationId,
-                    file.name
+                    fileName
                   );
                   const isEditingDesc =
                     multimodalInputActions.getEditingDescription(
                       activeConversationId,
-                      `external-${file.name}`
+                      `external-${fileName}`
                     );
                   const description =
                     multimodalInputActions.getFileDescription(
                       activeConversationId,
-                      `external-${file.name}`
+                      `external-${fileName}`
                     ) ||
                     (file as ComponentFileWithDescription).description ||
                     "";
 
+                  // Create a safe file object for AttachedFileItem
+                  const safeFile = {
+                    name: fileName,
+                    type: fileProps.type,
+                    size: fileProps.size,
+                    // Copy any other properties that might exist
+                    ...(typeof file === 'object' ? file : {})
+                  };
+
                   return (
                     <AttachedFileItem
                       key={`external-${index}`}
-                      file={file}
+                      file={safeFile as File}
                       description={description}
                       preview={preview}
                       isEditingDescription={isEditingDesc}
@@ -418,33 +507,146 @@ export function ChatInput({
                         );
                         multimodalInputActions.clearFilePreview(
                           activeConversationId,
-                          file.name
+                          fileName
                         );
                         multimodalInputActions.clearFileDescription(
                           activeConversationId,
-                          `external-${file.name}`
+                          `external-${fileName}`
                         );
                       }}
                       onToggleEdit={() =>
                         multimodalInputActions.setEditingDescription(
                           activeConversationId,
-                          `external-${file.name}`,
+                          `external-${fileName}`,
                           !isEditingDesc
                         )
                       }
                       onUpdateDescription={(desc) =>
                         multimodalInputActions.setFileDescription(
                           activeConversationId,
-                          `external-${file.name}`,
+                          `external-${fileName}`,
                           desc
                         )
                       }
                     />
                   );
-                })}
+                }).filter(Boolean)}
               </div>
-            </>
-          )}
+
+            {externalFiles.map((file: any, index: number) => {
+              // Skip if file is undefined or null
+              if (!file) {
+                console.warn("Skipping undefined file in externalFiles:", file);
+                return null;
+              }
+
+              const fileProps = getSafeFileProps(file);
+              const fileName = fileProps.name;
+
+              const preview = multimodalInputActions.getFilePreview(
+                activeConversationId,
+                `external-${fileName}`
+              );
+              const isEditingDesc =
+                multimodalInputActions.getEditingDescription(
+                  activeConversationId,
+                  `external-${fileName}`
+                );
+              const description =
+                multimodalInputActions.getFileDescription(
+                  activeConversationId,
+                  `external-${fileName}`
+                );
+
+              // Create a safe file object for AttachedFileItem
+              const safeFile = {
+                name: fileName,
+                type: fileProps.type,
+                size: fileProps.size,
+                // Copy any other properties that might exist
+                ...(typeof file === 'object' ? file : {})
+              };
+
+              return (
+                <AttachedFileItem
+                  key={`external-${index}`}
+                  file={safeFile as File}
+                  description={description}
+                  preview={preview}
+                  isEditingDescription={isEditingDesc}
+                  isUploading={inputSnapshot.isUploading}
+                  onRemove={() => {
+                    onExternalFilesChange?.(
+                      externalFiles.filter((_, i) => i !== index)
+                    );
+                    multimodalInputActions.clearFilePreview(
+                      activeConversationId,
+                      fileName
+                    );
+                    multimodalInputActions.clearFileDescription(
+                      activeConversationId,
+                      `external-${fileName}`
+                    );
+                  }}
+                  onToggleEdit={() =>
+                    multimodalInputActions.setEditingDescription(
+                      activeConversationId,
+                      `external-${fileName}`,
+                      !isEditingDesc
+                    )
+                  }
+                  onUpdateDescription={(desc) =>
+                    multimodalInputActions.setFileDescription(
+                      activeConversationId,
+                      `external-${fileName}`,
+                      desc
+                    )
+                  }
+                />
+              );
+            }).filter(Boolean)}
+
+            {/* Render uploaded files */}
+          {uploadedFiles.map((file: any, index: number) => {
+            // Create a file-like object for AttachedFileItem with actual data
+            const fileObj = {
+              name: file.original_name || file.file_name || 'Unknown file',
+              type: file.mime_type || 'application/octet-stream',
+              size: file.file_size || file.size || 0,
+              lastModified: file.created_at ? new Date(file.created_at).getTime() : Date.now(),
+            };
+
+            // Get preview URL for images
+            const isImage = fileObj.type.startsWith('image/');
+            let preview = undefined;
+            if (isImage && file.file_path && projectId) {
+              const clientId = localStorage.getItem("activeClientId");
+              if (clientId) {
+                // Parse file path to construct preview URL
+                const pathParts = file.file_path.split('/');
+                const fileName = pathParts[pathParts.length - 1];
+                preview = `${API_BASE_URL}/uploads/${clientId}/${projectId}/${fileName}`;
+              }
+            }
+
+            return (
+              <AttachedFileItem
+                key={`uploaded-${file.id}-${index}`}
+                file={fileObj as File}
+                description={file.description || file.auto_description || ''}
+                preview={preview}
+                isEditingDescription={false}
+                isUploading={false}
+                onRemove={() => {
+                  // For uploaded files, removal would require an API call
+                  // For now, we'll just ignore removal
+                  console.log('Remove uploaded file not implemented:', file.id);
+                }}
+                onToggleEdit={() => {}}
+                onUpdateDescription={() => {}}
+              />
+            );
+          })}
         </div>
       )}
 
@@ -560,9 +762,21 @@ export function ChatInput({
           projectId={projectId}
           onFilesSelected={(files) => {
             const convertedFiles = files.map((f) => {
+              // Determine the correct MIME type
+              const mimeType = f.mime_type || "application/octet-stream";
+
+              // Create a File object with correct type and size
               const file = new File([], f.original_name, {
-                type: f.mime_type || "application/octet-stream",
+                type: mimeType,
               });
+
+              // Override the size property to reflect actual file size
+              Object.defineProperty(file, 'size', {
+                value: f.file_size,
+                writable: false,
+                configurable: true
+              });
+
               Object.defineProperties(file, {
                 description: { value: f.description, writable: true },
                 autoDescription: { value: f.auto_description, writable: true },
@@ -570,7 +784,17 @@ export function ChatInput({
                 fileId: { value: f.id, writable: false },
                 filePath: { value: f.file_path, writable: false },
                 preview: { value: null, writable: true },
+                backendId: { value: f.id, writable: false },
               });
+
+              console.log('[FileBrowser] Created file:', {
+                name: file.name,
+                type: file.type,
+                size: file.size,
+                mimeType: f.mime_type,
+                filePath: f.file_path
+              });
+
               return file as ComponentFileWithDescription & {
                 isExisting: boolean;
                 fileId: string;

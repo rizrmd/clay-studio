@@ -1,5 +1,5 @@
-use super::super::core::base::{format_bytes, DataSourceConnector};
-use super::duckdb_wrapper::{DuckDBWrapper, create_duckdb_wrapper};
+use crate::utils::datasource::core::base::{format_bytes, DataSourceConnector};
+// use crate::utils::datasource::duckdb_wrapper::{DuckDBWrapper, create_duckdb_wrapper};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::error::Error;
@@ -7,7 +7,7 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
 use std::time::Instant;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 pub struct JsonConnector {
     file_path: String,
@@ -16,7 +16,7 @@ pub struct JsonConnector {
     schema_cache: Option<Value>,
     file_metadata: JsonFileMetadata,
     // DuckDB integration for full SQL support
-    duckdb_wrapper: Option<DuckDBWrapper>,
+    // duckdb_wrapper: Option<DuckDBWrapper>,
     use_duckdb: bool,
 }
 
@@ -119,7 +119,7 @@ impl JsonConnector {
                 total_objects: 0,
                 root_structure: JsonStructure::Invalid,
             },
-            duckdb_wrapper: None,
+            // duckdb_wrapper: None,
             use_duckdb: false,
         };
 
@@ -127,7 +127,8 @@ impl JsonConnector {
         connector.load_file_metadata()?;
 
         // Initialize DuckDB wrapper for SQL support
-        let use_duckdb = config.get("use_duckdb").and_then(|v| v.as_bool()).unwrap_or(true);
+        let _use_duckdb = config.get("use_duckdb").and_then(|v| v.as_bool()).unwrap_or(true);
+        /*
         if use_duckdb {
             match create_duckdb_wrapper(&json!({
                 "file_path": file_path,
@@ -136,7 +137,7 @@ impl JsonConnector {
             })) {
                 Ok(duckdb) => {
                     info!("DuckDB wrapper initialized for JSON file");
-                    connector.duckdb_wrapper = Some(duckdb);
+                    // connector.duckdb_wrapper = Some(duckdb);
                     connector.use_duckdb = true;
                 },
                 Err(e) => {
@@ -145,6 +146,7 @@ impl JsonConnector {
                 }
             }
         }
+        */
 
         Ok(connector)
     }
@@ -173,7 +175,7 @@ impl JsonConnector {
                 };
 
                 // Try to find arrays within the object
-                self.file_metadata.total_objects = self.count_objects_in_value(&json_value);
+                self.file_metadata.total_objects = Self::count_objects_in_value(&json_value);
                 JsonStructure::Object { key_count: obj.len() }
             },
             _ => JsonStructure::Invalid,
@@ -187,12 +189,12 @@ impl JsonConnector {
         Ok(())
     }
 
-    fn count_objects_in_value(&self, value: &Value) -> usize {
+    fn count_objects_in_value(value: &Value) -> usize {
         match value {
             Value::Array(arr) => arr.len(),
             Value::Object(obj) => {
                 obj.values()
-                    .map(|v| self.count_objects_in_value(v))
+                    .map(Self::count_objects_in_value)
                     .sum()
             },
             _ => 0,
@@ -222,7 +224,7 @@ impl JsonConnector {
             Value::Array(arr) => Ok(arr.clone()),
             Value::Object(obj) => {
                 // If it's an object, wrap it in an array
-                Ok(vec![obj.clone()])
+                Ok(vec![serde_json::Value::Object(obj.clone())])
             },
             _ => {
                 // If it's a primitive value, create objects with a "value" field
@@ -231,7 +233,7 @@ impl JsonConnector {
         }
     }
 
-    fn flatten_json_object(&self, obj: &Value, prefix: &str) -> Vec<(String, String)> {
+    fn flatten_json_object(obj: &Value, prefix: &str) -> Vec<(String, String)> {
         let mut result = Vec::new();
 
         match obj {
@@ -245,7 +247,7 @@ impl JsonConnector {
 
                     match value {
                         Value::Object(_) | Value::Array(_) => {
-                            result.extend(self.flatten_json_object(value, &new_key));
+                            result.extend(Self::flatten_json_object(value, &new_key));
                         },
                         _ => {
                             let value_str = match value {
@@ -265,7 +267,7 @@ impl JsonConnector {
                     let new_key = format!("{}[{}]", prefix, i);
                     match item {
                         Value::Object(_) | Value::Array(_) => {
-                            result.extend(self.flatten_json_object(item, &new_key));
+                            result.extend(Self::flatten_json_object(item, &new_key));
                         },
                         _ => {
                             let value_str = match item {
@@ -304,7 +306,7 @@ impl JsonConnector {
         let mut float_count = 0;
         let mut bool_count = 0;
         let mut date_count = 0;
-        let mut total_non_null = values.iter().filter(|v| !v.is_empty() && *v != "NULL").count();
+        let total_non_null = values.iter().filter(|v| !v.is_empty() && *v != "NULL").count();
 
         for value in values {
             if value.is_empty() || value == "NULL" {
@@ -388,6 +390,7 @@ impl DataSourceConnector for JsonConnector {
 
     async fn execute_query(&self, query: &str, limit: i32) -> Result<Value, Box<dyn Error + Send + Sync>> {
         // Use DuckDB for full SQL support if available
+        /*
         if self.use_duckdb {
             if let Some(duckdb) = &self.duckdb_wrapper {
                 match duckdb.execute_query(query, limit).await {
@@ -402,6 +405,7 @@ impl DataSourceConnector for JsonConnector {
                 }
             }
         }
+        */
 
         // Fallback to basic JSON operations for simple SELECT * queries
         let table_name = self.get_table_name();
@@ -422,7 +426,7 @@ impl DataSourceConnector for JsonConnector {
         let mut flattened_rows = Vec::new();
 
         for obj in &limited_data {
-            let flattened = self.flatten_json_object(obj, "");
+            let flattened = Self::flatten_json_object(obj, "");
             for (key, _) in &flattened {
                 all_keys.insert(key.clone());
             }
@@ -481,7 +485,7 @@ impl DataSourceConnector for JsonConnector {
         let mut flattened_rows = Vec::new();
 
         for obj in &data_array {
-            let flattened = self.flatten_json_object(obj, "");
+            let flattened = Self::flatten_json_object(obj, "");
             for (key, _) in &flattened {
                 all_keys.insert(key.clone());
             }
@@ -555,6 +559,7 @@ impl DataSourceConnector for JsonConnector {
         let start = Instant::now();
 
         // Use DuckDB for schema if available
+        /*
         if self.use_duckdb {
             if let Some(duckdb) = &self.duckdb_wrapper {
                 match duckdb.fetch_schema().await {
@@ -580,6 +585,7 @@ impl DataSourceConnector for JsonConnector {
                 }
             }
         }
+        */
 
         // Fallback to basic JSON operations
         let data_array = self.get_data_array()?;
@@ -590,11 +596,11 @@ impl DataSourceConnector for JsonConnector {
         let mut column_values: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
 
         for obj in &sample_data {
-            let flattened = self.flatten_json_object(obj, "");
+            let flattened = Self::flatten_json_object(obj, "");
 
             for (key, value) in &flattened {
                 all_keys.insert(key.clone());
-                column_values.entry(key.clone()).or_insert_with(Vec::new).push(value.clone());
+                column_values.entry(key.clone()).or_default().push(value.clone());
             }
         }
 
@@ -603,7 +609,8 @@ impl DataSourceConnector for JsonConnector {
 
         let mut columns = Vec::new();
         for header in &headers {
-            let values = column_values.get(header).unwrap_or(&Vec::new());
+            let empty_vec = Vec::new();
+            let values = column_values.get(header).unwrap_or(&empty_vec);
             let data_type = Self::infer_data_type(values);
             let nullable = values.iter().filter(|v| v.is_empty() || *v == "NULL").count() > 0;
 
@@ -686,7 +693,7 @@ impl DataSourceConnector for JsonConnector {
             let mut flattened_rows = Vec::new();
 
             for obj in &sample_data {
-                let flattened = self.flatten_json_object(obj, "");
+                let flattened = Self::flatten_json_object(obj, "");
                 for (key, _) in &flattened {
                     all_keys.insert(key.clone());
                 }

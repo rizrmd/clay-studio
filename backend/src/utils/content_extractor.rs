@@ -266,26 +266,38 @@ impl ContentExtractor {
 
     async fn extract_image_content(
         file_path: &Path,
-        _original_name: &str,
+        original_name: &str,
     ) -> Result<ExtractedContent, ContentExtractionError> {
         // Get basic image metadata
         let metadata = fs::metadata(file_path)
             .map_err(|e| ContentExtractionError::IoError(e.to_string()))?;
-        
+
         let file_size = metadata.len();
-        
+
+        // Get absolute file path for Claude SDK
+        let absolute_path = fs::canonicalize(file_path)
+            .map_err(|e| ContentExtractionError::IoError(e.to_string()))?;
+
+        // Determine MIME type if not provided
+        let mime_type = Self::guess_image_mime_type(file_path, original_name);
+
         // TODO: Add actual image processing here
         // For now, provide basic info and suggest what could be done
         let description = format!(
-            "Image file ({} bytes). Content analysis available through Vision AI.", 
-            file_size
+            "Image file ({} bytes, {}). Use the file path to access and analyze the image content.",
+            file_size, mime_type
         );
 
         Ok(ExtractedContent {
-            text_content: None,
+            text_content: Some(format!(
+                "Image: {} ({}, {} bytes)\nFile path: {}",
+                original_name, mime_type, file_size, absolute_path.display()
+            )),
             structured_data: Some(json!({
                 "type": "image",
+                "mime_type": mime_type,
                 "size_bytes": file_size,
+                "file_path": absolute_path.to_string_lossy(),
                 "analysis_available": true,
                 "suggested_actions": [
                     "Use Claude Vision API to analyze image content",
@@ -294,7 +306,7 @@ impl ContentExtractor {
                 ]
             })),
             description: Some(description),
-            preview: None,
+            preview: Some(format!("Image: {} ({} bytes)", original_name, file_size)),
         })
     }
 
@@ -954,6 +966,28 @@ impl ContentExtractor {
             Value::String(_) => "string".to_string(),
             Value::Array(_) => "array".to_string(),
             Value::Object(_) => "object".to_string(),
+        }
+    }
+
+    /// Guess image MIME type from file extension
+    fn guess_image_mime_type(file_path: &Path, original_name: &str) -> &'static str {
+        let extension = file_path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .or_else(|| Path::new(original_name).extension().and_then(|ext| ext.to_str()))
+            .unwrap_or("")
+            .to_lowercase();
+
+        match extension.as_str() {
+            "jpg" | "jpeg" => "image/jpeg",
+            "png" => "image/png",
+            "gif" => "image/gif",
+            "webp" => "image/webp",
+            "bmp" => "image/bmp",
+            "svg" => "image/svg+xml",
+            "ico" => "image/x-icon",
+            "tiff" | "tif" => "image/tiff",
+            _ => "image/jpeg", // Default fallback
         }
     }
 }

@@ -77,22 +77,22 @@ export function Chat() {
     if (allFiles.length > 0) {
       try {
         await uploadFiles(allFiles);
-        // After upload, get the newly added file IDs
-        // The upload adds files to inputStore.selectedFiles
-        // Get the updated snapshot and filter for new files
+        // After upload, get all file IDs from inputStore.selectedFiles
+        // The upload process populates inputStore with the uploaded files that have backend IDs
         const updatedSelectedFiles = inputStore.selectedFiles;
-        const newFileIds = updatedSelectedFiles
-          .filter(f => !initialFileIds.includes(f.id))
-          .map(f => f.id);
-        fileIds = [...initialFileIds, ...newFileIds];
+        fileIds = updatedSelectedFiles.map(f => f.id);
       } catch (error) {
         console.error('Failed to upload files:', error);
         // Still send message without files if upload fails
+        // Keep existing file IDs from before upload
       }
     }
 
     // Send message with file IDs (if any)
     sendMessage(message, fileIds.length > 0 ? fileIds : undefined);
+
+    // Clear selected files after sending message (both newly uploaded and existing)
+    chatInputActions.clearPendingFiles();
   };
 
   // Drag and drop handlers

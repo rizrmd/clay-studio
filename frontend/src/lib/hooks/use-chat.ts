@@ -4,7 +4,8 @@ import { useSnapshot } from "valtio";
 import { wsService } from "../services/ws-service";
 import { chatStore } from "../store/chat/chat-store";
 import { sidebarActions } from "../store/chat/sidebar-store";
-import type { CONVERSATION_ID, Message, PROJECT_ID } from "../types/chat";
+import { inputStore } from "../store/chat/input-store";
+import type { CONVERSATION_ID, Message, PROJECT_ID, FileUploadResponse } from "../types/chat";
 import type { ServerMessage } from "../types/ws";
 import { stream, checkAndCompleteIfTodosDone } from "./chat-streaming";
 import { messageUIActions } from "../store/chat/message-ui-store";
@@ -12,6 +13,7 @@ import { tabsActions, tabsStore } from "../store/tabs-store";
 
 export const useChat = () => {
   const snap = useSnapshot(chatStore);
+  const inputSnap = useSnapshot(inputStore);
   const navigate = useNavigate();
 
   // Auto-connect WebSocket and setup event listeners
@@ -485,11 +487,28 @@ export const useChat = () => {
           conversation.messages = [];
         }
 
+        // Get file attachments from input store to include in optimistic message
+        const selectedFiles = inputSnap.selectedFiles;
+        const fileAttachments: FileUploadResponse[] | undefined = selectedFiles.length > 0 ? selectedFiles.map(f => ({
+          id: f.id,
+          file_name: (f.file as any).backendId || f.id,
+          original_name: f.file.name,
+          file_path: (f.file as any).filePath || "", // Use filePath from uploaded file
+          file_size: f.file.size,
+          mime_type: f.file.type || undefined,
+          description: f.description || undefined,
+          auto_description: (f.file as any).autoDescription || undefined,
+          created_at: new Date().toISOString(),
+          is_text_file: f.file.type?.startsWith('text/') || false,
+          preview: (f.file as any).preview || undefined,
+        })) : undefined;
+
         const userMessage: Message = {
           id: crypto.randomUUID(),
           content,
           role: "user",
           createdAt: new Date().toISOString(),
+          file_attachments: fileAttachments,
         };
         conversation.messages.push(userMessage);
       }

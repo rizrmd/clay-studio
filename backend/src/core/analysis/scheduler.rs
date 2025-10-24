@@ -166,7 +166,7 @@ impl AnalysisScheduler {
         
         if let Some(next_run) = schedule.after(&from_time).next() {
             // Should run if the next scheduled time has passed and we haven't run since then
-            Ok(next_run <= now && (last_run_at.map_or(true, |last| last < next_run)))
+            Ok(next_run <= now && last_run_at.is_none_or(|last| last < next_run))
         } else {
             Ok(false)
         }

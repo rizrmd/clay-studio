@@ -38,6 +38,7 @@ pub struct MessageResponse {
     #[serde(rename = "createdAt")]
     pub created_at: String,
     pub processing_time_ms: Option<i64>,
+    pub file_attachments: Option<Vec<crate::models::file_upload::FileUploadResponse>>,
     pub tool_usages: Option<Vec<ToolUsage>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub progress_content: Option<String>,

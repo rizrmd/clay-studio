@@ -1,6 +1,5 @@
 pub mod common;
 pub mod csv;
-pub mod duckdb_wrapper;
 pub mod excel;
 pub mod json;
 pub mod clickhouse;
