@@ -47,6 +47,7 @@
     "goober": "^2.1.16",
     "highlight.js": "^11.11.1",
     "lucide-react": "^0.312.0",
+    "nanoid": "^5.1.6",
     "next-themes": "^0.4.6",
     "react": "^18.2.0",
     "react-datasheet-grid": "^4.11.5",
